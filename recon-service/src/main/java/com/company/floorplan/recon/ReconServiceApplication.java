@@ -4,6 +4,10 @@ import com.company.floorplan.common.config.GlobalExceptionHandler;
 import com.company.floorplan.common.config.JwtAuthInterceptor;
 import com.company.floorplan.common.config.WebMvcConfig;
 import com.company.floorplan.infrastructure.persistence.JdbcAuthUserRepository;
+import com.company.floorplan.recon.controller.ReconController;
+import com.company.floorplan.recon.repository.JdbcReconRepository;
+import com.company.floorplan.recon.rule.ReconRuleConfig;
+import com.company.floorplan.recon.service.ReconApplicationService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
@@ -20,7 +24,15 @@ import org.springframework.context.annotation.Import;
         JdbcAuthUserRepository.class,
         JwtAuthInterceptor.class,
         WebMvcConfig.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        // ---- recon 自有 bean：显式装配，不扫 infrastructure 全包 ----
+        JdbcReconRepository.class,
+        ReconRuleConfig.class,
+        ReconApplicationService.class,
+        ReconController.class
+        // NamedParameterJdbcTemplate 由 Spring Boot 的 JdbcTemplateAutoConfiguration
+        // 基于现有 DataSource 自动装配（spring-boot-starter-jdbc 由 infrastructure 传递引入），
+        // 无需在此重复声明——手动 new 会绕过 Hikari 数据源与自动事务管理。
 })
 @EnableDiscoveryClient
 public class ReconServiceApplication {
