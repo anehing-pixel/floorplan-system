@@ -35,7 +35,7 @@
 - **PM 职责**：派发（写 docs/AGENT_TASK-<name>.md）→ 巡检越界 → 验收编译 → 三方合并 → 更新本文件。agent 不自行合并，也不改根目录文件。
 - **已批准的边界例外（验收时勿误报为越界）**：
   - LOAN：允许在 `loan-service/pom.xml` 加 `spring-boot-starter-test`（scope=test）。
-  - PAYMENT（2026-11-22 批准）：允许在 `bank-service/pom.xml` 加 `spring-boot-starter-test`（scope=test）——理由同 LOAN，不写测试依赖无法完成任务卡要求的单测。**仅限这一处 pom 改动**，其余边界不变。
+  - PAYMENT（2026-11-22 批准）：允许在 `bank-service/pom.xml` 加测试依赖（scope=test，agent 实际采用 `junit-jupiter`——单测是纯逻辑不需 Spring 上下文，比 starter-test 更轻）——理由同 LOAN，不写测试依赖无法完成任务卡要求的单测。**仅限这一处 pom 改动**，其余边界不变。
 
 ### 后续波次的三层验收规范（2026-11-21 确立，后续照此执行）
 
