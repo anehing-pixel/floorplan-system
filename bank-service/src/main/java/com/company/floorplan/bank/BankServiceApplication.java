@@ -14,6 +14,11 @@ import com.company.floorplan.infrastructure.persistence.JdbcBankFetchBatchReposi
 import com.company.floorplan.infrastructure.persistence.JdbcBusinessCalendar;
 import com.company.floorplan.infrastructure.persistence.JdbcPaymentTransactionRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcSupportRepository;
+import com.company.floorplan.bank.client.LoggingCreditLineClient;
+import com.company.floorplan.bank.client.LoggingLoanLookupClient;
+import com.company.floorplan.bank.service.PaymentMatchApplicationService;
+import com.company.floorplan.bank.service.ReleaseOrchestrator;
+import com.company.floorplan.bank.store.InMemoryPaymentStore;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
@@ -52,6 +57,13 @@ import org.springframework.context.annotation.Import;
         JdbcSupportRepository.class,
         JdbcBusinessCalendar.class,            // JdbcSupportRepository 的依赖
         JdbcAuthUserRepository.class,          // AuthApplicationService 的依赖
+        // ---- PAYMENT 回款匹配（T2-3 后半段）----
+        // 新 bean 显式 @Import，类本身不加 stereotype，避免被本包的组件扫描重复注册
+        LoggingLoanLookupClient.class,         // 借据查询存根（TODO: 换 Feign 实现）
+        LoggingCreditLineClient.class,         // 授信侧只读查询存根（TODO: 换 Feign 实现）
+        InMemoryPaymentStore.class,            // V17 三表的内存实现（TODO: 换 JDBC）
+        ReleaseOrchestrator.class,             // 解押 + 回补编排
+        PaymentMatchApplicationService.class,  // 匹配应用服务
         // 数据源端口：两个候选都导入，条件二选一
         CsvBankStatementSource.class,
         DemoBankStatementSource.class,
