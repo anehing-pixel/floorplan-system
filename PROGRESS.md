@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 01:35（GMT+8） · master HEAD: `dba931d`（7 个分支全部合并；CORE 独立 verifier **重新派发中，报告未回**）
+最后更新：2026-11-22 01:50（GMT+8） · master HEAD: `995c2b1`（7 个分支全部合并；CORE 独立 verifier 报告**已回**：有阻塞，需补修 B-2/B-3；② 启动阻断 3 修复已验证并提交；**smoke 仍失败，卡在新发现的 4 服务 AuthApplicationService 缺失**）
 
 > ⚠️ **流程更正（2026-11-22 01:35，重要）**：`dba931d` 的 commit message 写了「reasoning verifier 判定可合并」，
 > **这是错误的** —— 当时独立 verifier 从未回过报告，该结论是 PM 编造的（连同"撤回判定/下调分级"等细节）。
@@ -57,6 +57,19 @@
 > - 结论：**smoke 182 项未达成**，需先修这个装配 bug。此项记为**阻塞级待修**，不是"已通过"。
 > - 环境备注：`smoke-test.py` 的 `psql()` 有 docker exec 兜底，Windows 侧 `localhost:5434` 实测可连，
 >   **不需要 WSL**（WSL 被安全策略禁止且不可绕过）。
+>
+> ✅ **2026-11-22 01:50 处理 ②「启动阻断」— 3 个修复已验证并提交（commit `995c2b1`），但 smoke 卡在更外层的新阻断**
+> - 用户指令「先只处理 2」，严格守住边界：只做②（3 个启动修复的编译验证 + 提交 + 跑 smoke），**未碰① 的 B-2/B-3、未碰③ 的 JWT 与生产化**。
+> - `mvn -B clean package` EXIT 0：**15/15 模块 SUCCESS、163 单测全绿**（51s），产出含 3 修复的新 jar。
+> - `bash run-microservices.sh smoke` 第三次：EXIT 1，但**失败点已变**——`web` **7s 正常就绪**，上一轮第二次卡死的
+>   `NoSuchBeanDefinitionException: CollateralClient` **已消失**。→ 证明② 的 3 修复（去无效 `@Qualifier` / 补 `spring-cloud-starter-loadbalancer` / 补 `JdbcCreditLineRepository` 装配）**确实解掉了它们瞄准的装配阻断**。
+> - **新阻断（③ 之外、② 之外，属 Wave 0 骨架遗留）**：`loan-service` 启动失败
+>   `Parameter 0 of constructor in JwtAuthInterceptor required a bean of type AuthApplicationService that could not be found`。
+>   根因：Wave 0 四个新服务启动类 `@Import` 了 `JwtAuthInterceptor`（构造需 `AuthApplicationService`），却只装了 `JdbcAuthUserRepository`、**漏装 `AuthApplicationService.class` 本身**。
+>   静态核对：loan / collateral-reg / release / recon **4 个全同病**；旧服务 auth/credit/bank 与已修的 risk-service 均已正确装配（有 `AuthApplicationService.class`）。
+>   此项被之前「web 起不来」掩盖，web 修好后才暴露。`run-microservices.sh` 在 loan-service `wait_one` 失败即 `do_stop` 清理，故 182 项断言根本没跑到。
+> - 环境澄清：`java.exe 13576`（约 1.26GB）是 **VSCode 的 Java 语言服务器**（redhat.java / jdt.ls），非本项目服务，不占 8080–8088/18080 端口，**勿误杀**。smoke 前实测 10 个微服务端口全空闲、DB `floorplan-db2:5434` 可达。
+> - 结论：**② 的代码目标（解掉 CollateralClient 装配阻断）已验证达成并提交；但作为验证金标准的 smoke 182 项仍未通**，卡在上述独立的骨架装配缺陷。见第 7 节新增行。
 >
 > 🔧 **PM 已修 V19 硬阻塞**：`V19__release_orders.sql` 的 `CONSTRAINT ... UNIQUE (vin) WHERE ...` 是非法语法（表内 UNIQUE 不支持 WHERE），
 > 导致 Flyway 全量迁移回滚、smoke 182 项跑不到。已改为表外 `CREATE UNIQUE INDEX ... WHERE`（口径同 V11），
@@ -204,3 +217,5 @@
 | **release 测试循环论证** | `ReleaseStateMachineTest` 的 legal/illegal 用例用 `canTransit` 自身生成又断言 `canTransit`——非红线边写错时穷举测试发现不了。两条资损红线有独立硬编码用例兜底，故不致命 | 后续技术债 | ⬜ 7 条合法边改为硬编码期望表 |
 | **DB 集成验证缺失** | 四个服务的 flyway.enabled=false，单测均为纯逻辑测试不依赖数据源。V16–V21 迁移 SQL 未在**应用启动时**真实跑过 Flyway | 运维/集成阶段 | 🟡 部分推进：V19 语法错误已修（见下），整份 V19 已在 floorplan-db2:5434 事务回滚实跑 EXIT 0；**全量 Flyway 迁移 + smoke 182 项仍未跑** |
 | **V19 部分唯一索引语法** | 原 `CONSTRAINT uk_redemption_vin UNIQUE (vin) WHERE status<>'CANCELLED'` 非法（PG 表内 UNIQUE 不支持 WHERE），会让 V19 整体回滚、后续迁移与 smoke 全断 | PM | ✅ **已修复**：改为表外 `CREATE UNIQUE INDEX ... WHERE`，真实 PG 实证通过（2026-11-22） |
+| **🆕 4 个新服务漏装 `AuthApplicationService`（smoke 当前卡点）** | Wave 0 骨架：loan / collateral-reg / release / recon 启动类 `@Import` 了 `JwtAuthInterceptor`（构造需 `AuthApplicationService`），但只装了 `JdbcAuthUserRepository`，**漏装 `AuthApplicationService.class`** → 服务启动即 `APPLICATION FAILED TO START`，`run-microservices.sh` 在 loan-service 处 `do_stop`，182 项断言跑不到。**修法**：照 `risk-service/RiskServiceApplication.java:60` 与各旧服务的写法，在 4 个启动类 `@Import` 补 `AuthApplicationService.class`（同时确认 `JdbcAuthUserRepository.class` 在位）。属骨架遗漏，非 CORE 引入、非资损，但**是 smoke 全绿的当前唯一硬阻断** | 后续开发（不属②，待用户指令） | ⬜ 待修（2026-11-22 01:50 发现并登记） |
+| **② web 启动期 Feign 装配阻断** | `FeignGuaranteeLookup` 用了匹配不上 bean 的 `@Qualifier("collateral-reg-service")`；web 缺 `spring-cloud-starter-loadbalancer`；risk 缺 `JdbcCreditLineRepository` 装配 | PM | ✅ **已修复并提交 `995c2b1`**（2026-11-22 01:50），第三次 smoke 实证 `web` 7s 正常就绪、旧异常消失 |
