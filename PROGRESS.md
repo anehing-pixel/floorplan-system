@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-21 00:02（GMT+8） · master HEAD: `15123bb`（四个 agent 全部合并完成）
+最后更新：2026-11-22 00:10（GMT+8） · master HEAD: `e441da1`（Wave 2 三 agent 已派发，进行中）
 
 ---
 
@@ -18,7 +18,13 @@
 > 🎉 **2026-11-21 夜完成**：四个外围服务全部落地主干，写入集互斥从未破坏，零合并冲突（仅 AGENT_TASK.md 一次 add/add 已归档化解）。
 > **最终验证（master `a69d386`）**：V16–V21 全局迁移表名查重无重复；四服务联合编译
 > `mvn -pl recon,loan,collateral,release -am package` EXIT 0。
-> 剩余工作见第 6/7 节的阻塞项与集成 TODO，不再是"断点续跑"状态。
+>
+> 🚀 **2026-11-22 00:10 Wave 2 已派发**：CORE / PAYMENT / ENG 三个 agent 并行开发中，基线 `e441da1`。
+> - CORE（`wt-core`）：9 个断点修复，唯一可改共享层；B1 依赖 Q27，做默认关闭开关。
+> - PAYMENT（`wt-payment`）：bank-service 回款匹配后半段 + V17；采集侧不许重写。
+> - ENG（`wt-eng`）：CI/压测/调优模板；**写入集已收窄——不碰任何服务 src/test/**（避开 PAYMENT 的 bank-service/src/test/）。
+> 任务卡在 `docs/AGENT_TASK-{core,payment,eng}.md`。醒来先查这三个分支的提交/tag/HANDOFF。
+> 剩余阻塞项与集成 TODO 见第 6/7 节。
 
 ## PM 监管机制（2026-11-21 新增）
 
