@@ -2,9 +2,11 @@ package com.company.floorplan.application.service;
 
 import com.company.floorplan.domain.exception.BusinessException;
 import com.company.floorplan.domain.exception.ErrorCode;
+import com.company.floorplan.domain.model.CreditLine;
 import com.company.floorplan.domain.model.DisposalCase;
 import com.company.floorplan.domain.model.VehicleStatus;
 import com.company.floorplan.domain.model.VehicleUnit;
+import com.company.floorplan.domain.repository.CreditLineRepository;
 import com.company.floorplan.domain.repository.DisposalCaseRepository;
 import com.company.floorplan.domain.repository.InterestLedgerRepository;
 import com.company.floorplan.domain.repository.SupportRepository;
@@ -34,17 +36,21 @@ public class DisposalApplicationService {
     private final VehicleUnitRepository vehicleUnitRepository;
     private final InterestLedgerRepository interestLedgerRepository;
     private final SupportRepository supportRepository;
+    /** T1-1（B3）：处置开单冻结额度，需行锁读写 credit_lines。 */
+    private final CreditLineRepository creditLineRepository;
 
     public DisposalApplicationService(DisposalCaseRepository disposalCaseRepository,
                                        VehicleUnitRepository vehicleUnitRepository,
                                        InterestLedgerRepository interestLedgerRepository,
                                        SupportRepository supportRepository,
-                                       CollateralLedgerApplicationService collateralService) {
+                                       CollateralLedgerApplicationService collateralService,
+                                       CreditLineRepository creditLineRepository) {
         this.disposalCaseRepository = disposalCaseRepository;
         this.vehicleUnitRepository = vehicleUnitRepository;
         this.interestLedgerRepository = interestLedgerRepository;
         this.supportRepository = supportRepository;
         this.collateralService = collateralService;
+        this.creditLineRepository = creditLineRepository;
     }
 
     /** 担保物台账服务：处置痕迹与抹消待办。 */
@@ -79,6 +85,20 @@ public class DisposalApplicationService {
             }
         }
 
+        // T1-1（B3 处置冻结额度）：开单即冻结该车未偿本金敞口，可用额度同步下降。
+        // 违约经销商不得再占用新额度放款——沿用 CreditLine 的行锁读写与冻结保护。
+        long frozenTotal = 0L;
+        if (unit.getCreditLineId() != null) {
+            CreditLine line = creditLineRepository.findByIdForUpdate(unit.getCreditLineId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "额度不存在"));
+            long exposure = unit.getPrincipalBalance();
+            frozenTotal = line.freezeForDisposal(exposure);
+            creditLineRepository.save(line);
+            supportRepository.writeAudit(actor, "DISPOSAL_FREEZE", "CREDIT_LINE",
+                    String.valueOf(line.getId()), null,
+                    "caseNo=" + c.getCaseNo() + ",exposure=" + exposure + ",frozenAmount=" + frozenTotal, null);
+        }
+
         supportRepository.createAlert(unit.getDealerId(), vin, "DISPOSAL_OPEN", "HIGH",
                 "开违约处置工单，原因=" + c.getReason());
         supportRepository.writeAudit(actor, "DISPOSAL_OPEN", "VEHICLE", vin,
@@ -108,6 +128,47 @@ public class DisposalApplicationService {
         c.startLiquidating();
         disposalCaseRepository.save(c);
         supportRepository.writeAudit(actor, "DISPOSAL_LIQ", "DISPOSAL", caseNo, null, "LIQUIDATING", null);
+        return result(c);
+    }
+
+    /** T2-6：违约通知已送达（含送达证明），OPEN → NOTIFIED。 */
+    @Transactional
+    public Map<String, Object> notifyParty(String caseNo, String actor) {
+        DisposalCase c = requireCase(caseNo);
+        c.notifyParty();
+        disposalCaseRepository.save(c);
+        supportRepository.writeAudit(actor, "DISPOSAL_NOTIFY", "DISPOSAL", caseNo, null, "NOTIFIED", null);
+        return result(c);
+    }
+
+    /** T2-6：进入法律程序（需法务确认），NOTIFIED → LEGAL_ACTION。 */
+    @Transactional
+    public Map<String, Object> startLegalAction(String caseNo, String actor) {
+        DisposalCase c = requireCase(caseNo);
+        c.startLegalAction();
+        disposalCaseRepository.save(c);
+        supportRepository.writeAudit(actor, "DISPOSAL_LEGAL", "DISPOSAL", caseNo, null, "LEGAL_ACTION", null);
+        return result(c);
+    }
+
+    /**
+     * T2-6 撤销通道：客户补救期内还清或和解 → CANCELLED，车辆退回 OVERDUE。
+     *
+     * <p>TODO(T2-6)：risk-service 的 /api/disposals 需暴露对应端点并做审批留痕；
+     * 本 core 用例只负责状态机与台账联动。</p>
+     */
+    @Transactional
+    public Map<String, Object> cancel(String caseNo, String reason, String actor) {
+        DisposalCase c = requireCase(caseNo);
+        c.cancel();
+        disposalCaseRepository.save(c);
+        VehicleUnit unit = vehicleUnitRepository.findByVinForUpdate(c.getVin()).orElse(null);
+        if (unit != null && unit.getStatus() == VehicleStatus.DISPOSING) {
+            unit.cancelDisposal();
+            vehicleUnitRepository.save(unit);
+        }
+        supportRepository.writeAudit(actor, "DISPOSAL_CANCEL", "DISPOSAL", caseNo,
+                "status=DISPOSING", "status=CANCELLED,reason=" + reason, null);
         return result(c);
     }
 

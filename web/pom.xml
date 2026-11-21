@@ -24,6 +24,13 @@
       <artifactId>floorplan-infrastructure</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- T1-5（B1）：跨服务 Feign 契约（CollateralClient）。common 反向依赖 application，
+         故只能由最外层 web 引入，application/infrastructure 保持不依赖 common。 -->
+    <dependency>
+      <groupId>com.company</groupId>
+      <artifactId>floorplan-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>

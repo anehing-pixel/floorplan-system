@@ -323,7 +323,7 @@ public class RepaymentApplicationService {
         var existing = repaymentRepository.findByIdempotencyKey(idempotencyKey);
         if (existing.isPresent()) {
             Repayment r = existing.get();
-            return buildPartialResponse(r, true);
+            return buildPartialResponse(r, true, 0L);
         }
 
         VehicleUnit unit = vehicleUnitRepository.findByVinForUpdate(vin)
@@ -339,9 +339,26 @@ public class RepaymentApplicationService {
                     "principalBalance", unit.getPrincipalBalance(), "requested", principalAmount));
         }
 
-        // 只扣本金，不解除担保、不回补额度
+        // T1-7（B1b）：先按"还款动因 + 本金下降 + 质押物状态"判定是否回补额度。
+        // 动因必须显式判定——库龄递减（强制）虽也走本金下降，但它走独立的 payPeriod 用例，
+        // 这里绝不因"本金下降"就回补，避免把强制压降的敞口又放回去。
+        VehicleUnit.RepaymentCause cause = resolveRepaymentCause(unit.getStatus());
+        VehicleUnit.ReleaseDecision decision = VehicleUnit.evaluateCreditRelease(unit, principalAmount, cause);
+
+        // 只扣本金；绝不调用 releaseSecurity / markReleased——
+        // 提前部分还款不触发担保消灭，担保解除仍只由结清/赎回/处置完成用例驱动。
         unit.applyPrincipalPayment(principalAmount);
         vehicleUnitRepository.save(unit);
+
+        // 仅在判定允许时回补额度（行锁保护，与结清回补同样的并发约束）
+        long released = 0L;
+        if (decision.release() && unit.getCreditLineId() != null) {
+            CreditLine line = creditLineRepository.findByIdForUpdate(unit.getCreditLineId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "额度不存在"));
+            released = decision.amount();
+            line.release(released);
+            creditLineRepository.save(line);
+        }
 
         Repayment repayment = new Repayment();
         repayment.setVin(vin);
@@ -354,16 +371,31 @@ public class RepaymentApplicationService {
         repaymentRepository.save(repayment);
 
         supportRepository.writeAudit(actor, "PARTIAL_REPAY", "VEHICLE", vin,
-                "balance_before=?", "paid=" + principalAmount + ",balance=" + unit.getPrincipalBalance(), null);
+                "balance_before=?", "paid=" + principalAmount + ",balance=" + unit.getPrincipalBalance()
+                        + ",released=" + released + ",decision=" + decision.reason(), null);
 
-        return buildPartialResponse(repayment, false);
+        return buildPartialResponse(repayment, false, released);
     }
 
-    private Map<String, Object> buildPartialResponse(Repayment r, boolean replay) {
+    /**
+     * 从车辆状态推断还款动因。
+     *
+     * <p>在库车视为主动提前还本金（自愿）；已逾期视为逾期补款；
+     * 其余状态（如已售未解押）虽传 VOLUNTARY_PREPAY，判定策略仍会按状态兜底拒绝回补。</p>
+     */
+    private VehicleUnit.RepaymentCause resolveRepaymentCause(VehicleStatus status) {
+        if (status == VehicleStatus.OVERDUE) {
+            return VehicleUnit.RepaymentCause.OVERDUE_MAKEUP;
+        }
+        return VehicleUnit.RepaymentCause.VOLUNTARY_PREPAY;
+    }
+
+    private Map<String, Object> buildPartialResponse(Repayment r, boolean replay, long released) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("repaymentId", r.getRepaymentNo());
         data.put("repaymentType", r.getRepaymentType());
         data.put("principal", r.getPrincipal());
+        data.put("releasedCredit", released);
         data.put("securityReleased", false);
         data.put("idempotentReplay", replay);
         return data;

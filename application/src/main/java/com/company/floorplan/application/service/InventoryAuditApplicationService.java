@@ -59,6 +59,7 @@ public class InventoryAuditApplicationService {
 
         List<String> missing = new ArrayList<>();   // 台账有、现场无（高风险：可能已脱信销售）
         List<String> unexpected = new ArrayList<>(); // 现场有、台账无
+        List<String> escalatedToOverdue = new ArrayList<>(); // T1-2：盘点缺失升级为 OVERDUE 的 VIN
         int matched = 0;
 
         Set<String> ledgerVins = new LinkedHashSet<>();
@@ -69,10 +70,12 @@ public class InventoryAuditApplicationService {
                 unit.setLastAuditDate(auditDate);
             } else {
                 missing.add(unit.getVin());
-                int mismatch = unit.getAuditMismatchCount() == null ? 0 : unit.getAuditMismatchCount();
-                unit.setAuditMismatchCount(mismatch + 1);
-                unit.setOotSuspected(true);
-                unit.setLastAuditDate(auditDate);
+                // T1-2（B4）：缺失不再只打标记——在库车转 OVERDUE，进入 DEFAULT_DISPOSAL 处置扫描视野
+                VehicleStatus before = unit.getStatus();
+                unit.markInventoryMissing(auditDate);
+                if (before != unit.getStatus()) {
+                    escalatedToOverdue.add(unit.getVin());
+                }
             }
             vehicleUnitRepository.save(unit);
             // 担保物台账：实地盘点是日本渠道的主要监管手段，盘点痕迹必须落在担保物台账上
@@ -89,7 +92,8 @@ public class InventoryAuditApplicationService {
         int alerts = 0;
         if (!missing.isEmpty()) {
             supportRepository.createAlert(dealerId, null, "AUDIT_MISMATCH", "HIGH",
-                    "盘点缺失 " + missing.size() + " 台：" + String.join(",", missing));
+                    "盘点缺失 " + missing.size() + " 台（其中 " + escalatedToOverdue.size()
+                            + " 台已升级 OVERDUE 进入处置扫描）：" + String.join(",", missing));
             alerts++;
         }
         if (!unexpected.isEmpty()) {
@@ -107,6 +111,7 @@ public class InventoryAuditApplicationService {
         data.put("matched", matched);
         data.put("missingVins", missing);
         data.put("unexpectedVins", unexpected);
+        data.put("escalatedToOverdueVins", escalatedToOverdue);
         data.put("alertsCreated", alerts);
         return data;
     }

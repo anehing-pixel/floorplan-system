@@ -148,6 +148,23 @@ public class VehicleController {
         return ApiResponse.ok(data, UUID.randomUUID().toString());
     }
 
+    /**
+     * T2-8（M11）：终端客户支付确认（第 ⑦ 环节"客户付款 → 金融确认 → 出库指令"）。
+     * —— 权限：还款核销岗。
+     */
+    @PostMapping("/{vin}/customer-payment/confirm")
+    @RequirePermission(Permission.REPAYMENT_EXECUTE)
+    public ApiResponse<Map<String, Object>> confirmCustomerPayment(
+            @PathVariable String vin,
+            @RequestBody(required = false) ApiRequests.CustomerPaymentConfirmRequest req,
+            HttpServletRequest request) {
+        long amount = (req == null || req.amount == null) ? 0L : req.amount;
+        String payer = req == null ? null : req.payerName;
+        Map<String, Object> data = salesService.confirmCustomerPayment(vin, amount, payer,
+                AuditActor.resolve(request));
+        return ApiResponse.ok(data, UUID.randomUUID().toString());
+    }
+
     /** 设定担保（第 ④ 环节；担保路径待确认）。 —— 权限：担保管理岗。 */
     @PostMapping("/{vin}/security")
     @RequirePermission(Permission.SECURITY_MAINTAIN)

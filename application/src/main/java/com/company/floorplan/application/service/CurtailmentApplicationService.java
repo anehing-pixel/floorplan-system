@@ -93,8 +93,18 @@ public class CurtailmentApplicationService {
             return replay;
         }
 
+        // T2-4（M6/G6）：车已售出、结清或进入处置时停止催款——
+        // 原实现对已不在库的车仍按计划扣款，会造成账实不符。
+        if (unit.getStatus() != VehicleStatus.IN_STOCK) {
+            throw new BusinessException(ErrorCode.CURTAIL_001,
+                    "车辆已不在库（" + unit.getStatus() + "），递减计划停止催款");
+        }
+
         int period = plan.getPaidPeriods() + 1;
-        long amount = plan.getReduceAmount();
+        // T2-4（M6/G2）：应还额动态重算——按当前库龄分层比例 × 当前未偿本金，
+        // 不再使用计划生成时算死的 reduceAmount（旧计划回退到记录金额，保持兼容）。
+        long amount = AgingPlan.currentAmount(unit.getPrincipalBalance(), unit.getAgingDays(), plan.getReduceAmount());
+        amount = Math.min(amount, unit.getPrincipalBalance()); // 不超过剩余本金
 
         unit.applyPrincipalPayment(amount);
         vehicleUnitRepository.save(unit);

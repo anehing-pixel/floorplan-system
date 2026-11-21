@@ -38,8 +38,15 @@ public class CreditApplicationService {
         this.supportRepository = supportRepository;
     }
 
+    /**
+     * T1-4（M12 授信审批链）第一段：发起授信。
+     *
+     * <p>额度落地即置 {@code PENDING_APPROVAL}，<b>不可用于放款</b>——
+     * {@link CreditLine#occupy(long)} 会抛 {@code CREDIT_003}。
+     * 必须由另一人调用 {@link #completeCreditLine(Long, boolean, String)} 复核后才能激活。</p>
+     */
     @Transactional
-    public CreditLine createCreditLine(Long dealerId, long approvedLimit, String actor) {
+    public CreditLine initiateCreditLine(Long dealerId, long approvedLimit, String actor) {
         if (approvedLimit <= 0) {
             throw new BusinessException(ErrorCode.VALID_002, "核定额度必须为正整数日元");
         }
@@ -51,12 +58,47 @@ public class CreditApplicationService {
         line.setApprovedLimit(approvedLimit);
         line.setUsedAmount(0L);
         line.setFrozenAmount(0L);
-        line.setStatus("ACTIVE");
+        line.setStatus("PENDING_APPROVAL");
         CreditLine saved = creditLineRepository.save(line);
 
-        supportRepository.writeAudit(actor, "CREATE_CREDIT_LINE", "CREDIT_LINE",
-                String.valueOf(saved.getId()), null, "limit=" + approvedLimit, null);
+        supportRepository.writeAudit(actor, "CREDIT_INITIATE", "CREDIT_LINE",
+                String.valueOf(saved.getId()), null, "limit=" + approvedLimit + ",status=PENDING_APPROVAL", null);
         return saved;
+    }
+
+    /**
+     * T1-4（M12）第二段：授信复核（发起与执行分离的内控要求）。
+     *
+     * @param approved true 复核通过激活额度；false 驳回并关闭额度
+     */
+    @Transactional
+    public CreditLine completeCreditLine(Long creditLineId, boolean approved, String actor) {
+        CreditLine line = creditLineRepository.findByIdForUpdate(creditLineId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "额度不存在：" + creditLineId));
+        if (approved) {
+            line.approve();
+        } else {
+            line.rejectApproval();
+        }
+        CreditLine saved = creditLineRepository.save(line);
+
+        supportRepository.writeAudit(actor, "CREDIT_COMPLETE", "CREDIT_LINE",
+                String.valueOf(creditLineId), "status=PENDING_APPROVAL",
+                "approved=" + approved + ",status=" + line.getStatus(), null);
+        return saved;
+    }
+
+    /**
+     * 兼容入口：credit-service 现有 {@code POST /api/credit-lines} 与存量冒烟脚本调用。
+     *
+     * <p>内部仍走 initiate → complete 双段并留两条审计，因此"未经 complete 不可用于放款"
+     * 的不变量在领域层始终成立。TODO(M12)：生产应禁用此单人自动审批入口，
+     * 由 credit-service 暴露独立审批端点并强制发起人与复核人不同（SOD）。</p>
+     */
+    @Transactional
+    public CreditLine createCreditLine(Long dealerId, long approvedLimit, String actor) {
+        CreditLine initiated = initiateCreditLine(dealerId, approvedLimit, actor);
+        return completeCreditLine(initiated.getId(), true, actor);
     }
 
     @Transactional

@@ -346,6 +346,17 @@ public class VehicleUnit {
     }
 
     /**
+     * T2-8（M11 终端客户支付确认）：判断该车是否可发起客户付款确认。
+     *
+     * <p>业务口径："客户付款 → 金融确认收款 → 下达出库指令"。
+     * 只有已售待还（SOLD_PENDING）且本金未结清的车才需要金融确认；
+     * 资金未到账不得下达出库指令（防脱信销售）。</p>
+     */
+    public boolean canConfirmCustomerPayment() {
+        return this.status == VehicleStatus.SOLD_PENDING && this.principalBalance > 0;
+    }
+
+    /**
      * 结清：终止于"已结清"，本金归零（业务闭环第 ⑦ 环节）。
      *
      * <p><b>调用方责任</b>：结清用例还需完成"解除担保 + 额度回补"，
@@ -414,10 +425,48 @@ public class VehicleUnit {
         this.riskLevel = "HIGH";
     }
 
+    /**
+     * T1-2（B4 盘点缺失改状态）：实地盘点"账有实无"时的升级动作。
+     *
+     * <p><b>为什么必须改状态而不只打标记</b>：修复前盘点缺失只置 {@code ootSuspected=true}
+     * 与差异次数，车辆状态仍是 {@link VehicleStatus#IN_STOCK}——而违约处置扫描作业
+     * {@code DEFAULT_DISPOSAL} 只扫 {@link VehicleStatus#OVERDUE}，
+     * 导致最严重的脱信信号永远进不了处置闭环（核查报告接缝三）。
+     * 本方法在库车直接转 OVERDUE，使其能被扫描作业捕获并自动开处置工单。</p>
+     *
+     * <p><b>边界</b>：仅 {@link VehicleStatus#IN_STOCK} 会被升级；
+     * 已售待还、逾期、处置中、终态车辆只累加差异标记，不重复流转。
+     * 重复调用在状态维度幂等，差异次数如实累加（每次盘点都是独立事实）。</p>
+     *
+     * @param auditDate 本次实地盘点日期
+     */
+    public void markInventoryMissing(LocalDate auditDate) {
+        this.ootSuspected = true;
+        this.auditMismatchCount = (this.auditMismatchCount == null ? 0 : this.auditMismatchCount) + 1;
+        this.lastAuditDate = auditDate;
+        if (this.status == VehicleStatus.IN_STOCK) {
+            transit(VehicleStatus.OVERDUE);
+            this.overdueDays = this.overdueDays == null ? 0 : this.overdueDays;
+            this.riskLevel = "HIGH";
+        }
+    }
+
     /** 违约升级：进入处置流程（车辆回收、残值处置、损失核算）。 */
     public void dispose() {
         transit(VehicleStatus.DISPOSING);
         this.riskLevel = "HIGH";
+    }
+
+    /**
+     * T2-6：处置撤销后把车辆从 DISPOSING 退回 OVERDUE。
+     *
+     * <p>撤销处置不等于车已恢复正常——客户可能只是达成和解或短期补救，
+     * 因此退回 OVERDUE（仍可走正常还款/结清流程），而不是直接 IN_STOCK。</p>
+     */
+    public void cancelDisposal() {
+        if (this.status == VehicleStatus.DISPOSING) {
+            transit(VehicleStatus.OVERDUE);
+        }
     }
 
     /**
@@ -472,6 +521,100 @@ public class VehicleUnit {
         this.securityType = type;
         // 无担保时状态保持 NONE；其余先置为"待登记"，等登记回执再转 REGISTERED
         this.securityStatus = type == SecurityType.NONE ? SecurityStatus.NONE : SecurityStatus.PENDING;
+    }
+
+    // ==================== T1-7（B1b）：额度回补判定（引入还款动因维度） ====================
+
+    /**
+     * 还款动因——区分"本金下降"背后的业务性质。
+     *
+     * <p>核查报告 §8.3 的关键结论：同样是在库车本金下降，
+     * 库龄递减（强制）不回补额度，主动提前还本金（自愿）应回补。
+     * 只看车辆状态会把两者混为一谈，故必须显式建模动因。</p>
+     */
+    public enum RepaymentCause {
+        /** 在库车主动提前还本金（自愿，资信良好信号）→ 应回补 */
+        VOLUNTARY_PREPAY,
+        /** 库龄递减强制还款（超期被逼，目的是压降敞口）→ 不回补 */
+        AGING_REDUCTION,
+        /** 逾期补款 → 不回补 */
+        OVERDUE_MAKEUP,
+        /** 整台结清（由 settle 用例处理，不经过 partialRepay） */
+        SETTLEMENT
+    }
+
+    /** 额度回补判定结果。 */
+    public record ReleaseDecision(boolean release, long amount, String reason) {
+        public static ReleaseDecision none(String reason) {
+            return new ReleaseDecision(false, 0L, reason);
+        }
+
+        public static ReleaseDecision full(long amount, String reason) {
+            return new ReleaseDecision(true, amount, reason);
+        }
+
+        public static ReleaseDecision partial(long amount, String reason) {
+            return new ReleaseDecision(true, amount, reason);
+        }
+    }
+
+    /**
+     * T1-7（B1b）额度回补判定：本金敞口下降 + 质押物释放/动因一致。
+     *
+     * <p><b>不误触发担保消灭</b>：本方法只返回"是否回补额度"，
+     * 绝不改变 securityStatus；担保的解除仍只由结清/赎回/处置完成用例驱动。</p>
+     *
+     * @param unit         还款车辆（判定时点，尚未扣本金）
+     * @param principalPaid 本次偿还本金
+     * @param cause        还款动因（必须由调用方显式传入，不得只按状态推断）
+     */
+    public static ReleaseDecision evaluateCreditRelease(VehicleUnit unit,
+                                                        long principalPaid,
+                                                        RepaymentCause cause) {
+        // C1：本金敞口是否真的下降
+        if (principalPaid <= 0) {
+            return ReleaseDecision.none("仅结息，本金未降，不回补");
+        }
+        // 动因维度：强制还款与自愿还款结论相反，必须先判
+        if (cause == RepaymentCause.AGING_REDUCTION) {
+            return ReleaseDecision.none("库龄递减为强制还款，目的是压降敞口，不回补额度");
+        }
+        if (cause == RepaymentCause.OVERDUE_MAKEUP) {
+            return ReleaseDecision.none("逾期补款不回补可用额度");
+        }
+        // C2：车辆已处置或担保已解除 → 质押物释放，全额回补
+        if (unit.getStatus() == VehicleStatus.DISPOSING || unit.getStatus() == VehicleStatus.CLOSED) {
+            return ReleaseDecision.full(principalPaid, "车辆已处置，担保消灭，本金敞口清零");
+        }
+        if (unit.getSecurityStatus() == SecurityStatus.RELEASED) {
+            return ReleaseDecision.full(principalPaid, "担保已解除，质押物已释放");
+        }
+        // 在库车主动提前还本金：本金敞口真实下降，且是资信良好信号 → 回补对应额度
+        if (unit.getStatus() == VehicleStatus.IN_STOCK && cause == RepaymentCause.VOLUNTARY_PREPAY) {
+            return ReleaseDecision.partial(principalPaid,
+                    "在库车主动提前还本金：本金敞口下降，回补对应额度");
+        }
+        // 已售未解押：质押物价值已归零且未解押，不回补
+        return ReleaseDecision.none("已售未解押，质押物未释放，不回补额度");
+    }
+
+    /**
+     * T1-3（M9 登记编号落库）：设定担保时回填线下登记编号。
+     *
+     * <p>老接口 {@code POST /{vin}/security} 收了 {@code regNo} 却直接丢弃，
+     * 车辆担保状态永远停在 PENDING，使用方以为登记完成。本重载把"带登记编号"
+     * 这一事实落到领域状态：有编号且担保方式非 NONE 时即为 REGISTERED
+     * （登记是线下去法务省办理的，编号回填即代表该线下动作已完成）。</p>
+     *
+     * @param type           担保方式；NONE 表示无担保
+     * @param registrationNo 法务省登记编号；为空/空白时维持 PENDING
+     */
+    public void setSecurity(SecurityType type, String registrationNo) {
+        setSecurity(type);
+        if (type != SecurityType.NONE && this.securityStatus == SecurityStatus.PENDING
+                && registrationNo != null && !registrationNo.isBlank()) {
+            this.securityStatus = SecurityStatus.REGISTERED;
+        }
     }
 
     /**

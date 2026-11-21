@@ -73,6 +73,10 @@ public class CreditLine {
      *                           超出可用余额抛 {@code CREDIT_001}（details 带可用额与需求额）
      */
     public void occupy(long amount) {
+        // T1-4（M12）：授信发起后、复核完成前的额度绝不可用于放款
+        if ("PENDING_APPROVAL".equals(status)) {
+            throw new BusinessException(ErrorCode.CREDIT_003);
+        }
         if (!"ACTIVE".equals(status)) {
             throw new BusinessException(ErrorCode.CREDIT_002);
         }
@@ -117,6 +121,53 @@ public class CreditLine {
         long actual = Math.min(amount, free);
         this.frozenAmount += actual;
         this.status = "FROZEN";
+    }
+
+    /**
+     * T1-4（M12 授信审批链）：授信复核通过，把待审批额度激活为可用。
+     *
+     * @throws BusinessException 非 PENDING_APPROVAL 状态抛 {@code CREDIT_003}
+     */
+    public void approve() {
+        if (!"PENDING_APPROVAL".equals(status)) {
+            throw new BusinessException(ErrorCode.CREDIT_003, Map.of(
+                    "currentStatus", String.valueOf(status), "reason", "仅待审批额度可审批通过"));
+        }
+        this.status = "ACTIVE";
+    }
+
+    /**
+     * T1-4（M12）：授信复核不通过，额度关闭（不可再用）。
+     */
+    public void rejectApproval() {
+        if (!"PENDING_APPROVAL".equals(status)) {
+            throw new BusinessException(ErrorCode.CREDIT_003, Map.of(
+                    "currentStatus", String.valueOf(status), "reason", "仅待审批额度可驳回"));
+        }
+        this.status = "CLOSED";
+    }
+
+    /**
+     * T1-1（B3 处置冻结额度）：处置开单时冻结该车敞口，使可用额度同步下降。
+     *
+     * <p><b>为什么冻结而不只是告警</b>：经销商一旦进入违约处置，绝不能再占用新额度放款——
+     * 冻结后 {@link #occupy(long)} 会因状态非 ACTIVE 被拦截，这是资金安全红线。
+     * 冻结量沿用 {@link #freeze(long)} 的"不超过当前可用额"保护，不会把额度扣成负数。</p>
+     *
+     * <p><b>敞口为 0 的边界</b>：未放款或已还清的车本金敞口为 0，此时无需冻结金额，
+     * 但仍须把状态置为 FROZEN，阻止该经销商继续放款（否则"处置中不冻结"的漏洞依旧）。</p>
+     *
+     * @param exposure 该车未偿本金敞口（整数日元）
+     * @return 本次冻结后的累计冻结额（便于调用方审计留痕）
+     */
+    public long freezeForDisposal(long exposure) {
+        if (exposure > 0) {
+            freeze(exposure);
+        } else {
+            // 敞口为 0 也要冻结状态：处置中的经销商不得再占用新额度
+            this.status = "FROZEN";
+        }
+        return this.frozenAmount;
     }
 
     /**

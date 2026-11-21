@@ -174,4 +174,69 @@ public final class RoleSeparationPolicy {
                             "reason", "SELF_APPROVAL"));
         }
     }
+
+    // =====================================================================
+    // T1-5（B1 担保门禁）：放款前的担保登记校验接缝
+    // =====================================================================
+
+    /**
+     * 担保登记查询端口。
+     *
+     * <p>application 层只依赖本接口；真正的 Feign 调用在 web 层适配器中完成，
+     * 因为 core 各模块的 pom 不依赖 common（common 反向依赖 application，直接引用会循环）。
+     * 这样既不改契约签名，也能让门禁判定逻辑脱离 HTTP/Feign 做单测。</p>
+     */
+    public interface GuaranteeLookup {
+        /**
+         * @return 担保登记视图；服务不可达或无记录返回 null（判定策略按 fail-closed 处理）
+         */
+        GuaranteeView findByVin(String vin);
+
+        /** 与 CollateralClient.RegistrationVO 字段对齐的只读视图。 */
+        record GuaranteeView(String status, String regNo, String ownerName, String registeredAt) {
+        }
+    }
+
+    /** 门禁判定结果。 */
+    public record GuaranteeDecision(boolean blocked, String reason) {
+        public static GuaranteeDecision allow(String reason) {
+            return new GuaranteeDecision(false, reason);
+        }
+
+        public static GuaranteeDecision block(String reason) {
+            return new GuaranteeDecision(true, reason);
+        }
+    }
+
+    /**
+     * T1-5（B1）放款前担保门禁判定。
+     *
+     * <p><b>TODO(Q27) 明确阻塞项</b>：门禁以哪张表为准（{@code vehicle_units} /
+     * {@code collateral_ledger} / {@code collateral_registration_batches} /
+     * collateral-reg-service 权属表）尚未由业务书面确认，三源互不一致。
+     * 本策略<b>只消费上层传入的视图，不自作主张选择判定源</b>；
+     * 且开关默认关闭，默认不参与任何放款判定。</p>
+     *
+     * @param view        权属查询结果（null 表示服务不可达/无记录）
+     * @param gateEnabled 门禁开关（默认 false）
+     * @param dealerRelaxed 该经销商是否配置的放宽名单内
+     */
+    public static GuaranteeDecision evaluateGuarantee(GuaranteeLookup.GuaranteeView view,
+                                                      boolean gateEnabled,
+                                                      boolean dealerRelaxed) {
+        if (!gateEnabled) {
+            return GuaranteeDecision.allow("担保门禁默认关闭（Q27 判定源未定），不参与放款判定");
+        }
+        if (dealerRelaxed) {
+            return GuaranteeDecision.allow("经销商已配置放宽担保门禁（Q21 可按经销商放宽）");
+        }
+        if (view == null) {
+            return GuaranteeDecision.block("担保权属查询无结果或服务不可达，fail-closed 阻断放款并强制工单");
+        }
+        if ("REGISTERED".equalsIgnoreCase(view.status())) {
+            return GuaranteeDecision.allow("该 VIN 已有 REGISTERED 担保登记");
+        }
+        return GuaranteeDecision.block("该 VIN 担保状态为 " + view.status()
+                + "（非 REGISTERED），阻断放款并强制工单");
+    }
 }
