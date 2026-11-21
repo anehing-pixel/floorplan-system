@@ -447,6 +447,18 @@ public class VehicleUnit {
     }
 
     /**
+     * T2-6：处置撤销后把车辆从 DISPOSING 退回 OVERDUE。
+     *
+     * <p>撤销处置不等于车已恢复正常——客户可能只是达成和解或短期补救，
+     * 因此退回 OVERDUE（仍可走正常还款/结清流程），而不是直接 IN_STOCK。</p>
+     */
+    public void cancelDisposal() {
+        if (this.status == VehicleStatus.DISPOSING) {
+            transit(VehicleStatus.OVERDUE);
+        }
+    }
+
+    /**
      * 关单：处置完成或异常终止。
      *
      * @implNote 若已是终态（SETTLED / CLOSED）直接返回，保证幂等。

@@ -131,6 +131,47 @@ public class DisposalApplicationService {
         return result(c);
     }
 
+    /** T2-6：违约通知已送达（含送达证明），OPEN → NOTIFIED。 */
+    @Transactional
+    public Map<String, Object> notifyParty(String caseNo, String actor) {
+        DisposalCase c = requireCase(caseNo);
+        c.notifyParty();
+        disposalCaseRepository.save(c);
+        supportRepository.writeAudit(actor, "DISPOSAL_NOTIFY", "DISPOSAL", caseNo, null, "NOTIFIED", null);
+        return result(c);
+    }
+
+    /** T2-6：进入法律程序（需法务确认），NOTIFIED → LEGAL_ACTION。 */
+    @Transactional
+    public Map<String, Object> startLegalAction(String caseNo, String actor) {
+        DisposalCase c = requireCase(caseNo);
+        c.startLegalAction();
+        disposalCaseRepository.save(c);
+        supportRepository.writeAudit(actor, "DISPOSAL_LEGAL", "DISPOSAL", caseNo, null, "LEGAL_ACTION", null);
+        return result(c);
+    }
+
+    /**
+     * T2-6 撤销通道：客户补救期内还清或和解 → CANCELLED，车辆退回 OVERDUE。
+     *
+     * <p>TODO(T2-6)：risk-service 的 /api/disposals 需暴露对应端点并做审批留痕；
+     * 本 core 用例只负责状态机与台账联动。</p>
+     */
+    @Transactional
+    public Map<String, Object> cancel(String caseNo, String reason, String actor) {
+        DisposalCase c = requireCase(caseNo);
+        c.cancel();
+        disposalCaseRepository.save(c);
+        VehicleUnit unit = vehicleUnitRepository.findByVinForUpdate(c.getVin()).orElse(null);
+        if (unit != null && unit.getStatus() == VehicleStatus.DISPOSING) {
+            unit.cancelDisposal();
+            vehicleUnitRepository.save(unit);
+        }
+        supportRepository.writeAudit(actor, "DISPOSAL_CANCEL", "DISPOSAL", caseNo,
+                "status=DISPOSING", "status=CANCELLED,reason=" + reason, null);
+        return result(c);
+    }
+
     /**
      * 结案：根据变现所得是否满足应收，形成"收回"或"损失"终态。
      *

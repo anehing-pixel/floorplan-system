@@ -93,6 +93,27 @@ public class DisposalCase {
         transit(DisposalStatus.LIQUIDATING);
     }
 
+    /** T2-6：违约通知已送达（含送达证明），OPEN → NOTIFIED，进入补救期。 */
+    public void notifyParty() {
+        transit(DisposalStatus.NOTIFIED);
+    }
+
+    /** T2-6：进入法律程序（律师/强制执行/竞拍），NOTIFIED → LEGAL_ACTION。 */
+    public void startLegalAction() {
+        transit(DisposalStatus.LEGAL_ACTION);
+    }
+
+    /**
+     * T2-6 撤销通道：客户在补救期内还清或达成和解 → CANCELLED（终态）。
+     *
+     * <p>违约处置不是单向门——没有撤销通道会导致"客户已还钱但系统还在处置"。
+     * 已进入变现（LIQUIDATING）后不允许撤销，避免半途终止造成账实不符。</p>
+     */
+    public void cancel() {
+        transit(DisposalStatus.CANCELLED);
+        this.closedAt = LocalDateTime.now();
+    }
+
     /**
      * 结案：根据变现所得是否满足应收，形成"收回"或"损失"终态。
      *

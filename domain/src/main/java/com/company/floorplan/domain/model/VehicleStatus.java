@@ -117,7 +117,7 @@ public enum VehicleStatus {
      *                   / REDEEMED（质押中提前还款赎回）
      *   SOLD_PENDING → SETTLED（结清） / OVERDUE（超结算窗口未还）
      *   OVERDUE      → SETTLED（补还结清） / DISPOSING（进入处置）
-     *   DISPOSING    → CLOSED（处置完成）
+     *   DISPOSING    → CLOSED（处置完成） / OVERDUE（T2-6：处置撤销后退回逾期）
      *   REDEEMED     → CREATED（重新建账） / PENDING_ADVANCE（直接再次申请垫款）
      *   SETTLED / CLOSED → 不可再流转
      * </pre>
@@ -137,7 +137,8 @@ public enum VehicleStatus {
                     || target == REDEEMED;
             case SOLD_PENDING -> target == SETTLED || target == OVERDUE;
             case OVERDUE -> target == SETTLED || target == DISPOSING;
-            case DISPOSING -> target == CLOSED;
+            // T2-6：撤销处置时车辆从 DISPOSING 退回 OVERDUE，恢复正常还款流程
+            case DISPOSING -> target == CLOSED || target == OVERDUE;
             case REDEEMED -> target == CREATED || target == PENDING_ADVANCE;
             case SETTLED, CLOSED -> false;
         };
