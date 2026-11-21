@@ -2,9 +2,11 @@ package com.company.floorplan.application.service;
 
 import com.company.floorplan.domain.exception.BusinessException;
 import com.company.floorplan.domain.exception.ErrorCode;
+import com.company.floorplan.domain.model.CreditLine;
 import com.company.floorplan.domain.model.DisposalCase;
 import com.company.floorplan.domain.model.VehicleStatus;
 import com.company.floorplan.domain.model.VehicleUnit;
+import com.company.floorplan.domain.repository.CreditLineRepository;
 import com.company.floorplan.domain.repository.DisposalCaseRepository;
 import com.company.floorplan.domain.repository.InterestLedgerRepository;
 import com.company.floorplan.domain.repository.SupportRepository;
@@ -34,17 +36,21 @@ public class DisposalApplicationService {
     private final VehicleUnitRepository vehicleUnitRepository;
     private final InterestLedgerRepository interestLedgerRepository;
     private final SupportRepository supportRepository;
+    /** T1-1（B3）：处置开单冻结额度，需行锁读写 credit_lines。 */
+    private final CreditLineRepository creditLineRepository;
 
     public DisposalApplicationService(DisposalCaseRepository disposalCaseRepository,
                                        VehicleUnitRepository vehicleUnitRepository,
                                        InterestLedgerRepository interestLedgerRepository,
                                        SupportRepository supportRepository,
-                                       CollateralLedgerApplicationService collateralService) {
+                                       CollateralLedgerApplicationService collateralService,
+                                       CreditLineRepository creditLineRepository) {
         this.disposalCaseRepository = disposalCaseRepository;
         this.vehicleUnitRepository = vehicleUnitRepository;
         this.interestLedgerRepository = interestLedgerRepository;
         this.supportRepository = supportRepository;
         this.collateralService = collateralService;
+        this.creditLineRepository = creditLineRepository;
     }
 
     /** 担保物台账服务：处置痕迹与抹消待办。 */
@@ -77,6 +83,20 @@ public class DisposalApplicationService {
                 unit.dispose();
                 vehicleUnitRepository.save(unit);
             }
+        }
+
+        // T1-1（B3 处置冻结额度）：开单即冻结该车未偿本金敞口，可用额度同步下降。
+        // 违约经销商不得再占用新额度放款——沿用 CreditLine 的行锁读写与冻结保护。
+        long frozenTotal = 0L;
+        if (unit.getCreditLineId() != null) {
+            CreditLine line = creditLineRepository.findByIdForUpdate(unit.getCreditLineId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "额度不存在"));
+            long exposure = unit.getPrincipalBalance();
+            frozenTotal = line.freezeForDisposal(exposure);
+            creditLineRepository.save(line);
+            supportRepository.writeAudit(actor, "DISPOSAL_FREEZE", "CREDIT_LINE",
+                    String.valueOf(line.getId()), null,
+                    "caseNo=" + c.getCaseNo() + ",exposure=" + exposure + ",frozenAmount=" + frozenTotal, null);
         }
 
         supportRepository.createAlert(unit.getDealerId(), vin, "DISPOSAL_OPEN", "HIGH",

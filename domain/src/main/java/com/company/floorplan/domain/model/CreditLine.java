@@ -120,6 +120,29 @@ public class CreditLine {
     }
 
     /**
+     * T1-1（B3 处置冻结额度）：处置开单时冻结该车敞口，使可用额度同步下降。
+     *
+     * <p><b>为什么冻结而不只是告警</b>：经销商一旦进入违约处置，绝不能再占用新额度放款——
+     * 冻结后 {@link #occupy(long)} 会因状态非 ACTIVE 被拦截，这是资金安全红线。
+     * 冻结量沿用 {@link #freeze(long)} 的"不超过当前可用额"保护，不会把额度扣成负数。</p>
+     *
+     * <p><b>敞口为 0 的边界</b>：未放款或已还清的车本金敞口为 0，此时无需冻结金额，
+     * 但仍须把状态置为 FROZEN，阻止该经销商继续放款（否则"处置中不冻结"的漏洞依旧）。</p>
+     *
+     * @param exposure 该车未偿本金敞口（整数日元）
+     * @return 本次冻结后的累计冻结额（便于调用方审计留痕）
+     */
+    public long freezeForDisposal(long exposure) {
+        if (exposure > 0) {
+            freeze(exposure);
+        } else {
+            // 敞口为 0 也要冻结状态：处置中的经销商不得再占用新额度
+            this.status = "FROZEN";
+        }
+        return this.frozenAmount;
+    }
+
+    /**
      * 解冻额度。
      *
      * @param amount 解冻金额（整数日元）
