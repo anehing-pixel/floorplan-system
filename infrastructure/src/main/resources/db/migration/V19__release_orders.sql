@@ -212,9 +212,15 @@ CREATE TABLE IF NOT EXISTS redemptions (
         -- ORDER_ISSUED / CONFIRMED / CANCELLED
     cancelled_at    TIMESTAMPTZ,
     cancel_reason   VARCHAR(500),
-    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-
-    -- 同一台车只允许一条未撤销赎车申请：撤销后可重新申请
-    CONSTRAINT uk_redemption_vin UNIQUE (vin) WHERE status <> 'CANCELLED'
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
+-- 同一台车只允许一条未撤销赎车申请：撤销后可重新申请。
+-- 【修正 2026-11-22】原写法把带 WHERE 的部分唯一写成了表内 CONSTRAINT：
+--   CONSTRAINT uk_redemption_vin UNIQUE (vin) WHERE status <> 'CANCELLED'
+-- PostgreSQL 表内 UNIQUE 约束不支持 WHERE 子句（部分唯一只能建独立索引），
+-- 该语法错误会让 V19 迁移整体回滚，后续迁移与全服务 smoke 全部跑不到。
+-- 正确口径同 V11__postlending_monitoring.sql 的 uk_risk_alert_open。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_redemption_vin
+    ON redemptions (vin)
+    WHERE status <> 'CANCELLED';
 COMMENT ON TABLE redemptions IS '赎车申请（设计稿§2①）。release-service 仅按 ID 引用，资金校验/冲抵/解押归结算与担保服务';

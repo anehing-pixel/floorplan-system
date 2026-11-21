@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 00:10（GMT+8） · master HEAD: `e441da1`（Wave 2 三 agent 已派发，进行中）
+最后更新：2026-11-22 00:35（GMT+8） · master HEAD: `6e6b35e`（Wave 2 三 agent 全部交付；ENG 已合并，PAYMENT/CORE 待合并）
 
 ---
 
@@ -19,11 +19,15 @@
 > **最终验证（master `a69d386`）**：V16–V21 全局迁移表名查重无重复；四服务联合编译
 > `mvn -pl recon,loan,collateral,release -am package` EXIT 0。
 >
-> 🚀 **2026-11-22 00:10 Wave 2 已派发**：CORE / PAYMENT / ENG 三个 agent 并行开发中，基线 `e441da1`。
-> - CORE（`wt-core`）：9 个断点修复，唯一可改共享层；B1 依赖 Q27，做默认关闭开关。
-> - PAYMENT（`wt-payment`）：bank-service 回款匹配后半段 + V17；采集侧不许重写。
-> - ENG（`wt-eng`）：CI/压测/调优模板；**写入集已收窄——不碰任何服务 src/test/**（避开 PAYMENT 的 bank-service/src/test/）。
-> 任务卡在 `docs/AGENT_TASK-{core,payment,eng}.md`。醒来先查这三个分支的提交/tag/HANDOFF。
+> ✅ **2026-11-22 00:35 Wave 2 三 agent 全部交付**（基线 `e441da1`）：
+> - ENG（`agent/eng-done` = `672fe88`）：CI/压测/调优/Runbook，reasoning verifier 通过 → **已合并 `6e6b35e`**。
+> - PAYMENT（`agent/payment-done` = `d50b806`）：8 commits / 18 单测，reasoning verifier 建议可合并 → ⬜ 待合并。
+> - CORE（`agent/core-done` = `8a6c363`）：10 commits / 46 单测，9 个断点全落地 → ⬜ 待合并（按第 4 节规矩最后合）；**独立 verifier 尚未派发**。
+> 任务卡在 `docs/AGENT_TASK-{core,payment,eng}.md`。三个 worktree 均已干净、无残留进程、teams 目录为空。
+>
+> 🔧 **PM 已修 V19 硬阻塞**：`V19__release_orders.sql` 的 `CONSTRAINT ... UNIQUE (vin) WHERE ...` 是非法语法（表内 UNIQUE 不支持 WHERE），
+> 导致 Flyway 全量迁移回滚、smoke 182 项跑不到。已改为表外 `CREATE UNIQUE INDEX ... WHERE`（口径同 V11），
+> 并在真实 PG（floorplan-db2:5434）用事务回滚实证：旧写法报 `syntax error at or near "WHERE"`，新写法整份 V19 `EXIT 0`。
 > 剩余阻塞项与集成 TODO 见第 6/7 节。
 
 ## PM 监管机制（2026-11-21 新增）
@@ -77,6 +81,9 @@
 | LOAN | `agent/loan` | `../wt-loan` | ✅ 完整交付 | 9 | ✅ | `agent/loan-done` | ✅ 已合并 `e34d6ac` |
 | COLLATERAL | `agent/collateral` | `../wt-collateral` | ✅ 完整交付 + 独立验收通过 | 7 | ✅ | `agent/collateral-done` | ✅ 已合并 `9304989` |
 | RELEASE | `agent/release` | `../wt-release` | ✅ 完整交付 + 独立验收通过 | 8 | ✅ | `agent/release-done` | ✅ 已合并 `15123bb` |
+| ENG（Wave2） | `agent/eng` | `../wt-eng` | ✅ 完整交付 + reasoning verifier 验收通过 | 8 | ✅ | `agent/eng-done` | ✅ 已合并 `6e6b35e` |
+| PAYMENT（Wave2） | `agent/payment` | `../wt-payment` | ✅ 完整交付 + reasoning verifier 建议可合并 | 8 | ✅ | `agent/payment-done` = `d50b806` | ⬜ 待合并 |
+| CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测通过；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ⬜ 待合并（最后合）；verifier 未派 |
 
 > 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox)。
 > **硬规矩**：共享层已有 java 文件只有 CORE agent 能改；其余 agent 只写自己的服务目录 + 自己号段的迁移。
@@ -114,8 +121,8 @@
 
 ## 4. 合并规则（恢复后必须遵守）
 
-1. **合并顺序**：外围先合、CORE 最后（`recon → eng → release → collateral → loan → core`）。
-   已合的 recon、loan 跳过；当前只剩 collateral / release（若之后派了 eng/core 再加进来）。
+1. **合并顺序**：外围先合、CORE 最后（`recon → loan → collateral → release → eng → payment → core`）。
+   已完成：recon / loan / collateral / release / eng 均已合并。**当前只剩 payment、core 两个待合**，且 core 按规矩最后合。
    注意 master 已因文档提交产生分叉，合并用普通三方合并（`--no-ff`），不再用 `--ff-only`；
    若出现 `AGENT_TASK.md` 的 add/add 冲突，按本次做法拆到 `docs/AGENT_TASK-<name>.md` 归档。
 2. 合并前查越界：`git -C ../wt-XXX diff --name-only wave0-baseline..HEAD`，对照第 2 节写入集；出现共享禁区文件就是冲突源。
@@ -156,9 +163,10 @@
 
 | 项 | 问题 | 处理方 | 状态 |
 |---|---|---|---|
-| **Feign JWT 传播** | `WebMvcConfig` 拦截全部 `/api/**` 且无放行。core 经 Feign 调 `GET /api/collateral-reg/registration` 时若不传播 `Authorization`，会被 401 挡下 → 走 NONE fallback → 拒付。**必须在 core 侧加 Feign 请求拦截器透传 JWT**，否则担保门禁形同虚设 | core agent（未派发） | ⬜ 待处理 |
+| **Feign JWT 传播** | `WebMvcConfig` 拦截全部 `/api/**` 且无放行。core 经 Feign 调 `GET /api/collateral-reg/registration` 时若不传播 `Authorization`，会被 401 挡下 → 走 NONE fallback → 拒付。**必须加 Feign RequestInterceptor 透传 JWT**，否则担保门禁形同虚设。**2026-11-22 PM 复核**：CORE 交付的 `GuaranteeFeignConfig` 只注册了 fallback bean，**并未实现 JWT 拦截器**，此项仍开放 | PM（合并 core 后处理） | ⬜ 待处理，未被 CORE 覆盖 |
 | **V18 表名改名** | V10 第185行已建 `collateral_registration_items`（batch_id/ledger_id/vin，批次↔车辆明细），任务卡要求的"登记流水/历史"同名会撞。PM 已批准改名为 `collateral_registration_history`，理由写进 V18 迁移注释与 collateral HANDOFF | collateral agent | ✅ 已批准，实现中 |
 | **独立验收 agent** | 已对 collateral/release 各派一个只读 verifier，均完成。collateral 抓到 tag 落后 HEAD（已修）；release 确认核心无阻断缺陷 | PM | ✅ 已完成 |
 | **release 并发竞态** | `ReleaseApplicationService.advanceExisting` + `JdbcReleaseOrderRepository:175` 是"读状态→应用层校验→无条件 UPDATE WHERE id"，无行锁/状态条件。并发下两个请求可能都读到 CONFIRMED、都通过红线校验写 RELEASED，理论上突破"未确认不放车"红线。单请求路径红线严格成立，属架构共性问题 | 后续技术债 | ⬜ 改为 `UPDATE ... WHERE id=? AND status=?` 校验影响行数，或加行锁 |
 | **release 测试循环论证** | `ReleaseStateMachineTest` 的 legal/illegal 用例用 `canTransit` 自身生成又断言 `canTransit`——非红线边写错时穷举测试发现不了。两条资损红线有独立硬编码用例兜底，故不致命 | 后续技术债 | ⬜ 7 条合法边改为硬编码期望表 |
-| **DB 集成验证缺失** | 四个服务的 flyway.enabled=false，单测均为纯逻辑测试不依赖数据源。V16/V18/V19/V20/V21 迁移 SQL 未在真实 PG 实跑（部分唯一索引 `WHERE status<>'CANCELLED'`、`CREATE INDEX IF NOT EXISTS` 等语法待验） | 运维/集成阶段 | ⬜ 起 floorplan-db2 后跑一次 Flyway 全量迁移 + smoke |
+| **DB 集成验证缺失** | 四个服务的 flyway.enabled=false，单测均为纯逻辑测试不依赖数据源。V16–V21 迁移 SQL 未在**应用启动时**真实跑过 Flyway | 运维/集成阶段 | 🟡 部分推进：V19 语法错误已修（见下），整份 V19 已在 floorplan-db2:5434 事务回滚实跑 EXIT 0；**全量 Flyway 迁移 + smoke 182 项仍未跑** |
+| **V19 部分唯一索引语法** | 原 `CONSTRAINT uk_redemption_vin UNIQUE (vin) WHERE status<>'CANCELLED'` 非法（PG 表内 UNIQUE 不支持 WHERE），会让 V19 整体回滚、后续迁移与 smoke 全断 | PM | ✅ **已修复**：改为表外 `CREATE UNIQUE INDEX ... WHERE`，真实 PG 实证通过（2026-11-22） |
