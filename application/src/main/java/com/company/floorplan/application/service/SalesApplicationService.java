@@ -91,6 +91,43 @@ public class SalesApplicationService {
     }
 
     /**
+     * T2-8（M11）终端客户支付确认：金融公司确认终端客户已向经销商付款。
+     *
+     * <p>业务闭环第 ⑦ 环节"客户付款 → 金融确认 → 出库指令"的中间一步。
+     * 修复前只有标记售出，没有金融确认环节。本用例以审计事件留痕确认事实，
+     * 并校验车辆处于已售待还且本金未结清。</p>
+     *
+     * <p><b>TODO(M11)</b>：确认记录（金额、付款人、凭证、幂等键）需新表
+     * {@code customer_payment_confirmations} 持久化；B2 出库指令上线后，
+     * 应以本确认为前置门禁（资金未到账不得放车）。当前迁移文件禁改，故先留接缝。</p>
+     */
+    @Transactional
+    public Map<String, Object> confirmCustomerPayment(String vin, long amount, String payerName, String actor) {
+        if (amount <= 0) {
+            throw new BusinessException(ErrorCode.VALID_002, "客户支付金额必须为正整数日元");
+        }
+        VehicleUnit unit = vehicleUnitRepository.findByVinForUpdate(vin)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VEHICLE_001, "车辆不存在：" + vin));
+        if (!unit.canConfirmCustomerPayment()) {
+            throw new BusinessException(ErrorCode.VEHICLE_002, Map.of(
+                    "vin", vin, "currentStatus", String.valueOf(unit.getStatus()),
+                    "reason", "仅已售待还且未结清的车可确认客户支付"));
+        }
+        String confirmNo = "PAYCONF-" + java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        supportRepository.writeAudit(actor, "CUSTOMER_PAYMENT_CONFIRMED", "VEHICLE", vin,
+                null, "confirmNo=" + confirmNo + ",amount=" + amount + ",payer=" + payerName, null);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("confirmNo", confirmNo);
+        data.put("vin", vin);
+        data.put("amount", amount);
+        data.put("payerName", payerName);
+        data.put("vehicleStatus", unit.getStatus().name());
+        data.put("note", "金融已确认客户支付；TODO(M11)：待新表持久化确认凭证并对接出库指令门禁");
+        return data;
+    }
+
+    /**
      * 设定担保（第 ④ 环节）。
      *
      * <p><b>T1-3（M9）</b>：老接口收到的 {@code regNo}/{@code ownerName} 不再丢弃——

@@ -106,6 +106,14 @@ public final class ApiRequests {
         public String ownerName;
     }
 
+    /** T2-8（M11）：终端客户支付确认。 */
+    public static class CustomerPaymentConfirmRequest {
+        /** 终端客户已支付金额（整数日元）。 */
+        public Long amount;
+        /** 付款人名称（终端客户）。 */
+        public String payerName;
+    }
+
     public static class RepaymentRequest {
         public String vin;
         public Long settlementAmount;

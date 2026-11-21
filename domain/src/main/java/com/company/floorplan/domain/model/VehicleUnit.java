@@ -346,6 +346,17 @@ public class VehicleUnit {
     }
 
     /**
+     * T2-8（M11 终端客户支付确认）：判断该车是否可发起客户付款确认。
+     *
+     * <p>业务口径："客户付款 → 金融确认收款 → 下达出库指令"。
+     * 只有已售待还（SOLD_PENDING）且本金未结清的车才需要金融确认；
+     * 资金未到账不得下达出库指令（防脱信销售）。</p>
+     */
+    public boolean canConfirmCustomerPayment() {
+        return this.status == VehicleStatus.SOLD_PENDING && this.principalBalance > 0;
+    }
+
+    /**
      * 结清：终止于"已结清"，本金归零（业务闭环第 ⑦ 环节）。
      *
      * <p><b>调用方责任</b>：结清用例还需完成"解除担保 + 额度回补"，
