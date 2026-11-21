@@ -13,6 +13,7 @@
 #   3) 只有 web 跑 Flyway（建表），其余服务 flyway.enabled=false，避免重复迁移。
 #
 # 端口分配：web=8080  auth=8081  bank=8082  credit=8083  risk=8084  gateway=18080
+#           Wave 0 新增：loan=8085  collateral-reg=8086  release=8087  recon=8088
 #
 # 用法：
 #   ./run-microservices.sh start   # 启动全部服务并前台保活；保持窗口开启，按 Ctrl+C 停止
@@ -64,7 +65,7 @@ port_in_use() {
 
 do_start() {
     local busy=""
-    for p in 8080 8081 8082 8083 8084 18080; do
+    for p in 8080 8081 8082 8083 8084 8085 8086 8087 8088 18080; do
       port_in_use "$p" && busy="$busy $p"
     done
     if [ -n "$busy" ]; then
@@ -78,6 +79,11 @@ do_start() {
     start_one bank-service "$(JAR bank-service)"
     start_one credit-service "$(JAR credit-service)"
     start_one risk-service "$(JAR risk-service)"
+    # Wave 0 新增四个服务（骨架可启动；agent 填充业务后再纳入完整冒烟）
+    start_one loan-service "$(JAR loan-service)"
+    start_one collateral-reg-service "$(JAR collateral-reg-service)"
+    start_one release-service "$(JAR release-service)"
+    start_one recon-service "$(JAR recon-service)"
     # 等后端就绪再起网关（网关依赖路由目标的 http 直连地址存在）
     # 任一服务失败：先清理已拉起的进程再退出，避免留下半套服务占着端口
     wait_one web "Started FloorplanApplication" 8080 || { do_stop; exit 1; }
@@ -85,6 +91,10 @@ do_start() {
     wait_one bank-service "Started BankServiceApplication" 8082 || { do_stop; exit 1; }
     wait_one credit-service "Started CreditServiceApplication" 8083 || { do_stop; exit 1; }
     wait_one risk-service "Started RiskServiceApplication" 8084 || { do_stop; exit 1; }
+    wait_one loan-service "Started LoanServiceApplication" 8085 || { do_stop; exit 1; }
+    wait_one collateral-reg-service "Started CollateralRegServiceApplication" 8086 || { do_stop; exit 1; }
+    wait_one release-service "Started ReleaseServiceApplication" 8087 || { do_stop; exit 1; }
+    wait_one recon-service "Started ReconServiceApplication" 8088 || { do_stop; exit 1; }
 
     echo "=== 启动网关（http 直连覆盖 lb://）==="
     env -u SERVER__PORT \
@@ -93,6 +103,10 @@ do_start() {
       ROUTE_BANK=http://127.0.0.1:8082 \
       ROUTE_CREDIT=http://127.0.0.1:8083 \
       ROUTE_RISK=http://127.0.0.1:8084 \
+      ROUTE_LOAN=http://127.0.0.1:8085 \
+      ROUTE_COLLATERAL=http://127.0.0.1:8086 \
+      ROUTE_RELEASE=http://127.0.0.1:8087 \
+      ROUTE_RECON=http://127.0.0.1:8088 \
       java -jar "$(JAR gateway)" > "$LOGDIR/gateway.log" 2>&1 &
     echo $! > "$PIDDIR/gateway.pid"
     wait_one gateway "Started GatewayApplication" 18080 || { do_stop; exit 1; }

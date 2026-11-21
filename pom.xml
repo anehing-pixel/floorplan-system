@@ -20,6 +20,11 @@
     <module>bank-service</module>
     <module>credit-service</module>
     <module>risk-service</module>
+    <!-- Wave 0 预留：以下四个新服务模块由各 agent 在 worktree 内填充实现 -->
+    <module>loan-service</module>
+    <module>collateral-reg-service</module>
+    <module>release-service</module>
+    <module>recon-service</module>
   </modules>
   <properties>
     <java.version>17</java.version>

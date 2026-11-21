@@ -1,0 +1,34 @@
+package com.company.floorplan.collateral;
+
+import com.company.floorplan.common.config.GlobalExceptionHandler;
+import com.company.floorplan.common.config.JwtAuthInterceptor;
+import com.company.floorplan.common.config.WebMvcConfig;
+import com.company.floorplan.infrastructure.persistence.JdbcAuthUserRepository;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+import org.springframework.context.annotation.Import;
+
+/**
+ * 担保权属权威源服务启动入口（Wave 0 骨架）。
+ *
+ * <p><b>本服务覆盖的限界上下文</b>：担保登记、顺位、抹消——把现在散落在
+ * vehicle_units / collateral_ledger / 批次表 的"三源不一致"收敛到一个权威源。</p>
+ *
+ * <p><b>对外契约</b>：实现 common 的 {@code CollateralClient#getRegistration(vin)}，
+ * 供 core 放款前做 B1 担保门禁。Q27 业务定源未下发前，只建表和服务骨架，不实现门禁判定。</p>
+ */
+@SpringBootApplication(scanBasePackages = "com.company.floorplan.collateral")
+@Import({
+        JdbcAuthUserRepository.class,
+        JwtAuthInterceptor.class,
+        WebMvcConfig.class,
+        GlobalExceptionHandler.class
+})
+@EnableDiscoveryClient
+public class CollateralRegServiceApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(CollateralRegServiceApplication.class, args);
+    }
+}

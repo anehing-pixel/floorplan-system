@@ -65,6 +65,29 @@ spring:
           predicates:
             - Path=/api/bank/**
 
+        # ================= Wave 0 预留路由（specific 在前，必须早于 core 兜底）=================
+        # 借据 / DPD / 经销商画像（新服务 loan-service，端口 8085）
+        - id: loan
+          uri: ${ROUTE_LOAN:lb://loan-service}
+          predicates:
+            - Path=/api/loans/**,/api/dealer-profile/risk/**
+        # 担保权属权威源（新服务 collateral-reg-service，端口 8086）
+        # 注意路径是 /api/collateral-reg/**，与上面 risk 的 /api/collateral/** 是两套东西
+        - id: collateral-reg
+          uri: ${ROUTE_COLLATERAL:lb://collateral-reg-service}
+          predicates:
+            - Path=/api/collateral-reg/**
+        # 出库指令（新服务 release-service，端口 8087）
+        - id: release
+          uri: ${ROUTE_RELEASE:lb://release-service}
+          predicates:
+            - Path=/api/releases/**
+        # 对账清算（新服务 recon-service，端口 8088）
+        - id: recon
+          uri: ${ROUTE_RECON:lb://recon-service}
+          predicates:
+            - Path=/api/recon/**
+
         # ---------------- 核心账务单体（兜底：垫款/还款/计息/车辆/供应商/附件/展期/保险/回购/采购单等）----------------
         # 这些仍是有状态账本写入，留在 web，受本地事务 + 行锁保护。
         - id: core
