@@ -36,6 +36,11 @@ public final class ApiRequests {
         public Long proceeds;
     }
 
+    /** T2-6 / B-2 违约处置撤销（POST /api/disposals/{caseNo}/cancel）。 */
+    public static class DisposalCancelRequest {
+        public String reason;
+    }
+
     /** 权属核对录入（POST /api/vehicles/{vin}/lien-check）。 */
     public static class LienCheckRequest {
         public String checkSource;

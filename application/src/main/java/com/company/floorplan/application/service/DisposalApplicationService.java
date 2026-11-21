@@ -74,7 +74,6 @@ public class DisposalApplicationService {
         c.setCreditLineId(unit.getCreditLineId());
         c.setReason(reason == null ? "OOT" : reason);
         c.open();
-        disposalCaseRepository.save(c);
 
         // 车辆进入处置中（OVERDUE/DISPOSING 均可；状态机合法）
         if (unit.getStatus() != VehicleStatus.DISPOSING) {
@@ -87,17 +86,26 @@ public class DisposalApplicationService {
 
         // T1-1（B3 处置冻结额度）：开单即冻结该车未偿本金敞口，可用额度同步下降。
         // 违约经销商不得再占用新额度放款——沿用 CreditLine 的行锁读写与冻结保护。
-        long frozenTotal = 0L;
+        // B-2：必须记录【本次真实增量】而非累计冻结额/敞口——freeze() 内部按
+        // min(exposure, available()) 封顶，freezeForDisposal(0) 更是只置状态不加金额；
+        // 只有前后差值才能在结案/撤销时精确配对回退（多单叠加时不会误解冻）。
         if (unit.getCreditLineId() != null) {
             CreditLine line = creditLineRepository.findByIdForUpdate(unit.getCreditLineId())
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "额度不存在"));
             long exposure = unit.getPrincipalBalance();
-            frozenTotal = line.freezeForDisposal(exposure);
+            long frozenBefore = line.getFrozenAmount();
+            long frozenTotal = line.freezeForDisposal(exposure);
+            long frozenIncrement = frozenTotal - frozenBefore;
+            c.setFrozenIncrement(frozenIncrement);
             creditLineRepository.save(line);
             supportRepository.writeAudit(actor, "DISPOSAL_FREEZE", "CREDIT_LINE",
                     String.valueOf(line.getId()), null,
-                    "caseNo=" + c.getCaseNo() + ",exposure=" + exposure + ",frozenAmount=" + frozenTotal, null);
+                    "caseNo=" + c.getCaseNo() + ",exposure=" + exposure
+                            + ",frozenIncrement=" + frozenIncrement
+                            + ",frozenTotal=" + frozenTotal, null);
         }
+        // 单次落库：带上本次冻结增量（V22），供结案/撤销时精确配对解冻
+        disposalCaseRepository.save(c);
 
         supportRepository.createAlert(unit.getDealerId(), vin, "DISPOSAL_OPEN", "HIGH",
                 "开违约处置工单，原因=" + c.getReason());
@@ -167,6 +175,8 @@ public class DisposalApplicationService {
             unit.cancelDisposal();
             vehicleUnitRepository.save(unit);
         }
+        // B-2：撤销处置 → 配对解冻额度线，恢复该经销商正常放款能力
+        unfreezeForCase(c, actor, "DISPOSAL_CANCEL");
         supportRepository.writeAudit(actor, "DISPOSAL_CANCEL", "DISPOSAL", caseNo,
                 "status=DISPOSING", "status=CANCELLED,reason=" + reason, null);
         return result(c);
@@ -208,6 +218,10 @@ public class DisposalApplicationService {
             collateralService.markReleased(c.getVin(), "DISPOSED", actor);
         }
 
+        // B-2：结案 → 配对解冻额度线。必须计算在 markReleased 之后、方法返回之前，
+        // 与 cancel() 共用同一段逻辑；否则额度线永久 FROZEN，其他正常车放款被阻断。
+        unfreezeForCase(c, actor, "DISPOSAL_CLOSE");
+
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("caseNo", caseNo);
         data.put("receivable", receivable);
@@ -215,6 +229,47 @@ public class DisposalApplicationService {
         data.put("lossAmount", c.getLossAmount());
         data.put("status", c.getStatus().name());
         return data;
+    }
+
+    /**
+     * B-2：处置单终态化（撤销 / 结案）后的<b>配对解冻</b>。
+     *
+     * <p>按开单时落库的 {@code frozenIncrement} 精确回退「本单」对额度线的冻结量，
+     * 不能用敞口（会被 {@code min(exposure, available())} 封顶），也不能用累计冻结额
+     * （多单叠加会重复回退，形成资损）。只有本额度线已无其他未结案处置单
+     * <b>且</b>冻结额归零时才恢复 ACTIVE，否则保持 FROZEN——资金安全红线不因
+     * 单笔结案而被削弱。</p>
+     *
+     * <p><b>幂等</b>：调用方 {@code cancel()} / {@code close()} 均先做状态机流转，
+     * 终态单重复调用会在 {@code transit()} 抛 {@code DISPOSAL_002} 并整体回滚，
+     * 本方法不会二次执行、也不会重复解冻。</p>
+     *
+     * @param c         已置终态的处置单（携带开单时记录的冻结增量）
+     * @param actor     操作人
+     * @param eventType 触发来源（DISPOSAL_CANCEL / DISPOSAL_CLOSE），仅用于审计留痕
+     */
+    private void unfreezeForCase(DisposalCase c, String actor, String eventType) {
+        if (c.getCreditLineId() == null) {
+            return; // 未挂额度线的车（如未放款）开单时本就没有冻结
+        }
+        CreditLine line = creditLineRepository.findByIdForUpdate(c.getCreditLineId()).orElse(null);
+        if (line == null) {
+            // 额度线已不存在：无需解冻，也不该阻断处置闭环（历史单/数据清理场景）
+            return;
+        }
+        // 本单已置终态并被 excludeCaseNo 排除；此处统计的是"其他仍未结案"的单
+        long otherOpen = disposalCaseRepository
+                .countOtherOpenByCreditLine(c.getCreditLineId(), c.getCaseNo());
+        boolean lastOpenCase = otherOpen == 0L;
+        long frozenBefore = line.getFrozenAmount();
+        line.unfreezeForDisposal(c.getFrozenIncrement(), lastOpenCase);
+        creditLineRepository.save(line);
+        supportRepository.writeAudit(actor, "DISPOSAL_UNFREEZE", "CREDIT_LINE",
+                String.valueOf(line.getId()), null,
+                "caseNo=" + c.getCaseNo() + ",event=" + eventType
+                        + ",increment=" + c.getFrozenIncrement()
+                        + ",frozenBefore=" + frozenBefore + ",frozenAfter=" + line.getFrozenAmount()
+                        + ",otherOpen=" + otherOpen + ",status=" + line.getStatus(), null);
     }
 
     private DisposalCase requireCase(String caseNo) {

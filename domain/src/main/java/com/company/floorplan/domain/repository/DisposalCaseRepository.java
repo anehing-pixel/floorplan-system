@@ -22,4 +22,11 @@ public interface DisposalCaseRepository {
 
     /** 按状态列出（作业扫描用）。 */
     List<DisposalCase> findByStatus(DisposalStatus status);
+
+    /**
+     * B-2：统计该额度线下「除本单之外」仍未结案的处置单数。
+     * 用于配对解冻时判断本单是否最后一个未结案单——只有最后一个才允许额度线恢复 ACTIVE，
+     * 避免多单叠加冻结时提前解冻导致违约经销商恢复放款能力。
+     */
+    long countOtherOpenByCreditLine(Long creditLineId, String excludeCaseNo);
 }

@@ -165,8 +165,13 @@ public class SalesApplicationService {
             // TODO(Q27): ownerName（担保权人）在 V10 批次表无专用列，暂记 co_signed_by。
             // Q27 定权威源后再归一（collateral-reg-service 权属表已有 dedicated ownerName）。
             batchRepository.findById(batchId).ifPresent(b -> {
-                b.setCoSignedBy(ownerName);
-                batchRepository.save(b);
+                // B-1（CORE_VERIFIER_REPORT）：幂等分支不得无条件覆盖已有权属人。
+                // 同一登记编号重复回填时以首次写入为准，避免第二次调用用不同
+                // ownerName 悄悄改写权属留痕（审计链被覆盖 = 合规问题）。
+                if (b.getCoSignedBy() == null || b.getCoSignedBy().isBlank()) {
+                    b.setCoSignedBy(ownerName);
+                    batchRepository.save(b);
+                }
             });
             data.put("registrationNo", regNo);
             data.put("batchNo", batchNo);

@@ -55,6 +55,16 @@ public class DisposalCase {
     /** 认定损失（整数日元 = 应收 − 变现所得，若为正）。 */
     private long lossAmount;
 
+    /**
+     * 本次开单对该额度线的<b>冻结增量</b>（整数日元），B-2 配对解冻的唯一依据。
+     *
+     * <p>必须是「冻结后 frozenAmount − 冻结前 frozenAmount」的真实差值，
+     * 不能用敞口 exposure（会被 {@code min(exposure, available())} 封顶），
+     * 也不能用累计冻结额（多次开单会重复回退）。敞口为 0 时该值为 0
+     * ——但状态仍被冻结，应用层配对解冻时仍需处理「状态复位」。</p>
+     */
+    private long frozenIncrement;
+
     /** 开单时间。 */
     private LocalDateTime openedAt;
 
@@ -212,6 +222,14 @@ public class DisposalCase {
 
     public void setLossAmount(long lossAmount) {
         this.lossAmount = lossAmount;
+    }
+
+    public long getFrozenIncrement() {
+        return frozenIncrement;
+    }
+
+    public void setFrozenIncrement(long frozenIncrement) {
+        this.frozenIncrement = frozenIncrement;
     }
 
     public LocalDateTime getOpenedAt() {

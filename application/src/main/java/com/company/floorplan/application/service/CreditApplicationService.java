@@ -6,6 +6,7 @@ import com.company.floorplan.domain.model.CreditLine;
 import com.company.floorplan.domain.repository.CreditLineRepository;
 import com.company.floorplan.domain.repository.DealerRepository;
 import com.company.floorplan.domain.repository.SupportRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,16 @@ public class CreditApplicationService {
     private final CreditLineRepository creditLineRepository;
     private final DealerRepository dealerRepository;
     private final SupportRepository supportRepository;
+
+    /**
+     * B-5：是否强制授信职责分离（发起与复核不得为同一自然人）。
+     *
+     * <p>默认 {@code false}：本地原型 / 冒烟脚本仍走兼容入口 {@code createCreditLine}。
+     * <b>生产必须置 true</b>：届时单人自动审批入口被禁用，
+     * 且 {@code completeCreditLine} 会校验复核人 ≠ {@code initiated_by}。</p>
+     */
+    @Value("${floorplan.credit.strict-sod:false}")
+    private boolean strictSod;
 
     public CreditApplicationService(CreditLineRepository creditLineRepository,
                                     DealerRepository dealerRepository,
@@ -59,6 +70,7 @@ public class CreditApplicationService {
         line.setUsedAmount(0L);
         line.setFrozenAmount(0L);
         line.setStatus("PENDING_APPROVAL");
+        line.setInitiatedBy(actor);   // B-5：发起人落库，供复核时做 SOD 校验
         CreditLine saved = creditLineRepository.save(line);
 
         supportRepository.writeAudit(actor, "CREDIT_INITIATE", "CREDIT_LINE",
@@ -75,6 +87,14 @@ public class CreditApplicationService {
     public CreditLine completeCreditLine(Long creditLineId, boolean approved, String actor) {
         CreditLine line = creditLineRepository.findByIdForUpdate(creditLineId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "额度不存在：" + creditLineId));
+        // B-5：生产强制职责分离——复核人不得与发起人为同一自然人。
+        // initiatedBy 为 null 表示历史数据（V23 之前创建），为避免把存量额度锁死，
+        // 只在能明确判定"同人"时拒绝，并在审计里留痕。
+        if (strictSod && line.getInitiatedBy() != null && line.getInitiatedBy().equals(actor)) {
+            throw new BusinessException(ErrorCode.AUTH_003,
+                    "授信复核人不得与发起人为同一自然人：initiatedBy=" + line.getInitiatedBy()
+                            + "，请换人复核");
+        }
         if (approved) {
             line.approve();
         } else {
@@ -92,11 +112,20 @@ public class CreditApplicationService {
      * 兼容入口：credit-service 现有 {@code POST /api/credit-lines} 与存量冒烟脚本调用。
      *
      * <p>内部仍走 initiate → complete 双段并留两条审计，因此"未经 complete 不可用于放款"
-     * 的不变量在领域层始终成立。TODO(M12)：生产应禁用此单人自动审批入口，
-     * 由 credit-service 暴露独立审批端点并强制发起人与复核人不同（SOD）。</p>
+     * 的不变量在领域层始终成立。</p>
+     *
+     * <p><b>B-5（CORE_VERIFIER_REPORT）</b>：单人自动审批会绕过职责分离。
+     * 代码层已提供完整的 initiate / complete 双端点与 SOD 校验；本兼容入口
+     * 在 {@code floorplan.credit.strict-sod=true}（生产配置）时<b>直接拒绝</b>，
+     * 强制调用方使用双端点并由另一人复核。默认 false 仅用于本地原型 / 冒烟。</p>
      */
     @Transactional
     public CreditLine createCreditLine(Long dealerId, long approvedLimit, String actor) {
+        if (strictSod) {
+            throw new BusinessException(ErrorCode.AUTH_003,
+                    "生产模式已禁用单人自动审批入口；请先用 initiateCreditLine 发起，"
+                            + "再由另一人调用 completeCreditLine 复核（职责分离）");
+        }
         CreditLine initiated = initiateCreditLine(dealerId, approvedLimit, actor);
         return completeCreditLine(initiated.getId(), true, actor);
     }

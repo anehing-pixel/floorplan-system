@@ -124,7 +124,15 @@ public class ReleaseApplicationService {
                          String operator, String reason, Instant now) {
         ReleaseStatus from = order.getStatus();
         ReleaseStateMachine.requireTransition(from, target); // 非法迁移在这里被拒绝
-        repository.updateStatus(order.getId(), target, now);
+        // 并发防线：CAS 式 UPDATE（WHERE id AND status=读到的状态）。两个并发请求
+        // 都读到同一状态时只有一个能推进成功，另一个必须整体回滚，
+        // 否则"未确认不放车 / 未放车不解抵"红线会被并发绕过（CORE_VERIFIER_REPORT）。
+        boolean moved = repository.updateStatus(order.getId(), from, target, now);
+        if (!moved) {
+            throw new BusinessException(ErrorCode.CONFLICT_001,
+                    "出库指令状态已被其他操作抢先推进，请刷新后重试：id=" + order.getId()
+                            + ",expected=" + from.name() + ",target=" + target.name());
+        }
         repository.appendHistory(new ReleaseStateHistory(order.getId(), from, target, action, operator, reason));
     }
 

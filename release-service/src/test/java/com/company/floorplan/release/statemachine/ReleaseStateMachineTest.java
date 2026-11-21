@@ -11,10 +11,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,28 +24,52 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 状态机穷举测试：6×6 = 36 种状态对全部覆盖。
  *
- * <p>合法迁移清单与非法迁移清单都由 {@code ReleaseStateMachine.canTransit} 反向生成，
- * 因此"新增一个状态却忘了补测试"不会静默漏过——合法集合变了，非法集合自动跟着变。</p>
+ * <p><b>release 测试循环论证修复（CORE_VERIFIER_REPORT）</b>：旧版合法/非法用例都由
+ * {@code ReleaseStateMachine.canTransit} 自身反向生成，再断言 {@code canTransit}，
+ * 等于"用被测代码证明被测代码"——白名单里写错一条边，穷举测试照样全绿。
+ * 现在改为<b>硬编码期望表</b>作为唯一事实来源：用例由期望表生成，
+ * 另加 {@link #implementationMatchesHardcodedWhitelist()} 逐格比对 36 种组合，
+ * 实现与期望表一旦分叉立即失败。</p>
  */
 class ReleaseStateMachineTest {
 
+    /**
+     * 业务白名单（硬编码，不从被测代码派生）。与设计稿 §状态机一致：
+     * <pre>
+     *   PENDING_RELEASE → SENT | CANCELLED
+     *   SENT            → CONFIRMED | CANCELLED
+     *   CONFIRMED       → RELEASED | CANCELLED
+     *   RELEASED        → LIEN_DISCHARGED
+     *   LIEN_DISCHARGED → （终态）
+     *   CANCELLED       → （终态）
+     * </pre>
+     */
+    private static final Map<ReleaseStatus, Set<ReleaseStatus>> EXPECTED_ALLOWED = Map.of(
+            ReleaseStatus.PENDING_RELEASE, Set.of(ReleaseStatus.SENT, ReleaseStatus.CANCELLED),
+            ReleaseStatus.SENT, Set.of(ReleaseStatus.CONFIRMED, ReleaseStatus.CANCELLED),
+            ReleaseStatus.CONFIRMED, Set.of(ReleaseStatus.RELEASED, ReleaseStatus.CANCELLED),
+            ReleaseStatus.RELEASED, Set.of(ReleaseStatus.LIEN_DISCHARGED),
+            ReleaseStatus.LIEN_DISCHARGED, Set.of(),
+            ReleaseStatus.CANCELLED, Set.of());
+
+    /** 合法用例来自硬编码期望表，而非 canTransit 反向生成。 */
     static Stream<Arguments> legalTransitions() {
         List<Arguments> cases = new ArrayList<>();
-        for (ReleaseStatus from : ReleaseStatus.values()) {
-            for (ReleaseStatus to : ReleaseStatus.values()) {
-                if (ReleaseStateMachine.canTransit(from, to)) {
-                    cases.add(Arguments.of(from, to));
-                }
+        for (var entry : EXPECTED_ALLOWED.entrySet()) {
+            for (ReleaseStatus to : entry.getValue()) {
+                cases.add(Arguments.of(entry.getKey(), to));
             }
         }
         return cases.stream();
     }
 
+    /** 非法用例 = 全 36 组合减去硬编码期望表里的合法边。 */
     static Stream<Arguments> illegalTransitions() {
         List<Arguments> cases = new ArrayList<>();
         for (ReleaseStatus from : ReleaseStatus.values()) {
+            Set<ReleaseStatus> allowed = EXPECTED_ALLOWED.getOrDefault(from, Set.of());
             for (ReleaseStatus to : ReleaseStatus.values()) {
-                if (!ReleaseStateMachine.canTransit(from, to)) {
+                if (!allowed.contains(to)) {
                     cases.add(Arguments.of(from, to));
                 }
             }
@@ -68,6 +94,24 @@ class ReleaseStateMachineTest {
                 () -> ReleaseStateMachine.requireTransition(from, to));
         assertEquals(ErrorCode.VEHICLE_002, ex.getErrorCode());
         assertTrue(ex.getMessage().contains(from.name() + " -> " + to.name()));
+    }
+
+    /** 逐格比对实现与硬编码白名单，彻底消除循环论证。 */
+    @Test
+    void implementationMatchesHardcodedWhitelist() {
+        int legalCount = 0;
+        for (ReleaseStatus from : ReleaseStatus.values()) {
+            Set<ReleaseStatus> expected = EXPECTED_ALLOWED.getOrDefault(from, Set.of());
+            for (ReleaseStatus to : ReleaseStatus.values()) {
+                boolean expectedLegal = expected.contains(to);
+                assertEquals(expectedLegal, ReleaseStateMachine.canTransit(from, to),
+                        "状态迁移判定与业务白名单不一致：" + from + " -> " + to);
+                if (expectedLegal) {
+                    legalCount++;
+                }
+            }
+        }
+        assertEquals(7, legalCount, "合法迁移白名单应为 7 条边");
     }
 
     /** 红线一：跳步放车——没有 CONFIRMED 就 RELEASED，必须拒绝。 */

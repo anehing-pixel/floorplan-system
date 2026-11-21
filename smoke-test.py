@@ -375,7 +375,9 @@ def main():
     print("\n④ 设定担保")
     status, res = call("POST", "/api/vehicles/%s/security" % VIN,
                        {"securityType": "RETENTION", "regNo": "REG-001", "ownerName": "金融公司"}, token=login_role("settlement"))
-    ok(status == 200 and res["data"]["securityStatus"] == "PENDING", "设定担保 -> %s" % status)
+    # M9：带 regNo 回填即代表线下登记已完成 -> REGISTERED（不再是 PENDING）
+    ok(status == 200 and res["data"]["securityStatus"] == "REGISTERED",
+       "设定担保（回填登记编号）-> %s/REGISTERED（M9 登记编号落库）" % status)
 
     # ⑤ 在库计息（跑 3 个业务日）
     print("\n⑤ 在库计息（连续 3 个业务日）")
@@ -616,8 +618,23 @@ def main():
        "认定损失=%d（应收 %d - 变现 %d）" % (res["data"]["lossAmount"], advance_disp, proceeds))
     # 自动处置作业：⑯ 升级 OOT 的车应被自动开单（无未结案工单才开）
     status, res = call("POST", "/api/jobs/disposal", {})
-    ok(status == 200 and res["data"].get("openedCount", 0) >= 1,
-       "违约处置扫描作业 -> 自动开单 %s 件（覆盖 OOT 车）" % res.get("data", {}).get("openedCount"))
+    auto_cases = res.get("data", {}).get("openedCaseNos", [])
+    ok(status == 200 and res["data"].get("openedCount", 0) >= 1
+       and len(auto_cases) == res["data"]["openedCount"],
+       "违约处置扫描作业 -> 自动开单 %s 件（返回单号列表，覆盖 OOT 车）"
+       % res.get("data", {}).get("openedCount"))
+    # B-2 闭环：自动开单会冻结【整条额度线】，若不撤销/结案，后续 ⑱⑲ 复用该额度线
+    # 的新建账/垫款会被 CREDIT_002 误拦。这里逐单走补救撤销，验证配对解冻生效。
+    for auto_case in auto_cases:
+        status, res = call("POST", "/api/disposals/%s/cancel" % auto_case,
+                           {"reason": "冒烟：补救期内和解，撤销自动处置单"},
+                           token=login_role("disposal"))
+        ok(status == 200 and res["data"]["status"] == "CANCELLED",
+           "撤销自动处置单 %s -> %s/CANCELLED（配对解冻）" % (auto_case, status))
+    status, res = call("GET", "/api/credit-lines/%d" % credit_line_id)
+    ok(status == 200 and res["data"]["status"] == "ACTIVE" and res["data"]["frozenAmount"] == 0,
+       "处置闭环后额度线恢复 ACTIVE 且冻结额归零 -> status=%s,frozen=%s"
+       % (res.get("data", {}).get("status"), res.get("data", {}).get("frozenAmount")))
 
     # ⑱ 评级口径动态配置（后台可调，即时生效）
     print("\n⑱ 授信评级分级口径：后台动态配置（⚠️预设待客户确认）")

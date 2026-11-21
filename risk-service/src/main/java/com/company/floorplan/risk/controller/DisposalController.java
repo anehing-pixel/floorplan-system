@@ -62,4 +62,20 @@ public class DisposalController {
         return ApiResponse.ok(service.close(caseNo, proceeds, AuditActor.resolve(request)),
                 UUID.randomUUID().toString());
     }
+
+    /**
+     * T2-6 / B-2 撤销通道：客户在补救期内还清或和解 → CANCELLED，
+     * 并按本单冻结增量配对解冻额度线（恢复该经销商正常放款能力）。
+     */
+    @PostMapping("/{caseNo}/cancel")
+    @RequirePermission(Permission.DISPOSAL_EXECUTE)
+    public ApiResponse<Map<String, Object>> cancel(
+            @PathVariable String caseNo,
+            @RequestBody(required = false) ApiRequests.DisposalCancelRequest req,
+            HttpServletRequest request) {
+        String reason = req != null && req.reason != null && !req.reason.isBlank()
+                ? req.reason : "客户补救期内还清或达成和解";
+        return ApiResponse.ok(service.cancel(caseNo, reason, AuditActor.resolve(request)),
+                UUID.randomUUID().toString());
+    }
 }

@@ -2,6 +2,9 @@
 logs/
 *.log
 
+# 微服务本地启停脚本写入的运行时 PID 文件，不入版本库
+.microservice-pids/
+
 # 构建产物
 target/
 

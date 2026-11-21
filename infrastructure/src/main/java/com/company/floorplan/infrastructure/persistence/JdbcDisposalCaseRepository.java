@@ -37,6 +37,8 @@ public class JdbcDisposalCaseRepository implements DisposalCaseRepository {
         c.setRepossessedAt(toLdt(rs.getTimestamp("repossessed_at")));
         c.setProceeds(rs.getLong("proceeds"));
         c.setLossAmount(rs.getLong("loss_amount"));
+        // V22（B-2）：本次冻结增量，配对解冻的唯一依据
+        c.setFrozenIncrement(rs.getLong("frozen_increment"));
         c.setOpenedAt(toLdt(rs.getTimestamp("opened_at")));
         c.setClosedAt(toLdt(rs.getTimestamp("closed_at")));
         return c;
@@ -53,15 +55,16 @@ public class JdbcDisposalCaseRepository implements DisposalCaseRepository {
     @Override
     public DisposalCase save(DisposalCase c) {
         jdbc.update("INSERT INTO disposal_cases (case_no, vin, dealer_id, credit_line_id, reason, status, "
-                        + "repossessed_at, proceeds, loss_amount, opened_at, closed_at) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                        + "repossessed_at, proceeds, loss_amount, frozen_increment, opened_at, closed_at) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
                         + "ON CONFLICT (case_no) DO UPDATE SET dealer_id=EXCLUDED.dealer_id, "
                         + "credit_line_id=EXCLUDED.credit_line_id, reason=EXCLUDED.reason, status=EXCLUDED.status, "
                         + "repossessed_at=EXCLUDED.repossessed_at, proceeds=EXCLUDED.proceeds, "
-                        + "loss_amount=EXCLUDED.loss_amount, closed_at=EXCLUDED.closed_at",
+                        + "loss_amount=EXCLUDED.loss_amount, frozen_increment=EXCLUDED.frozen_increment, "
+                        + "closed_at=EXCLUDED.closed_at",
                 c.getCaseNo(), c.getVin(), c.getDealerId(), c.getCreditLineId(), c.getReason(),
                 c.getStatus() == null ? "OPEN" : c.getStatus().name(),
-                c.getRepossessedAt(), c.getProceeds(), c.getLossAmount(),
+                c.getRepossessedAt(), c.getProceeds(), c.getLossAmount(), c.getFrozenIncrement(),
                 c.getOpenedAt(), c.getClosedAt());
         return c;
     }
@@ -80,5 +83,14 @@ public class JdbcDisposalCaseRepository implements DisposalCaseRepository {
     @Override
     public List<DisposalCase> findByStatus(DisposalStatus status) {
         return jdbc.query("SELECT * FROM disposal_cases WHERE status = ? ORDER BY case_no", MAPPER, status.name());
+    }
+
+    @Override
+    public long countOtherOpenByCreditLine(Long creditLineId, String excludeCaseNo) {
+        Long n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM disposal_cases WHERE credit_line_id = ? AND case_no <> ? "
+                        + "AND status NOT IN ('CLOSED_RECOVERED','CLOSED_LOSS','CANCELLED')",
+                Long.class, creditLineId, excludeCaseNo);
+        return n == null ? 0L : n;
     }
 }

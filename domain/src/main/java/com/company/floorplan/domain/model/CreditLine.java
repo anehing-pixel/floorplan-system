@@ -52,6 +52,16 @@ public class CreditLine {
     /** 乐观锁版本号。 */
     private int version;
 
+    /**
+     * B-5：授信发起人（自然人账号）。
+     *
+     * <p>生产启用 {@code floorplan.credit.strict-sod=true} 后，
+     * 复核人不得与发起人为同一人（发起与执行分离）。落库是为了让
+     * {@code completeCreditLine} 重新从数据库加载额度时仍能拿到发起人，
+     * 不能只放在内存里。</p>
+     */
+    private String initiatedBy;
+
     public CreditLine() {
     }
 
@@ -184,6 +194,25 @@ public class CreditLine {
         }
     }
 
+    /**
+     * B-2：违约处置冻结的<b>配对解冻</b>——按本单记录的冻结增量精确回退。
+     *
+     * <p>与 {@link #unfreeze(long)} 的区别：只有「本额度线已无其他未结案处置单」
+     * （{@code lastOpenCase=true}）<b>且</b>冻结金额归零时，才允许状态恢复 ACTIVE。
+     * 否则即便本单增量为 0（敞口为 0 只冻状态），仍保持 FROZEN，
+     * 避免多单叠加时提前给违约经销商恢复放款能力。</p>
+     *
+     * @param increment   本次开单的真实冻结增量（冻结前后 frozenAmount 之差）
+     * @param lastOpenCase 本单是否为该额度线最后一个未结案处置单
+     */
+    public void unfreezeForDisposal(long increment, boolean lastOpenCase) {
+        long actual = Math.min(increment, frozenAmount);
+        this.frozenAmount -= actual;
+        if (lastOpenCase && this.frozenAmount == 0 && !"CLOSED".equals(status)) {
+            this.status = "ACTIVE";
+        }
+    }
+
     public Long getId() {
         return id;
     }
@@ -238,5 +267,13 @@ public class CreditLine {
 
     public void setVersion(int version) {
         this.version = version;
+    }
+
+    public String getInitiatedBy() {
+        return initiatedBy;
+    }
+
+    public void setInitiatedBy(String initiatedBy) {
+        this.initiatedBy = initiatedBy;
     }
 }

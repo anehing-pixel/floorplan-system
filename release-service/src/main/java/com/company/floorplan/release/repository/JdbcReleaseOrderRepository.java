@@ -158,13 +158,23 @@ public class JdbcReleaseOrderRepository {
     }
 
     /**
-     * 推进状态并写入对应的时间戳列。
+     * 推进状态并写入对应的时间戳列（CAS 式并发防线）。
      *
      * <p>时间戳列名来自对状态的封闭 switch，不接受外部字符串，无 SQL 注入面。
      * 状态合法性由调用方先经 {@code ReleaseStateMachine.requireTransition} 校验。</p>
+     *
+     * <p><b>release 并发竞态修复（CORE_VERIFIER_REPORT）</b>：旧实现是
+     * {@code UPDATE ... WHERE id = :id}，两个并发请求若都读到 CONFIRMED，
+     * 都会通过应用层红线校验并双双写成 RELEASED，理论上突破"未确认不放车"。
+     * 这里把读到的 {@code expectedFrom} 作为 CAS 条件放进 WHERE，只有当前状态
+     * 仍等于读时状态的那一个请求能更新成功；另一个影响行数为 0，由调用方抛异常回滚。</p>
+     *
+     * @param expectedFrom 调用方读到的当前状态（CAS 比较基准）
+     * @param target       目标状态
+     * @return 是否确实推进了一条记录（false 表示已被并发操作抢先推进）
      */
-    public void updateStatus(long id, ReleaseStatus status, Instant now) {
-        String timeColumn = switch (status) {
+    public boolean updateStatus(long id, ReleaseStatus expectedFrom, ReleaseStatus target, Instant now) {
+        String timeColumn = switch (target) {
             case PENDING_RELEASE -> "created_at";
             case SENT -> "sent_at";
             case CONFIRMED -> "confirmed_at";
@@ -172,11 +182,14 @@ public class JdbcReleaseOrderRepository {
             case LIEN_DISCHARGED -> "lien_discharged_at";
             case CANCELLED -> "cancelled_at";
         };
-        String sql = "UPDATE release_orders SET status = :status, " + timeColumn + " = :ts WHERE id = :id";
-        jdbc.update(sql, new MapSqlParameterSource()
-                .addValue("status", status.name())
+        String sql = "UPDATE release_orders SET status = :status, " + timeColumn + " = :ts "
+                + "WHERE id = :id AND status = :expectedFrom";
+        int affected = jdbc.update(sql, new MapSqlParameterSource()
+                .addValue("status", target.name())
                 .addValue("ts", toTimestamp(now))
-                .addValue("id", id));
+                .addValue("id", id)
+                .addValue("expectedFrom", expectedFrom.name()));
+        return affected == 1;
     }
 
     /** 放车时把该指令下所有明细标记为已释放。 */

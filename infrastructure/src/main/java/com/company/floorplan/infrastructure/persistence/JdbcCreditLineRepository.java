@@ -34,6 +34,8 @@ public class JdbcCreditLineRepository implements CreditLineRepository {
         c.setFrozenAmount(rs.getLong("frozen_amount"));
         c.setStatus(rs.getString("status"));
         c.setVersion(rs.getInt("version"));
+        // V23（B-5）：授信发起人，供 completeCreditLine 做职责分离校验
+        c.setInitiatedBy(rs.getString("initiated_by"));
         return c;
     };
 
@@ -73,16 +75,21 @@ public class JdbcCreditLineRepository implements CreditLineRepository {
     public CreditLine save(CreditLine creditLine) {
         if (creditLine.getId() == null) {
             Long id = jdbc.queryForObject(
-                    "INSERT INTO credit_lines (dealer_id, approved_limit, used_amount, frozen_amount, status) VALUES (?,?,?,?,?) RETURNING id",
+                    "INSERT INTO credit_lines "
+                            + "(dealer_id, approved_limit, used_amount, frozen_amount, status, initiated_by) "
+                            + "VALUES (?,?,?,?,?,?) RETURNING id",
                     Long.class,
                     creditLine.getDealerId(), creditLine.getApprovedLimit(),
                     creditLine.getUsedAmount(), creditLine.getFrozenAmount(),
-                    creditLine.getStatus() == null ? "ACTIVE" : creditLine.getStatus());
+                    creditLine.getStatus() == null ? "ACTIVE" : creditLine.getStatus(),
+                    creditLine.getInitiatedBy());
             creditLine.setId(id);
         } else {
-            jdbc.update("UPDATE credit_lines SET approved_limit=?, used_amount=?, frozen_amount=?, status=?, version=version+1, updated_at=now() WHERE id=?",
+            jdbc.update("UPDATE credit_lines SET approved_limit=?, used_amount=?, frozen_amount=?, status=?, "
+                            + "initiated_by=?, version=version+1, updated_at=now() WHERE id=?",
                     creditLine.getApprovedLimit(), creditLine.getUsedAmount(),
-                    creditLine.getFrozenAmount(), creditLine.getStatus(), creditLine.getId());
+                    creditLine.getFrozenAmount(), creditLine.getStatus(),
+                    creditLine.getInitiatedBy(), creditLine.getId());
         }
         return creditLine;
     }

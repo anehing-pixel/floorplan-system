@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -315,12 +316,19 @@ public class BatchApplicationService {
         try {
             List<VehicleUnit> candidates = vehicleUnitRepository.findByStatus(VehicleStatus.OVERDUE);
             int opened = 0;
+            // B-2：返回本轮自动开出的单号，供调用方（运维/冒烟/对账）做闭环处理——
+            // 自动开单会冻结整条额度线，若不留痕就无法定向撤销/结案配对解冻。
+            List<String> openedCaseNos = new ArrayList<>();
             for (VehicleUnit unit : candidates) {
                 var latest = disposalCaseRepository.findLatestByVin(unit.getVin());
                 if (latest.isPresent() && !latest.get().getStatus().isTerminal()) {
                     continue; // 已有未结案工单，避免重复开单
                 }
-                disposalApplicationService.open(unit.getVin(), "AUTO_OOT", "system");
+                Map<String, Object> openedCase = disposalApplicationService.open(unit.getVin(), "AUTO_OOT", "system");
+                Object caseNo = openedCase.get("caseNo");
+                if (caseNo != null) {
+                    openedCaseNos.add(caseNo.toString());
+                }
                 opened++;
             }
             supportRepository.markBatchFinished("DEFAULT_DISPOSAL", today, true, null);
@@ -329,6 +337,7 @@ public class BatchApplicationService {
             data.put("bizDate", today.toString());
             data.put("status", "SUCCESS");
             data.put("openedCount", opened);
+            data.put("openedCaseNos", openedCaseNos);
             return data;
         } catch (RuntimeException ex) {
             supportRepository.markBatchFinished("DEFAULT_DISPOSAL", today, false, ex.getMessage());

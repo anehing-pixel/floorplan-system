@@ -582,9 +582,16 @@ public class VehicleUnit {
         if (cause == RepaymentCause.OVERDUE_MAKEUP) {
             return ReleaseDecision.none("逾期补款不回补可用额度");
         }
-        // C2：车辆已处置或担保已解除 → 质押物释放，全额回补
-        if (unit.getStatus() == VehicleStatus.DISPOSING || unit.getStatus() == VehicleStatus.CLOSED) {
-            return ReleaseDecision.full(principalPaid, "车辆已处置，担保消灭，本金敞口清零");
+        // C2：仅"处置完成"或"担保已解除"才代表质押物释放 → 全额回补。
+        // B-3 修复：DISPOSING 是"处置进行中"（车辆回收/变现/损失核算尚未完成），
+        // 担保并未消灭（releaseSecurity() 与车辆 close() 在此阶段都未发生），
+        // 因此绝不能按"担保消灭"回补额度；否则一旦额度解冻，虚增的 available()
+        // 立即变成可放款额度，形成实际资损（CORE_VERIFIER_REPORT B-3）。
+        if (unit.getStatus() == VehicleStatus.CLOSED) {
+            return ReleaseDecision.full(principalPaid, "车辆已处置完成，担保消灭，本金敞口清零");
+        }
+        if (unit.getStatus() == VehicleStatus.DISPOSING) {
+            return ReleaseDecision.none("处置进行中，担保尚未消灭，不回补额度");
         }
         if (unit.getSecurityStatus() == SecurityStatus.RELEASED) {
             return ReleaseDecision.full(principalPaid, "担保已解除，质押物已释放");

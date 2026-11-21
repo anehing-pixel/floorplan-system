@@ -76,13 +76,38 @@ class CreditReleasePolicyTest {
     }
 
     @Test
-    void disposed_fullRelease() {
+    void disposingInProgress_noRelease() {
+        // B-3 修复（CORE_VERIFIER_REPORT）：DISPOSING 是"处置进行中"，担保尚未消灭。
+        // 原用例把它断言成 full release，把错误行为钉成了假绿灯；
+        // 修复后应为「本金照降、额度不回补」，否则配合解冻即形成资损通道。
         VehicleUnit u = unit(VehicleStatus.DISPOSING, SecurityStatus.REGISTERED);
+
+        ReleaseDecision decision = evaluateCreditRelease(u, PAID, RepaymentCause.VOLUNTARY_PREPAY);
+
+        assertFalse(decision.release());
+        // 判定过程绝不改变担保状态：处置中担保仍是 REGISTERED
+        assertEquals(SecurityStatus.REGISTERED, u.getSecurityStatus());
+    }
+
+    @Test
+    void disposalCompleted_fullRelease() {
+        // CLOSED 才是"处置完成"：担保确已消灭，质押物释放 → 全额回补
+        VehicleUnit u = unit(VehicleStatus.CLOSED, SecurityStatus.RELEASED);
 
         ReleaseDecision decision = evaluateCreditRelease(u, PAID, RepaymentCause.VOLUNTARY_PREPAY);
 
         assertTrue(decision.release());
         assertEquals(PAID, decision.amount());
+    }
+
+    @Test
+    void disposingWithReleasedSecurity_stillNoRelease() {
+        // 即便担保状态被异常置为 RELEASED，处置进行中也不得回补（状态维度优先于安全状态维度）
+        VehicleUnit u = unit(VehicleStatus.DISPOSING, SecurityStatus.RELEASED);
+
+        ReleaseDecision decision = evaluateCreditRelease(u, PAID, RepaymentCause.VOLUNTARY_PREPAY);
+
+        assertFalse(decision.release());
     }
 
     @Test
