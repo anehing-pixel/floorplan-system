@@ -1,5 +1,9 @@
 package com.company.floorplan.collateral;
 
+import com.company.floorplan.collateral.controller.CollateralRegController;
+import com.company.floorplan.collateral.repository.JdbcCollateralRegistrationRepository;
+import com.company.floorplan.collateral.service.CollateralRegistrationService;
+import com.company.floorplan.collateral.strategy.DefaultAuthoritativeSourceStrategy;
 import com.company.floorplan.common.config.GlobalExceptionHandler;
 import com.company.floorplan.common.config.JwtAuthInterceptor;
 import com.company.floorplan.common.config.WebMvcConfig;
@@ -23,7 +27,12 @@ import org.springframework.context.annotation.Import;
         JdbcAuthUserRepository.class,
         JwtAuthInterceptor.class,
         WebMvcConfig.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        // 担保权属服务：本包下的类不加 stereotype，统一在此显式装配，避免与组件扫描重复注册
+        JdbcCollateralRegistrationRepository.class,
+        DefaultAuthoritativeSourceStrategy.class,
+        CollateralRegistrationService.class,
+        CollateralRegController.class
 })
 @EnableDiscoveryClient
 public class CollateralRegServiceApplication {

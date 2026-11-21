@@ -28,28 +28,35 @@ public interface AuthoritativeSourceStrategy {
         private final String regNo;
         private final String ownerName;
         private final String source;
+        private final Long amount;
+        /** 被采信快照的时间，供登记时间兜底。 */
+        private final java.time.LocalDateTime effectiveAt;
         private final String reason;
 
         private Decision(boolean adopted, RegistrationStatus status, String regNo,
-                         String ownerName, String source, String reason) {
+                         String ownerName, String source, Long amount,
+                         java.time.LocalDateTime effectiveAt, String reason) {
             this.adopted = adopted;
             this.status = status;
             this.regNo = regNo;
             this.ownerName = ownerName;
             this.source = source;
+            this.amount = amount;
+            this.effectiveAt = effectiveAt;
             this.reason = reason;
         }
 
         /** 不采纳：策略关闭 / 无可采信数据时使用，调用方应保持当前权属不变。 */
         public static Decision skipped(String reason) {
-            return new Decision(false, RegistrationStatus.NONE, null, null, null, reason);
+            return new Decision(false, RegistrationStatus.NONE, null, null, null, null, null, reason);
         }
 
         /** 采纳：按裁决结果覆盖当前权属。 */
         public static Decision adopt(RegistrationStatus status, String regNo, String ownerName,
-                                     String source, String reason) {
+                                     String source, Long amount,
+                                     java.time.LocalDateTime effectiveAt, String reason) {
             return new Decision(true, status == null ? RegistrationStatus.NONE : status,
-                    regNo, ownerName, source, reason);
+                    regNo, ownerName, source, amount, effectiveAt, reason);
         }
 
         public boolean isAdopted() { return adopted; }
@@ -57,6 +64,8 @@ public interface AuthoritativeSourceStrategy {
         public String getRegNo() { return regNo; }
         public String getOwnerName() { return ownerName; }
         public String getSource() { return source; }
+        public Long getAmount() { return amount; }
+        public java.time.LocalDateTime getEffectiveAt() { return effectiveAt; }
         public String getReason() { return reason; }
     }
 }

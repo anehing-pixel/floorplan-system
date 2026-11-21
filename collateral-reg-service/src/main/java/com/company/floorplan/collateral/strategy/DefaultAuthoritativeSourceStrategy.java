@@ -68,6 +68,7 @@ public class DefaultAuthoritativeSourceStrategy implements AuthoritativeSourceSt
             return Decision.adopt(
                     any.getStatus() == null ? RegistrationStatus.NONE : any.getStatus(),
                     any.getRegNo(), any.getOwnerName(), any.getSource(),
+                    any.getAmount(), any.getCapturedAt(),
                     "已上报源状态一致：" + statuses.iterator().next().name());
         }
 
@@ -78,6 +79,7 @@ public class DefaultAuthoritativeSourceStrategy implements AuthoritativeSourceSt
                 return Decision.adopt(
                         chosen.getStatus() == null ? RegistrationStatus.NONE : chosen.getStatus(),
                         chosen.getRegNo(), chosen.getOwnerName(), chosen.getSource(),
+                        chosen.getAmount(), chosen.getCapturedAt(),
                         "三源冲突：按默认优先级采信 " + sys.code() + "（" + sys.getDescription()
                                 + "）——Q27 定源前的占位规则");
             }
