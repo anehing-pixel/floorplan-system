@@ -15,7 +15,10 @@
 3. **loan agent 也已完整交付并合并进 master**：T2-2 借据与贷后分层，五张表 + DPD + 仓储 + 应用服务 + Controller + HANDOFF + tag，编译打包通过。合并时把两份 `AGENT_TASK.md` 冲突拆成 `docs/AGENT_TASK-{recon,loan}.md` 归档。
 4. **四个 agent 全部完成并合并 master**（最终 HEAD `15123bb`）：recon / loan / collateral / release，每个都经过独立 verifier 验收 + PM 三方合并。Wave 1 并行开发波次闭环。
 
-> 🎉 **2026-11-21 夜完成**：四个外围服务全部落地主干，写入集互斥从未破坏，零合并冲突（仅 AGENT_TASK.md 一次 add/add 已归档化解）。剩余工作见第 6/7 节的阻塞项与集成 TODO，不再是"断点续跑"状态。
+> 🎉 **2026-11-21 夜完成**：四个外围服务全部落地主干，写入集互斥从未破坏，零合并冲突（仅 AGENT_TASK.md 一次 add/add 已归档化解）。
+> **最终验证（master `a69d386`）**：V16–V21 全局迁移表名查重无重复；四服务联合编译
+> `mvn -pl recon,loan,collateral,release -am package` EXIT 0。
+> 剩余工作见第 6/7 节的阻塞项与集成 TODO，不再是"断点续跑"状态。
 
 ## PM 监管机制（2026-11-21 新增）
 
