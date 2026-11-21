@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 00:35（GMT+8） · master HEAD: `6e6b35e`（Wave 2 三 agent 全部交付；ENG 已合并，PAYMENT/CORE 待合并）
+最后更新：2026-11-22 01:05（GMT+8） · master HEAD: `d31ae9a`（PAYMENT 已合并；CORE 独立 verifier 验收中，待合并）
 
 ---
 
@@ -21,9 +21,16 @@
 >
 > ✅ **2026-11-22 00:35 Wave 2 三 agent 全部交付**（基线 `e441da1`）：
 > - ENG（`agent/eng-done` = `672fe88`）：CI/压测/调优/Runbook，reasoning verifier 通过 → **已合并 `6e6b35e`**。
-> - PAYMENT（`agent/payment-done` = `d50b806`）：8 commits / 18 单测，reasoning verifier 建议可合并 → ⬜ 待合并。
-> - CORE（`agent/core-done` = `8a6c363`）：10 commits / 46 单测，9 个断点全落地 → ⬜ 待合并（按第 4 节规矩最后合）；**独立 verifier 尚未派发**。
-> 任务卡在 `docs/AGENT_TASK-{core,payment,eng}.md`。三个 worktree 均已干净、无残留进程、teams 目录为空。
+> - PAYMENT（`agent/payment-done` = `d50b806`）：8 commits / 18 单测，reasoning verifier 建议可合并 → ✅ **已合并 `d31ae9a`**（写入集零越界、冲突集为空）。
+> - CORE（`agent/core-done` = `8a6c363`）：10 commits / 46 单测，9 个断点全落地 → ⬜ 待合并（按第 4 节规矩最后合）；**独立 reasoning verifier 验收中**（已派，等结论再合）。
+> 任务卡在 `docs/AGENT_TASK-{core,payment,eng}.md`。三个 worktree 均已干净、无残留进程。
+>
+> 🧪 **2026-11-22 01:05 PM 全量验证（payment 已合 / core 未合态）**：
+> - `mvn -q -B -pl bank-service -am test` EXIT 0，18 项单测全绿（failures=0/errors=0）；tail 里的 stack trace 是测试故意抛异常的预期日志，非失败。
+> - `mvn -q -B clean package -DskipTests` EXIT 0；`mvn -q -B clean package`（CI 门禁同款，含单测）EXIT 0，**全仓 117 项单测全绿**（bank 18 / recon 22 / loan 22 / collateral 10 / release 45）。
+> - **Flyway 全量 V1–V21 首次真实跑通**：新建临时空库逐文件单事务执行（模拟 Flyway，勿用 autocommit——V14 有 `CREATE TEMP TABLE ... ON COMMIT DROP`），21/21 全 OK，64 张表，表名零重复，临时库已删。
+> - smoke（182 项）**待 CORE 合并后跑**：`smoke-test.py` 的 `psql()` 有 docker exec 兜底，Windows 侧 `localhost:5434` 实测可连，**不需要 WSL**（WSL 被安全策略禁止，且不可绕过）。
+> - ⚠️ 已知风险：CORE 的 T1-7 把"提前部分还款"语义改成"回补额度但不解担保"，而 CORE 对 `smoke-test.py` 只改了 1 行 print 文案、没改断言——合并后 smoke 的⑪用例可能失败，需实跑确认。
 >
 > 🔧 **PM 已修 V19 硬阻塞**：`V19__release_orders.sql` 的 `CONSTRAINT ... UNIQUE (vin) WHERE ...` 是非法语法（表内 UNIQUE 不支持 WHERE），
 > 导致 Flyway 全量迁移回滚、smoke 182 项跑不到。已改为表外 `CREATE UNIQUE INDEX ... WHERE`（口径同 V11），
@@ -82,8 +89,8 @@
 | COLLATERAL | `agent/collateral` | `../wt-collateral` | ✅ 完整交付 + 独立验收通过 | 7 | ✅ | `agent/collateral-done` | ✅ 已合并 `9304989` |
 | RELEASE | `agent/release` | `../wt-release` | ✅ 完整交付 + 独立验收通过 | 8 | ✅ | `agent/release-done` | ✅ 已合并 `15123bb` |
 | ENG（Wave2） | `agent/eng` | `../wt-eng` | ✅ 完整交付 + reasoning verifier 验收通过 | 8 | ✅ | `agent/eng-done` | ✅ 已合并 `6e6b35e` |
-| PAYMENT（Wave2） | `agent/payment` | `../wt-payment` | ✅ 完整交付 + reasoning verifier 建议可合并 | 8 | ✅ | `agent/payment-done` = `d50b806` | ⬜ 待合并 |
-| CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测通过；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ⬜ 待合并（最后合）；verifier 未派 |
+| PAYMENT（Wave2） | `agent/payment` | `../wt-payment` | ✅ 完整交付 + reasoning verifier 通过 | 8 | ✅ | `agent/payment-done` = `d50b806` | ✅ 已合并 `d31ae9a` |
+| CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ⬜ reasoning verifier 验收中，待合并（最后合） |
 
 > 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox)。
 > **硬规矩**：共享层已有 java 文件只有 CORE agent 能改；其余 agent 只写自己的服务目录 + 自己号段的迁移。
