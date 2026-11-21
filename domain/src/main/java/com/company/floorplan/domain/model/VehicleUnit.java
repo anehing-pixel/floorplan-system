@@ -501,6 +501,25 @@ public class VehicleUnit {
     }
 
     /**
+     * T1-3（M9 登记编号落库）：设定担保时回填线下登记编号。
+     *
+     * <p>老接口 {@code POST /{vin}/security} 收了 {@code regNo} 却直接丢弃，
+     * 车辆担保状态永远停在 PENDING，使用方以为登记完成。本重载把"带登记编号"
+     * 这一事实落到领域状态：有编号且担保方式非 NONE 时即为 REGISTERED
+     * （登记是线下去法务省办理的，编号回填即代表该线下动作已完成）。</p>
+     *
+     * @param type           担保方式；NONE 表示无担保
+     * @param registrationNo 法务省登记编号；为空/空白时维持 PENDING
+     */
+    public void setSecurity(SecurityType type, String registrationNo) {
+        setSecurity(type);
+        if (type != SecurityType.NONE && this.securityStatus == SecurityStatus.PENDING
+                && registrationNo != null && !registrationNo.isBlank()) {
+            this.securityStatus = SecurityStatus.REGISTERED;
+        }
+    }
+
+    /**
      * 解除担保（业务闭环第 ⑦ 环节，结清时自动触发）。
      *
      * @implNote 本就无担保时直接返回，保证幂等（重复调用不报错）。
