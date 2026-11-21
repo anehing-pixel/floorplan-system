@@ -107,3 +107,23 @@ CREATE INDEX IF NOT EXISTS idx_css_vin_source_captured
 COMMENT ON TABLE collateral_source_snapshot IS '担保三源快照：每次上报留痕，供冲突裁决回溯（Q27 定源前不参与门禁判定）';
 COMMENT ON COLUMN collateral_source_snapshot.source IS '来源：VEHICLE_UNITS / COLLATERAL_LEDGER / REGISTRATION_BATCH';
 COMMENT ON COLUMN collateral_source_snapshot.raw_payload IS '原始上报报文（JSONB），争议时自证';
+
+-- ===========================================================================
+-- ④ 三源快照的"导入"为什么不放进本迁移
+-- ===========================================================================
+-- 三源 = vehicle_units(V1) / collateral_ledger(V10) /
+--        collateral_registration_batches + collateral_registration_items(V10)。
+-- 三张源表此时都已存在，理论上可以 INSERT ... SELECT 一次性灌入初始快照；
+-- 这里刻意**不执行**，原因有三：
+--   ① 初始灌数等于默认采信了三源中的某个口径，而 Q27"以哪张表为准"尚未
+--      书面确认，在迁移里写死就是拍脑袋定源；
+--   ② 快照表语义是"每次上报一条、只追加不覆盖"（见上方表注释），由运行时
+--      POST /api/collateral-reg/snapshot/import 采集更贴合：可重复触发、
+--      逐条留 captured_at、raw_payload 可回看；
+--   ③ 权威表 collateral_registration 在 Q27 定源前**保持为空**，查询接口据此
+--      fail-closed 返回 NONE、core 拒付——这是刻意的安全默认，不是"没实现"。
+-- 三源采集 SQL（原始列 → 归一化状态）由 JdbcCollateralRegistrationRepository
+-- 承载，归一化口径同样带 TODO(Q27) 标注，见对应 Java 类。
+-- Q27 书面定源后：打开 floorplan.collateral.authoritative-source.enabled，
+-- 由 CollateralRegistrationService 把裁决结果 adopt 回权威表并留 SNAPSHOT_ADOPT 流水。
+-- ===========================================================================
