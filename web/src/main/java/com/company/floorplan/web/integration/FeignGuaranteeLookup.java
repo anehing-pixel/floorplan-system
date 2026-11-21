@@ -2,7 +2,6 @@ package com.company.floorplan.web.integration;
 
 import com.company.floorplan.common.contract.CollateralClient;
 import com.company.floorplan.domain.service.RoleSeparationPolicy;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,7 +21,12 @@ public class FeignGuaranteeLookup implements RoleSeparationPolicy.GuaranteeLooku
 
     private final CollateralClient collateralClient;
 
-    public FeignGuaranteeLookup(@Qualifier("collateral-reg-service") CollateralClient collateralClient) {
+    // 不指定 @Qualifier：@FeignClient 契约未声明 qualifiers，Feign 代理的 bean 名是接口全限定名、
+    // alias 是 "collateral-reg-serviceFeignClient"，都不是服务名 "collateral-reg-service"。
+    // 原写法 @Qualifier("collateral-reg-service") 匹配不上任何 bean，导致 web 启动即失败。
+    // 这里按类型注入即可：@FeignClient.primary() 默认 true，代理会被优先选中，
+    // 与 GuaranteeFeignConfig 注册的 fallback bean 不冲突。
+    public FeignGuaranteeLookup(CollateralClient collateralClient) {
         this.collateralClient = collateralClient;
     }
 

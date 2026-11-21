@@ -14,6 +14,7 @@ import com.company.floorplan.infrastructure.persistence.JdbcBusinessCalendar;
 import com.company.floorplan.infrastructure.persistence.JdbcCollateralEvidenceRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcCollateralLedgerRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcCollateralRegistrationBatchRepository;
+import com.company.floorplan.infrastructure.persistence.JdbcCreditLineRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcDisposalCaseRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcFinancingLienCheckRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcInterestLedgerRepository;
@@ -40,6 +41,8 @@ import org.springframework.context.annotation.Import;
  *       都依赖 {@link CollateralLedgerApplicationService}，三者必须一起装；</li>
  *   <li>{@link CollateralLedgerApplicationService} 依赖
  *       {@link JdbcBankAccountRepository}（账户引用码校验）；</li>
+ *   <li>{@link DisposalApplicationService} 自 T1-1 起还依赖
+ *       {@link JdbcCreditLineRepository}（处置开单时行锁冻结额度），须一并装配；</li>
  *   <li>{@link JdbcSupportRepository} 依赖 {@link JdbcBusinessCalendar}；</li>
  *   <li>{@link AuthApplicationService} 依赖 {@link JdbcAuthUserRepository}（JWT 验签）。</li>
  * </ul>
@@ -64,6 +67,7 @@ import org.springframework.context.annotation.Import;
         JdbcCollateralRegistrationBatchRepository.class,
         JdbcCollateralEvidenceRepository.class,
         JdbcBankAccountRepository.class,                    // CollateralLedgerService 的依赖
+        JdbcCreditLineRepository.class,                    // T1-1: DisposalApplicationService 新增的额度行锁依赖
         JdbcSupportRepository.class,
         JdbcBusinessCalendar.class,                         // JdbcSupportRepository 的依赖
         JdbcAuthUserRepository.class,                        // AuthApplicationService 的依赖

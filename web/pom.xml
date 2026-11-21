@@ -39,6 +39,16 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
+    <!-- T1-5（B1）启动期依赖补齐（2026-11-22 PM 集成修复）：
+         @EnableFeignClients 扫描到的 CollateralClient 用 name="collateral-reg-service" 且无 url，
+         FeignClientFactoryBean.loadBalance() 必须能拿到 LoadBalancerClient，否则启动即抛
+         "No Feign Client for loadBalancing defined"。common 只声明了 openfeign，
+         gateway 已单独引了 loadbalancer，web 作为唯一启用 Feign 的模块必须自己补上。
+         版本由 spring-cloud BOM 统一管理。 -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+    </dependency>
   </dependencies>
 
   <build>
