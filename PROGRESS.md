@@ -33,6 +33,9 @@
 - 但通信**跨会话不保留**——模型切换/新会话醒来后，团队消息通道失效。此时靠本文件 + git 提交记录判断进度：
   `git -C ../wt-XXX log --oneline -3` 看提交、`git tag -l 'agent/*-done'` 看交付、`ls wt-XXX/*/HANDOFF.md` 看交付说明。
 - **PM 职责**：派发（写 docs/AGENT_TASK-<name>.md）→ 巡检越界 → 验收编译 → 三方合并 → 更新本文件。agent 不自行合并，也不改根目录文件。
+- **已批准的边界例外（验收时勿误报为越界）**：
+  - LOAN：允许在 `loan-service/pom.xml` 加 `spring-boot-starter-test`（scope=test）。
+  - PAYMENT（2026-11-22 批准）：允许在 `bank-service/pom.xml` 加 `spring-boot-starter-test`（scope=test）——理由同 LOAN，不写测试依赖无法完成任务卡要求的单测。**仅限这一处 pom 改动**，其余边界不变。
 
 ### 后续波次的三层验收规范（2026-11-21 确立，后续照此执行）
 
