@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-21 23:58（GMT+8） · master HEAD: `9304989`
+最后更新：2026-11-21 00:02（GMT+8） · master HEAD: `15123bb`（四个 agent 全部合并完成）
 
 ---
 
@@ -13,7 +13,9 @@
 1. **Wave 0（地基）已完成**：父 pom 预留模块、网关路由、启动脚本端口、契约接口、V21 outbox、4 个空服务骨架全部落地。
 2. **recon agent 已完整交付并合并进 master**：T3-2 对账清算服务，8 条规则（4 实现 + 4 占位），22 个单测通过，HANDOFF 齐全。
 3. **loan agent 也已完整交付并合并进 master**：T2-2 借据与贷后分层，五张表 + DPD + 仓储 + 应用服务 + Controller + HANDOFF + tag，编译打包通过。合并时把两份 `AGENT_TASK.md` 冲突拆成 `docs/AGENT_TASK-{recon,loan}.md` 归档。
-4. **collateral 已完整交付 + 独立验收通过 + 合并 master**（`9304989`）；**release 已交付，独立 verifier 审查中**——醒来查 release 验收结论，通过后合并。
+4. **四个 agent 全部完成并合并 master**（最终 HEAD `15123bb`）：recon / loan / collateral / release，每个都经过独立 verifier 验收 + PM 三方合并。Wave 1 并行开发波次闭环。
+
+> 🎉 **2026-11-21 夜完成**：四个外围服务全部落地主干，写入集互斥从未破坏，零合并冲突（仅 AGENT_TASK.md 一次 add/add 已归档化解）。剩余工作见第 6/7 节的阻塞项与集成 TODO，不再是"断点续跑"状态。
 
 ## PM 监管机制（2026-11-21 新增）
 
@@ -48,7 +50,7 @@
 | RECON | `agent/recon` | `../wt-recon` | ✅ 完整交付 | 9 | ✅ | `agent/recon-done` | ✅ 已合并 `f052e7c` |
 | LOAN | `agent/loan` | `../wt-loan` | ✅ 完整交付 | 9 | ✅ | `agent/loan-done` | ✅ 已合并 `e34d6ac` |
 | COLLATERAL | `agent/collateral` | `../wt-collateral` | ✅ 完整交付 + 独立验收通过 | 7 | ✅ | `agent/collateral-done` | ✅ 已合并 `9304989` |
-| RELEASE | `agent/release` | `../wt-release` | 🔄 开发中（23:45 派发） | 动态 | ❌ | ❌ | ❌ 未合并 |
+| RELEASE | `agent/release` | `../wt-release` | ✅ 完整交付 + 独立验收通过 | 8 | ✅ | `agent/release-done` | ✅ 已合并 `15123bb` |
 
 > 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox)。
 > **硬规矩**：共享层已有 java 文件只有 CORE agent 能改；其余 agent 只写自己的服务目录 + 自己号段的迁移。
@@ -130,4 +132,7 @@
 |---|---|---|---|
 | **Feign JWT 传播** | `WebMvcConfig` 拦截全部 `/api/**` 且无放行。core 经 Feign 调 `GET /api/collateral-reg/registration` 时若不传播 `Authorization`，会被 401 挡下 → 走 NONE fallback → 拒付。**必须在 core 侧加 Feign 请求拦截器透传 JWT**，否则担保门禁形同虚设 | core agent（未派发） | ⬜ 待处理 |
 | **V18 表名改名** | V10 第185行已建 `collateral_registration_items`（batch_id/ledger_id/vin，批次↔车辆明细），任务卡要求的"登记流水/历史"同名会撞。PM 已批准改名为 `collateral_registration_history`，理由写进 V18 迁移注释与 collateral HANDOFF | collateral agent | ✅ 已批准，实现中 |
-| **独立验收 agent** | 开发 agent 自测有"自证"盲区。两个 agent 交付后派一个**只读** verifier，验状态机非法迁移 / CollateralClient 契约对齐 / V18 越界。**verifier 不改代码**，问题上报 PM，由 PM 让开发 agent 修——保持写入集互斥 | PM | ⬜ 待两个 agent 交付后派发 |
+| **独立验收 agent** | 已对 collateral/release 各派一个只读 verifier，均完成。collateral 抓到 tag 落后 HEAD（已修）；release 确认核心无阻断缺陷 | PM | ✅ 已完成 |
+| **release 并发竞态** | `ReleaseApplicationService.advanceExisting` + `JdbcReleaseOrderRepository:175` 是"读状态→应用层校验→无条件 UPDATE WHERE id"，无行锁/状态条件。并发下两个请求可能都读到 CONFIRMED、都通过红线校验写 RELEASED，理论上突破"未确认不放车"红线。单请求路径红线严格成立，属架构共性问题 | 后续技术债 | ⬜ 改为 `UPDATE ... WHERE id=? AND status=?` 校验影响行数，或加行锁 |
+| **release 测试循环论证** | `ReleaseStateMachineTest` 的 legal/illegal 用例用 `canTransit` 自身生成又断言 `canTransit`——非红线边写错时穷举测试发现不了。两条资损红线有独立硬编码用例兜底，故不致命 | 后续技术债 | ⬜ 7 条合法边改为硬编码期望表 |
+| **DB 集成验证缺失** | 四个服务的 flyway.enabled=false，单测均为纯逻辑测试不依赖数据源。V16/V18/V19/V20/V21 迁移 SQL 未在真实 PG 实跑（部分唯一索引 `WHERE status<>'CANCELLED'`、`CREATE INDEX IF NOT EXISTS` 等语法待验） | 运维/集成阶段 | ⬜ 起 floorplan-db2 后跑一次 Flyway 全量迁移 + smoke |
