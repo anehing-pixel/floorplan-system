@@ -1,5 +1,6 @@
 package com.company.floorplan.collateral;
 
+import com.company.floorplan.application.service.AuthApplicationService;
 import com.company.floorplan.collateral.controller.CollateralRegController;
 import com.company.floorplan.collateral.repository.JdbcCollateralRegistrationRepository;
 import com.company.floorplan.collateral.service.CollateralRegistrationService;
@@ -24,7 +25,8 @@ import org.springframework.context.annotation.Import;
  */
 @SpringBootApplication(scanBasePackages = "com.company.floorplan.collateral")
 @Import({
-        JdbcAuthUserRepository.class,
+        AuthApplicationService.class,       // JWT 验签（JwtAuthInterceptor 的依赖）
+        JdbcAuthUserRepository.class,       // AuthApplicationService 的依赖
         JwtAuthInterceptor.class,
         WebMvcConfig.class,
         GlobalExceptionHandler.class,

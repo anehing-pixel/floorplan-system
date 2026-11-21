@@ -1,5 +1,6 @@
 package com.company.floorplan.release;
 
+import com.company.floorplan.application.service.AuthApplicationService;
 import com.company.floorplan.common.config.GlobalExceptionHandler;
 import com.company.floorplan.common.config.JwtAuthInterceptor;
 import com.company.floorplan.common.config.WebMvcConfig;
@@ -23,7 +24,8 @@ import org.springframework.context.annotation.Import;
  */
 @SpringBootApplication(scanBasePackages = "com.company.floorplan.release")
 @Import({
-        JdbcAuthUserRepository.class,
+        AuthApplicationService.class,       // JWT 验签（JwtAuthInterceptor 的依赖）
+        JdbcAuthUserRepository.class,       // AuthApplicationService 的依赖
         JwtAuthInterceptor.class,
         WebMvcConfig.class,
         GlobalExceptionHandler.class,
