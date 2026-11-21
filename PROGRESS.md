@@ -4,15 +4,16 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-21 23:35（GMT+8） · master HEAD: `f052e7c`
+最后更新：2026-11-21 23:38（GMT+8） · master HEAD: `e34d6ac`
 
 ---
 
 ## 0. 三句话现状
 
 1. **Wave 0（地基）已完成**：父 pom 预留模块、网关路由、启动脚本端口、契约接口、V21 outbox、4 个空服务骨架全部落地。
-2. **recon agent 已完整交付并合并进 master**：T3-2 对账清算服务，8 条规则（4 实现 + 4 占位），22 个单测通过，HANDOFF 齐全。这是唯一走完交付流程的 agent。
-3. **loan 做到一半就停了**（仓储层），collateral / release 只派了任务卡没开工。**这三个是断点**，醒来从这里接。
+2. **recon agent 已完整交付并合并进 master**：T3-2 对账清算服务，8 条规则（4 实现 + 4 占位），22 个单测通过，HANDOFF 齐全。
+3. **loan agent 也已完整交付并合并进 master**：T2-2 借据与贷后分层，五张表 + DPD + 仓储 + 应用服务 + Controller + HANDOFF + tag，编译打包通过。合并时把两份 `AGENT_TASK.md` 冲突拆成 `docs/AGENT_TASK-{recon,loan}.md` 归档。
+4. **剩下 collateral / release 只派了任务卡没开工**——这两个才是断点，醒来从这里接。
 
 ---
 
@@ -37,7 +38,7 @@
 | Agent | 分支 | worktree 路径 | 状态 | 提交数 | HANDOFF | tag | 是否已并入 master |
 |---|---|---|---|---|---|---|---|
 | RECON | `agent/recon` | `../wt-recon` | ✅ 完整交付 | 9 | ✅ | `agent/recon-done` | ✅ 已合并 `f052e7c` |
-| LOAN | `agent/loan` | `../wt-loan` | ⚠️ 做到仓储层中断 | 6 | ❌ | ❌ | ❌ 未合并 |
+| LOAN | `agent/loan` | `../wt-loan` | ✅ 完整交付 | 9 | ✅ | `agent/loan-done` | ✅ 已合并 `e34d6ac` |
 | COLLATERAL | `agent/collateral` | `../wt-collateral` | ⚠️ 仅派任务卡，未开工 | 1 | ❌ | ❌ | ❌ 未合并 |
 | RELEASE | `agent/release` | `../wt-release` | ⚠️ 仅派任务卡，未开工 | 1 | ❌ | ❌ | ❌ 未合并 |
 
@@ -50,18 +51,12 @@
 
 > 每个动作都必须做到"做完 → 更新本文件 → commit → 打 tag → 合并"的完整闭环，避免再次半途中断。
 
-### 3.1 LOAN（T2-2 借据与贷后分层）— 优先接这个，因为做了一半
+### 3.1 LOAN — ✅ 已完成，无需接手
 
-- **已完成**：V16 五表迁移、跨 agent 契约文档（V16借据）、8 个 model 类、`DpdCalculator` + 22 例单测、`JdbcLoanRepository`。
-- **下一步（按序）**：
-  1. `LoanServiceApplication` 加 `@Import`：`JdbcLoanRepository`、`LoanApplicationService`、`LoanController`（启动类当前还是 wave0 骨架，未装配）。
-  2. 新建 `LoanApplicationService`：建据 / by-vin 查询 / DPD 回写 / 逾期升档 / 画像 upsert 的用例编排。
-  3. 新建 `LoanController`：暴露端点（签名先对齐契约文档，拿不准写 TODO）。
-  4. 跑 `cd ../wt-loan && mvn -q -pl loan-service -am test && mvn -q -pl loan-service -am package`。
-  5. 写 `loan-service/HANDOFF.md`（照抄 recon 格式：改了什么 / 外部依赖 / TODO / 验证结果）。
-  6. `git tag agent/loan-done`，确认 `git status` 干净。
-  7. 回来合并：`cd 主干 && git merge --ff-only agent/loan`，然后更新本文件第 2 节表格。
-- **恢复起点**：`cd ../wt-loan && git log --oneline -1` 应为 `60a5387`。
+- 已交付：V16 五表迁移、跨 agent 契约文档、8 个 model 类、`DpdCalculator` + 22 例单测、
+  `JdbcLoanRepository`、`LoanApplicationService`、`LoanController`、启动类装配、HANDOFF、tag。
+- 已合并 master（`e34d6ac`）。细节见 `loan-service/HANDOFF.md` 和 `docs/AGENT_TASK-loan.md`。
+- 后续增强（非断点）：`loan-service` 的真实 PG 集成验证（HANDOFF 记录了未做，环境无数据库）。
 
 ### 3.2 COLLATERAL（T1-6 + T3-4 担保权属权威源）
 
@@ -83,7 +78,10 @@
 
 ## 4. 合并规则（恢复后必须遵守）
 
-1. **合并顺序**：外围先合、CORE 最后（`recon → eng → release → collateral → loan → core`）。已合的 recon 跳过。
+1. **合并顺序**：外围先合、CORE 最后（`recon → eng → release → collateral → loan → core`）。
+   已合的 recon、loan 跳过；当前只剩 collateral / release（若之后派了 eng/core 再加进来）。
+   注意 master 已因文档提交产生分叉，合并用普通三方合并（`--no-ff`），不再用 `--ff-only`；
+   若出现 `AGENT_TASK.md` 的 add/add 冲突，按本次做法拆到 `docs/AGENT_TASK-<name>.md` 归档。
 2. 合并前查越界：`git -C ../wt-XXX diff --name-only wave0-baseline..HEAD`，对照第 2 节写入集；出现共享禁区文件就是冲突源。
 3. 用 `--ff-only`；若失败说明主干已分叉，停下来人工判断，不要强推。
 4. 每合一个，跑一次 `mvn -q -pl <module> -am package`，全绿再合下一个。
