@@ -4,6 +4,8 @@ import com.company.floorplan.common.config.GlobalExceptionHandler;
 import com.company.floorplan.common.config.JwtAuthInterceptor;
 import com.company.floorplan.common.config.WebMvcConfig;
 import com.company.floorplan.infrastructure.persistence.JdbcAuthUserRepository;
+import com.company.floorplan.loan.repository.JdbcLoanRepository;
+import com.company.floorplan.loan.service.LoanApplicationService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
@@ -23,7 +25,10 @@ import org.springframework.context.annotation.Import;
         JdbcAuthUserRepository.class,   // JWT 验签所需
         JwtAuthInterceptor.class,
         WebMvcConfig.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        // 借据服务新 bean（T2-2）：显式装配，便于主 agent 合并时核对装配面
+        JdbcLoanRepository.class,
+        LoanApplicationService.class
 })
 @EnableDiscoveryClient
 public class LoanServiceApplication {
