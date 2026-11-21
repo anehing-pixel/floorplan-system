@@ -73,6 +73,10 @@ public class CreditLine {
      *                           超出可用余额抛 {@code CREDIT_001}（details 带可用额与需求额）
      */
     public void occupy(long amount) {
+        // T1-4（M12）：授信发起后、复核完成前的额度绝不可用于放款
+        if ("PENDING_APPROVAL".equals(status)) {
+            throw new BusinessException(ErrorCode.CREDIT_003);
+        }
         if (!"ACTIVE".equals(status)) {
             throw new BusinessException(ErrorCode.CREDIT_002);
         }
@@ -117,6 +121,30 @@ public class CreditLine {
         long actual = Math.min(amount, free);
         this.frozenAmount += actual;
         this.status = "FROZEN";
+    }
+
+    /**
+     * T1-4（M12 授信审批链）：授信复核通过，把待审批额度激活为可用。
+     *
+     * @throws BusinessException 非 PENDING_APPROVAL 状态抛 {@code CREDIT_003}
+     */
+    public void approve() {
+        if (!"PENDING_APPROVAL".equals(status)) {
+            throw new BusinessException(ErrorCode.CREDIT_003, Map.of(
+                    "currentStatus", String.valueOf(status), "reason", "仅待审批额度可审批通过"));
+        }
+        this.status = "ACTIVE";
+    }
+
+    /**
+     * T1-4（M12）：授信复核不通过，额度关闭（不可再用）。
+     */
+    public void rejectApproval() {
+        if (!"PENDING_APPROVAL".equals(status)) {
+            throw new BusinessException(ErrorCode.CREDIT_003, Map.of(
+                    "currentStatus", String.valueOf(status), "reason", "仅待审批额度可驳回"));
+        }
+        this.status = "CLOSED";
     }
 
     /**

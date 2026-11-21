@@ -20,6 +20,8 @@ public enum ErrorCode {
 
     CREDIT_001("可用额度不足", 422),
     CREDIT_002("额度已冻结", 422),
+    /** T1-4（M12）：额度尚处授信审批中（initiate 未 complete），不得用于放款。 */
+    CREDIT_003("额度尚未审批通过，不可用于放款", 422),
 
     VEHICLE_001("车辆（VIN）不存在", 404),
     VEHICLE_002("状态非法流转", 422),
