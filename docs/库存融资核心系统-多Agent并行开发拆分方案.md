@@ -8,18 +8,16 @@
 
 ---
 
-## 0. 前置阻塞：当前目录还不是 Git 仓库
+## 0. 前置条件：已满足（2026-11-21 更新）
 
-实测：`git status` → `fatal: not a git repository`，无 `.git` 目录。**worktree 用不了，必须先建库**：
+> ⚠️ **本节原写"当前不是 Git 仓库"，已过时。** 实测 `git status` 正常、`git tag` 已有
+> `wave0-baseline`，4 个 worktree 已建。以下内容仅作历史留档，**无需再执行**。
 
-```bash
-cd C:/Users/Administrator/Documents/GitHub/floorplan-system
-git init
-# 建议先写 .gitignore：target/ logs/ .microservice-pids/ *.log data/ backups/
-git add . && git commit -m "baseline: 原型快照（并行开发基线）"
-```
+~~实测：`git status` → `fatal: not a git repository`，无 `.git` 目录。**worktree 用不了，必须先建库**~~
 
-⚠️ 这一步没做，后面所有 worktree 命令都会失败。**且必须在没有任何 agent 开工前完成**——基线一旦确定，各 worktree 从同一 commit 切出，才有共同祖先可合并。
+**当前真实状态**：Git 仓库已建、`baseline` 与 `wave0` 两次提交已完成、`wave0-baseline` tag 已打、
+4 个 worktree（wt-recon / wt-loan / wt-collateral / wt-release）已切出。
+**实时状态以仓库根 `PROGRESS.md` 为准**，本节不再维护。
 
 ---
 
