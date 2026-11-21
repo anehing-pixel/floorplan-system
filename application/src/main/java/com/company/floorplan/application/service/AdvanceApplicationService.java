@@ -79,6 +79,18 @@ public class AdvanceApplicationService {
     private final BankAccountRepository bankAccountRepository;
     /** 担保物台账服务：放款确认时建立台账行（证据链起点）。 */
     private final CollateralLedgerApplicationService collateralService;
+    /**
+     * T1-5（B1）担保门禁查询端口：由 web 层 CollateralClient Feign 适配器实现。
+     * TODO(Q27)：判定源未定，开关默认关闭，默认不参与放款判定。
+     */
+    private final RoleSeparationPolicy.GuaranteeLookup guaranteeLookup;
+
+    /** T1-5（B1）：担保门禁总开关，默认关闭——Q27 定源前绝不默认开启。 */
+    @Value("${floorplan.core.guarantee-gate.enabled:false}")
+    private boolean guaranteeGateEnabled;
+    /** T1-5（B1）：按经销商放宽门禁的白名单（逗号分隔 dealerId，Q21 可配）。 */
+    @Value("${floorplan.core.guarantee-gate.relaxed-dealers:}")
+    private String relaxedDealers;
 
     /** 垫款比例上限（预设 100%，需客户确认）。 */
     @Value("${floorplan.advance.max-ratio:1.0}")
@@ -107,7 +119,8 @@ public class AdvanceApplicationService {
                                      RatingConfigApplicationService ratingConfigService,
                                      PurchaseOrderRepository purchaseOrderRepository,
                                      BankAccountRepository bankAccountRepository,
-                                     CollateralLedgerApplicationService collateralService) {
+                                     CollateralLedgerApplicationService collateralService,
+                                     RoleSeparationPolicy.GuaranteeLookup guaranteeLookup) {
         this.vehicleUnitRepository = vehicleUnitRepository;
         this.creditLineRepository = creditLineRepository;
         this.advanceRepository = advanceRepository;
@@ -119,6 +132,7 @@ public class AdvanceApplicationService {
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.bankAccountRepository = bankAccountRepository;
         this.collateralService = collateralService;
+        this.guaranteeLookup = guaranteeLookup;
     }
 
     /** 批量到货建账：部分成功语义（逐台处理，一台脏数据不阻塞整批）。 */
@@ -338,6 +352,8 @@ public class AdvanceApplicationService {
         // 这里按自然人身份再挡一次——这是防资损的最后一道闸。
         RoleSeparationPolicy.assertNoSelfApproval(pending.getApplicant(), actor, "垫款支付");
         RoleSeparationPolicy.assertNoSelfApproval(pending.getReviewer(), actor, "垫款支付");
+        // T1-5（B1）：放款前担保门禁——默认关闭，不参与判定；开启时无 REGISTERED 登记即硬阻断。
+        enforceGuaranteeGate(pending);
         // 责任链第三环：记下支付人
         advanceRepository.saveDisburser(pending.getId(), actor);
         // 事务外：提交支付指令（此时 PENDING 已提交，绝不会因后续落库失败而"钱付账没记"）
@@ -356,6 +372,48 @@ public class AdvanceApplicationService {
         Advance processing = self.submitAdvance(pending.getId(), result.getReference(), actor);
         CreditLine line = creditLineRepository.findById(pending.getCreditLineId()).orElse(null);
         return buildAdvanceResponse(processing, line == null ? 0L : line.available(), false);
+    }
+
+    /**
+     * T1-5（B1）放款前担保门禁。
+     *
+     * <p><b>TODO(Q27) 明确阻塞项</b>：担保判定源（三张表 + 权属服务）尚未由业务书面确认，
+     * 本门禁只通过 {@link RoleSeparationPolicy.GuaranteeLookup} 消费上层视图，不自定判定源；
+     * 开关 {@code floorplan.core.guarantee-gate.enabled} 默认 false，
+     * 默认关闭时<b>连权属服务都不查询</b>，绝不改变现有放款行为。</p>
+     *
+     * <p>开关开启后：查不到 REGISTERED 登记（含服务不可达）→ 阻断放款 + 生成 HIGH 级
+     * 「担保待登记」工单；按经销商白名单可放宽（Q21）。</p>
+     */
+    private void enforceGuaranteeGate(Advance pending) {
+        if (!guaranteeGateEnabled) {
+            return;
+        }
+        Long dealerId = vehicleUnitRepository.findByVin(pending.getVin())
+                .map(VehicleUnit::getDealerId)
+                .orElse(null);
+        boolean relaxed = isRelaxedDealer(dealerId);
+        RoleSeparationPolicy.GuaranteeLookup.GuaranteeView view = guaranteeLookup.findByVin(pending.getVin());
+        RoleSeparationPolicy.GuaranteeDecision decision =
+                RoleSeparationPolicy.evaluateGuarantee(view, guaranteeGateEnabled, relaxed);
+        if (decision.blocked()) {
+            supportRepository.createAlert(dealerId, pending.getVin(), "GUARANTEE_PENDING", "HIGH",
+                    "B1 担保门禁阻断放款：" + decision.reason() + "（TODO(Q27)：判定源待业务确认，需强制工单补登）");
+            throw new BusinessException(ErrorCode.GUARANTEE_001, decision.reason());
+        }
+    }
+
+    /** 经销商是否在门禁放宽白名单内（Q21：可按经销商配置）。 */
+    private boolean isRelaxedDealer(Long dealerId) {
+        if (dealerId == null || relaxedDealers == null || relaxedDealers.isBlank()) {
+            return false;
+        }
+        for (String part : relaxedDealers.split(",")) {
+            if (part.trim().equals(String.valueOf(dealerId))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
