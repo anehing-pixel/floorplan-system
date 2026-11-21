@@ -414,6 +414,32 @@ public class VehicleUnit {
         this.riskLevel = "HIGH";
     }
 
+    /**
+     * T1-2（B4 盘点缺失改状态）：实地盘点"账有实无"时的升级动作。
+     *
+     * <p><b>为什么必须改状态而不只打标记</b>：修复前盘点缺失只置 {@code ootSuspected=true}
+     * 与差异次数，车辆状态仍是 {@link VehicleStatus#IN_STOCK}——而违约处置扫描作业
+     * {@code DEFAULT_DISPOSAL} 只扫 {@link VehicleStatus#OVERDUE}，
+     * 导致最严重的脱信信号永远进不了处置闭环（核查报告接缝三）。
+     * 本方法在库车直接转 OVERDUE，使其能被扫描作业捕获并自动开处置工单。</p>
+     *
+     * <p><b>边界</b>：仅 {@link VehicleStatus#IN_STOCK} 会被升级；
+     * 已售待还、逾期、处置中、终态车辆只累加差异标记，不重复流转。
+     * 重复调用在状态维度幂等，差异次数如实累加（每次盘点都是独立事实）。</p>
+     *
+     * @param auditDate 本次实地盘点日期
+     */
+    public void markInventoryMissing(LocalDate auditDate) {
+        this.ootSuspected = true;
+        this.auditMismatchCount = (this.auditMismatchCount == null ? 0 : this.auditMismatchCount) + 1;
+        this.lastAuditDate = auditDate;
+        if (this.status == VehicleStatus.IN_STOCK) {
+            transit(VehicleStatus.OVERDUE);
+            this.overdueDays = this.overdueDays == null ? 0 : this.overdueDays;
+            this.riskLevel = "HIGH";
+        }
+    }
+
     /** 违约升级：进入处置流程（车辆回收、残值处置、损失核算）。 */
     public void dispose() {
         transit(VehicleStatus.DISPOSING);
