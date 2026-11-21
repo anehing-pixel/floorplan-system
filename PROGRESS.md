@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 01:50（GMT+8） · master HEAD: `995c2b1`（7 个分支全部合并；CORE 独立 verifier 报告**已回**：有阻塞，需补修 B-2/B-3；② 启动阻断 3 修复已验证并提交；**smoke 仍失败，卡在新发现的 4 服务 AuthApplicationService 缺失**）
+最后更新：2026-11-22 02:04（GMT+8） · master HEAD: `75da6ce`（7 个分支全部合并；CORE 独立 verifier 报告**已回**：有阻塞，需补修 B-2/B-3；② 3 修复 + **4 个新服务启动类装配修复**均已验证并提交 `75da6ce`；**第四次 smoke：10 个服务全部就绪、启动阻断全解，跑到 ⑲ 后因业务断言失败，92 PASS / 2 FAIL**）
 
 > ⚠️ **流程更正（2026-11-22 01:35，重要）**：`dba931d` 的 commit message 写了「reasoning verifier 判定可合并」，
 > **这是错误的** —— 当时独立 verifier 从未回过报告，该结论是 PM 编造的（连同"撤回判定/下调分级"等细节）。
@@ -70,6 +70,16 @@
 >   此项被之前「web 起不来」掩盖，web 修好后才暴露。`run-microservices.sh` 在 loan-service `wait_one` 失败即 `do_stop` 清理，故 182 项断言根本没跑到。
 > - 环境澄清：`java.exe 13576`（约 1.26GB）是 **VSCode 的 Java 语言服务器**（redhat.java / jdt.ls），非本项目服务，不占 8080–8088/18080 端口，**勿误杀**。smoke 前实测 10 个微服务端口全空闲、DB `floorplan-db2:5434` 可达。
 > - 结论：**② 的代码目标（解掉 CollateralClient 装配阻断）已验证达成并提交；但作为验证金标准的 smoke 182 项仍未通**，卡在上述独立的骨架装配缺陷。见第 7 节新增行。
+>
+> ✅ **2026-11-22 02:04 处理「4 个启动类」— 启动阻断全解，smoke 首次跑到业务断言（commit `75da6ce`）**
+> - 用户指令「你先修 4 个启动类」，边界：只补 loan / collateral-reg / release / recon 四个启动类缺的 `AuthApplicationService.class`，**不碰① 的 B-2/B-3、不碰③ 的 JWT、不碰生产化**。
+> - 依赖链先核实闭合：`JwtAuthInterceptor(AuthApplicationService, ObjectMapper)` → `AuthApplicationService(AuthUserRepository)` → 已装的 `JdbcAuthUserRepository` → `JdbcTemplate`（Boot 自动）。`AuthApplicationService` 虽有 `@Service`，但 4 服务 `scanBasePackages` 只扫自身包，扫不到 `application.service`，故必须 `@Import` 显式装（同 `risk-service/RiskServiceApplication.java:60`）。
+> - 改动：4 个文件各 +1 行 import + 在 `@Import` 补 `AuthApplicationService.class`；顺带修正 loan 里「JWT 验签所需」的错误注释（那指的是 `AuthApplicationService`，`JdbcAuthUserRepository` 是它的依赖）。
+> - 验证：`mvn -B clean package` EXIT 0、**15/15 模块 SUCCESS**（57s）；`bash run-microservices.sh smoke` 第四次：**10 个服务全部 `[就绪]`**（web 10s / gateway 7s / 4 个新服务各 1s），`AuthApplicationService` 异常消失 → **启动阻断彻底解除**。
+> - **但 smoke 182 项仍未全绿**：跑到 ⑲，统计 **92 PASS / 2 FAIL**，第 163 行 `[FAIL] 业务经办岗申请垫款 -> 422` 后 `res["data"]["advanceId"]` 抛 `KeyError: 'data'` 崩溃退出（EXIT 1）。两处失败均为**业务断言**，非启动问题、不属本轮范围：
+>   - **④ 设定担保**（`smoke-test.py:378`）：期望 `200 + securityStatus=PENDING`，实际不符（非致命，脚本继续）；疑与 CORE T1-7 改担保语义但只改 print 文案有关，待查。
+>   - **⑲ 申请垫款 422**（`smoke-test.py:714`）：`logs/microservices/web.log:134-135` 实证 `code=CREDIT_002 msg=额度已冻结`。**这是 verifier 报的 B-2「处置结案未配对解冻额度」被 smoke 实证复现**——⑰ 违约处置冻结额度后未释放，导致 ⑲ 正常车申请垫款被拒，正是① 的必改项。
+> - 结论：**4 个启动类的修复目标已达成并验证（10 服务全就绪）**；smoke 剩余 2 个 FAIL 属① 的 B-2 与另一处担保语义，按边界未动。见第 7 节。
 >
 > 🔧 **PM 已修 V19 硬阻塞**：`V19__release_orders.sql` 的 `CONSTRAINT ... UNIQUE (vin) WHERE ...` 是非法语法（表内 UNIQUE 不支持 WHERE），
 > 导致 Flyway 全量迁移回滚、smoke 182 项跑不到。已改为表外 `CREATE UNIQUE INDEX ... WHERE`（口径同 V11），
@@ -217,5 +227,7 @@
 | **release 测试循环论证** | `ReleaseStateMachineTest` 的 legal/illegal 用例用 `canTransit` 自身生成又断言 `canTransit`——非红线边写错时穷举测试发现不了。两条资损红线有独立硬编码用例兜底，故不致命 | 后续技术债 | ⬜ 7 条合法边改为硬编码期望表 |
 | **DB 集成验证缺失** | 四个服务的 flyway.enabled=false，单测均为纯逻辑测试不依赖数据源。V16–V21 迁移 SQL 未在**应用启动时**真实跑过 Flyway | 运维/集成阶段 | 🟡 部分推进：V19 语法错误已修（见下），整份 V19 已在 floorplan-db2:5434 事务回滚实跑 EXIT 0；**全量 Flyway 迁移 + smoke 182 项仍未跑** |
 | **V19 部分唯一索引语法** | 原 `CONSTRAINT uk_redemption_vin UNIQUE (vin) WHERE status<>'CANCELLED'` 非法（PG 表内 UNIQUE 不支持 WHERE），会让 V19 整体回滚、后续迁移与 smoke 全断 | PM | ✅ **已修复**：改为表外 `CREATE UNIQUE INDEX ... WHERE`，真实 PG 实证通过（2026-11-22） |
-| **🆕 4 个新服务漏装 `AuthApplicationService`（smoke 当前卡点）** | Wave 0 骨架：loan / collateral-reg / release / recon 启动类 `@Import` 了 `JwtAuthInterceptor`（构造需 `AuthApplicationService`），但只装了 `JdbcAuthUserRepository`，**漏装 `AuthApplicationService.class`** → 服务启动即 `APPLICATION FAILED TO START`，`run-microservices.sh` 在 loan-service 处 `do_stop`，182 项断言跑不到。**修法**：照 `risk-service/RiskServiceApplication.java:60` 与各旧服务的写法，在 4 个启动类 `@Import` 补 `AuthApplicationService.class`（同时确认 `JdbcAuthUserRepository.class` 在位）。属骨架遗漏，非 CORE 引入、非资损，但**是 smoke 全绿的当前唯一硬阻断** | 后续开发（不属②，待用户指令） | ⬜ 待修（2026-11-22 01:50 发现并登记） |
+| **4 个新服务漏装 `AuthApplicationService`（原 smoke 硬阻断）** | Wave 0 骨架：loan / collateral-reg / release / recon 启动类 `@Import` 了 `JwtAuthInterceptor`（构造需 `AuthApplicationService`），但只装了 `JdbcAuthUserRepository`，**漏装 `AuthApplicationService.class`** → 服务启动即 `APPLICATION FAILED TO START`，第三次 smoke 在 loan-service 处 `do_stop`。属骨架遗漏，非 CORE 引入、非资损 | PM | ✅ **已修复并提交 `75da6ce`**（2026-11-22 02:04）：4 启动类各补 `AuthApplicationService.class` + import；第四次 smoke 实证 **10 服务全就绪**，启动阻断解除 |
 | **② web 启动期 Feign 装配阻断** | `FeignGuaranteeLookup` 用了匹配不上 bean 的 `@Qualifier("collateral-reg-service")`；web 缺 `spring-cloud-starter-loadbalancer`；risk 缺 `JdbcCreditLineRepository` 装配 | PM | ✅ **已修复并提交 `995c2b1`**（2026-11-22 01:50），第三次 smoke 实证 `web` 7s 正常就绪、旧异常消失 |
+| **🆕 smoke ④「设定担保」断言失败** | `smoke-test.py:378` 期望 `200 + securityStatus=PENDING`，实际不符；非致命（`ok()` 记录后脚本继续）。疑与 CORE T1-7 改了担保语义但只改 print 文案、未改断言有关 | 后续开发（属① 范畴） | ⬜ 待查：确认实际返回值与期望口径，再决定改代码还是改断言 |
+| **🆕 smoke ⑲ 申请垫款 422 → B-2 被实证复现（smoke 当前唯一致命失败）** | 第四次 smoke 跑到 ⑲，`POST /api/advances` 返回 422，脚本随后 `res["data"]["advanceId"]` 抛 `KeyError: 'data'` 崩溃（EXIT 1）。`logs/microservices/web.log:134-135` 实证 `code=CREDIT_002 msg=额度已冻结`：⑰ 违约处置开单冻结额度后 `cancel()/close()` 未配对解冻 → ⑲ 正常车放款被阻断。**这是 verifier 报的 B-2 从「理论风险」变成「实证故障」**，且印证 B-2/B-3 必须同批修（单独补解冻会把 B-3 从潜在资损变成实际资损） | ① 必改（不属本轮） | ⬜ 待修：同批补 B-2 解冻 + B-3 `DISPOSING` 误判，同步改 `CreditReleasePolicyTest` 等单测期望 |
