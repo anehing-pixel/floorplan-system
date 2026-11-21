@@ -58,6 +58,10 @@ public class BatchApplicationService {
     @Value("${floorplan.aging.reduce-ratio:0.10}")
     private BigDecimal agingReduceRatio;
 
+    /** T2-4（M6/G4）：库龄递减豁免 VIN 名单（逗号分隔），如主机厂调拨中/整备运输中的车。 */
+    @Value("${floorplan.aging.exempt-vins:}")
+    private String agingExemptVins;
+
     /**
      * 结算窗口宽限期（营业日）—— 贴合日本实务：
      * 售出后超结算窗口（预设 2 营业日）未还，先"告警但允许"；
@@ -191,7 +195,12 @@ public class BatchApplicationService {
         try {
             List<VehicleUnit> units = vehicleUnitRepository.findByStatus(VehicleStatus.IN_STOCK);
             int created = 0;
+            java.util.Set<String> exempt = parseExemptVins();
             for (VehicleUnit unit : units) {
+                // T2-4（M6/G4）：豁免车不生成递减计划（调拨中/已签约未交车/整备运输中）
+                if (AgingPlan.isExempt(unit.getVin(), exempt)) {
+                    continue;
+                }
                 if (unit.getAgingDays() == null || unit.getAgingDays() < agingFirstTriggerDays) {
                     continue;
                 }
@@ -222,6 +231,20 @@ public class BatchApplicationService {
             supportRepository.markBatchFinished("AGING_REDUCTION_DUE", bizDate, false, ex.getMessage());
             throw ex;
         }
+    }
+
+    /** 解析库龄递减豁免 VIN 名单（逗号分隔，配置为空时不豁免任何车）。 */
+    private java.util.Set<String> parseExemptVins() {
+        if (agingExemptVins == null || agingExemptVins.isBlank()) {
+            return java.util.Set.of();
+        }
+        java.util.Set<String> set = new java.util.LinkedHashSet<>();
+        for (String vin : agingExemptVins.split(",")) {
+            if (!vin.isBlank()) {
+                set.add(vin.trim());
+            }
+        }
+        return set;
     }
 
     /**

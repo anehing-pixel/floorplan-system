@@ -1,7 +1,10 @@
 package com.company.floorplan.domain.model;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Set;
 
 /**
  * 库龄递减还款计划。
@@ -130,5 +133,64 @@ public class AgingPlan {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    // ==================== T2-4（M6 库龄递减增强） ====================
+
+    /** 分层动作：监控 / 预警 / 强制还款 / 强制还款+冻结额度 / 转处置。 */
+    public enum AgingAction {
+        MONITOR, WARN, REPAY, FREEZE_REPAY, DISPOSE
+    }
+
+    /** 库龄分层定义（下界含、上界含；toDays=-1 表示无上限）。 */
+    public record Tier(int fromDays, int toDays, AgingAction action,
+                       BigDecimal ratio, int periodDays) {
+    }
+
+    /**
+     * 内置默认分层规则（G1：从单层到分层）。
+     *
+     * <p><b>兼容说明</b>：91–120 天档沿用现有 10% 与 30 天周期，与存量计划一致，
+     * 避免升级后既有 V1 计划的每期金额突变；更高档位按设计稿递增。
+     * 后台可配的 aging_rule_tiers 表需新增迁移（本次禁改迁移文件），故先内置。</p>
+     */
+    private static final List<Tier> TIERS = List.of(
+            new Tier(0, 60, AgingAction.MONITOR, BigDecimal.ZERO, 0),
+            new Tier(61, 90, AgingAction.WARN, BigDecimal.ZERO, 0),
+            new Tier(91, 120, AgingAction.REPAY, new BigDecimal("0.10"), 30),
+            new Tier(121, 180, AgingAction.REPAY, new BigDecimal("0.20"), 30),
+            new Tier(181, 270, AgingAction.FREEZE_REPAY, new BigDecimal("0.30"), 30),
+            new Tier(271, -1, AgingAction.DISPOSE, BigDecimal.ZERO, 0)
+    );
+
+    /** 按当前库龄命中分层。 */
+    public static Tier tierFor(int agingDays) {
+        for (Tier t : TIERS) {
+            if (agingDays >= t.fromDays() && (t.toDays() == -1 || agingDays <= t.toDays())) {
+                return t;
+            }
+        }
+        return TIERS.get(0);
+    }
+
+    /**
+     * G2：应还额动态重算——按当前分层比例 × 当前未偿本金，而不是生成计划时算死的金额。
+     *
+     * @param currentBalance 当前未偿本金
+     * @param agingDays      当前库龄
+     * @param fallbackAmount 非还款档位/无库龄时沿用的计划金额（兼容存量）
+     */
+    public static long currentAmount(long currentBalance, Integer agingDays, long fallbackAmount) {
+        Tier tier = tierFor(agingDays == null ? 0 : agingDays);
+        if (tier.action() == AgingAction.REPAY || tier.action() == AgingAction.FREEZE_REPAY) {
+            return BigDecimal.valueOf(currentBalance)
+                    .multiply(tier.ratio()).setScale(0, RoundingMode.HALF_UP).longValueExact();
+        }
+        return fallbackAmount;
+    }
+
+    /** G4：豁免判定——命中名单的车不生成递减计划（如主机厂调拨中、整备运输中）。 */
+    public static boolean isExempt(String vin, Set<String> exemptVins) {
+        return vin != null && exemptVins != null && exemptVins.contains(vin);
     }
 }
