@@ -510,7 +510,7 @@ def main():
     balance_after_buyback = res["data"]["principalBalance"]
 
     # ⑪ 提前部分还款（P1）
-    print("\n⑪ 提前部分还款：只扣本金，不解担保、不回补额度")
+    print("\n⑪ 提前部分还款：在库车主动提前还本金回补额度，但不解除担保（B1b）")
     partial_amount = 100_000
     status, res = call("POST", "/api/repayments/partial",
                        {"vin": VIN_REP, "principalAmount": partial_amount},

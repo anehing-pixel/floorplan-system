@@ -500,6 +500,81 @@ public class VehicleUnit {
         this.securityStatus = type == SecurityType.NONE ? SecurityStatus.NONE : SecurityStatus.PENDING;
     }
 
+    // ==================== T1-7（B1b）：额度回补判定（引入还款动因维度） ====================
+
+    /**
+     * 还款动因——区分"本金下降"背后的业务性质。
+     *
+     * <p>核查报告 §8.3 的关键结论：同样是在库车本金下降，
+     * 库龄递减（强制）不回补额度，主动提前还本金（自愿）应回补。
+     * 只看车辆状态会把两者混为一谈，故必须显式建模动因。</p>
+     */
+    public enum RepaymentCause {
+        /** 在库车主动提前还本金（自愿，资信良好信号）→ 应回补 */
+        VOLUNTARY_PREPAY,
+        /** 库龄递减强制还款（超期被逼，目的是压降敞口）→ 不回补 */
+        AGING_REDUCTION,
+        /** 逾期补款 → 不回补 */
+        OVERDUE_MAKEUP,
+        /** 整台结清（由 settle 用例处理，不经过 partialRepay） */
+        SETTLEMENT
+    }
+
+    /** 额度回补判定结果。 */
+    public record ReleaseDecision(boolean release, long amount, String reason) {
+        public static ReleaseDecision none(String reason) {
+            return new ReleaseDecision(false, 0L, reason);
+        }
+
+        public static ReleaseDecision full(long amount, String reason) {
+            return new ReleaseDecision(true, amount, reason);
+        }
+
+        public static ReleaseDecision partial(long amount, String reason) {
+            return new ReleaseDecision(true, amount, reason);
+        }
+    }
+
+    /**
+     * T1-7（B1b）额度回补判定：本金敞口下降 + 质押物释放/动因一致。
+     *
+     * <p><b>不误触发担保消灭</b>：本方法只返回"是否回补额度"，
+     * 绝不改变 securityStatus；担保的解除仍只由结清/赎回/处置完成用例驱动。</p>
+     *
+     * @param unit         还款车辆（判定时点，尚未扣本金）
+     * @param principalPaid 本次偿还本金
+     * @param cause        还款动因（必须由调用方显式传入，不得只按状态推断）
+     */
+    public static ReleaseDecision evaluateCreditRelease(VehicleUnit unit,
+                                                        long principalPaid,
+                                                        RepaymentCause cause) {
+        // C1：本金敞口是否真的下降
+        if (principalPaid <= 0) {
+            return ReleaseDecision.none("仅结息，本金未降，不回补");
+        }
+        // 动因维度：强制还款与自愿还款结论相反，必须先判
+        if (cause == RepaymentCause.AGING_REDUCTION) {
+            return ReleaseDecision.none("库龄递减为强制还款，目的是压降敞口，不回补额度");
+        }
+        if (cause == RepaymentCause.OVERDUE_MAKEUP) {
+            return ReleaseDecision.none("逾期补款不回补可用额度");
+        }
+        // C2：车辆已处置或担保已解除 → 质押物释放，全额回补
+        if (unit.getStatus() == VehicleStatus.DISPOSING || unit.getStatus() == VehicleStatus.CLOSED) {
+            return ReleaseDecision.full(principalPaid, "车辆已处置，担保消灭，本金敞口清零");
+        }
+        if (unit.getSecurityStatus() == SecurityStatus.RELEASED) {
+            return ReleaseDecision.full(principalPaid, "担保已解除，质押物已释放");
+        }
+        // 在库车主动提前还本金：本金敞口真实下降，且是资信良好信号 → 回补对应额度
+        if (unit.getStatus() == VehicleStatus.IN_STOCK && cause == RepaymentCause.VOLUNTARY_PREPAY) {
+            return ReleaseDecision.partial(principalPaid,
+                    "在库车主动提前还本金：本金敞口下降，回补对应额度");
+        }
+        // 已售未解押：质押物价值已归零且未解押，不回补
+        return ReleaseDecision.none("已售未解押，质押物未释放，不回补额度");
+    }
+
     /**
      * T1-3（M9 登记编号落库）：设定担保时回填线下登记编号。
      *
