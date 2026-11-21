@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-21 23:46（GMT+8） · master HEAD: `02a6045`
+最后更新：2026-11-21 23:58（GMT+8） · master HEAD: `9304989`
 
 ---
 
@@ -13,7 +13,7 @@
 1. **Wave 0（地基）已完成**：父 pom 预留模块、网关路由、启动脚本端口、契约接口、V21 outbox、4 个空服务骨架全部落地。
 2. **recon agent 已完整交付并合并进 master**：T3-2 对账清算服务，8 条规则（4 实现 + 4 占位），22 个单测通过，HANDOFF 齐全。
 3. **loan agent 也已完整交付并合并进 master**：T2-2 借据与贷后分层，五张表 + DPD + 仓储 + 应用服务 + Controller + HANDOFF + tag，编译打包通过。合并时把两份 `AGENT_TASK.md` 冲突拆成 `docs/AGENT_TASK-{recon,loan}.md` 归档。
-4. **collateral / release 已由 PM 派发，正在并行开发中**（23:45 启动）——醒来先查它们的最新提交/HANDOFF/tag，可能已完成。
+4. **collateral 已完整交付 + 独立验收通过 + 合并 master**（`9304989`）；**release 已交付，独立 verifier 审查中**——醒来查 release 验收结论，通过后合并。
 
 ## PM 监管机制（2026-11-21 新增）
 
@@ -47,7 +47,7 @@
 |---|---|---|---|---|---|---|---|
 | RECON | `agent/recon` | `../wt-recon` | ✅ 完整交付 | 9 | ✅ | `agent/recon-done` | ✅ 已合并 `f052e7c` |
 | LOAN | `agent/loan` | `../wt-loan` | ✅ 完整交付 | 9 | ✅ | `agent/loan-done` | ✅ 已合并 `e34d6ac` |
-| COLLATERAL | `agent/collateral` | `../wt-collateral` | 🔄 开发中（23:45 派发） | 动态 | ❌ | ❌ | ❌ 未合并 |
+| COLLATERAL | `agent/collateral` | `../wt-collateral` | ✅ 完整交付 + 独立验收通过 | 7 | ✅ | `agent/collateral-done` | ✅ 已合并 `9304989` |
 | RELEASE | `agent/release` | `../wt-release` | 🔄 开发中（23:45 派发） | 动态 | ❌ | ❌ | ❌ 未合并 |
 
 > 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox)。
