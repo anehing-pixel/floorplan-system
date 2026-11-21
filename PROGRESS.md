@@ -28,6 +28,20 @@
   `git -C ../wt-XXX log --oneline -3` 看提交、`git tag -l 'agent/*-done'` 看交付、`ls wt-XXX/*/HANDOFF.md` 看交付说明。
 - **PM 职责**：派发（写 docs/AGENT_TASK-<name>.md）→ 巡检越界 → 验收编译 → 三方合并 → 更新本文件。agent 不自行合并，也不改根目录文件。
 
+### 后续波次的三层验收规范（2026-11-21 确立，后续照此执行）
+
+> 验收质量 = 角色分离 + 详细 checklist + 异构模型。三者叠加，缺一不可。
+
+| 层次 | 解决什么 | 做法 |
+|---|---|---|
+| ① 流程性 | tag 落后 HEAD、越界、契约路径、工作区不干净 | **详细 checklist**——验收指令必须逐项列出检查点（查 tag 与 HEAD、git diff 对照写入集、契约字段逐一核对、自己重跑 mvn）。Wave 1 实证：collateral-verifier 靠 checklist 抓到 tag 落后 |
+| ② 设计性 | 循环论证测试、边界遗漏、并发竞态 | **换模型**——验收 agent 用 `model=reasoning`，开发保持默认。异构比同族互验更可信。Wave 1 实证：release-verifier 抓到测试循环论证 |
+| ③ 自证 | 自己写代码自己验、只测"我写出来的样子" | **角色分离**——开发 agent 与 verifier 是两个独立 agent；verifier 只读不改代码，问题上报 PM，由 PM 让开发 agent 修，保持写入集互斥 |
+
+- **派发模板**：开发 agent（默认 model）→ 自测通过 + HANDOFF + tag → PM git 核验 → verifier（`model=reasoning` + 逐项 checklist）→ PM 三方合并 → 更新本文件。
+- **注意区分**：派发 agent 时**可以**指定 model（`default`/`lite`/`reasoning`/具体 ID）；定时任务 automation **没有** model 字段。两者不是一回事。
+- **模型受限时的降级**：若 reasoning 不可用，退回默认 model，但 checklist 必须保留——checklist 才是抓到①类问题主力，换模型只是②类的加成。
+
 ---
 
 ## 1. 全局环境事实（别再踩坑）
