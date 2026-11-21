@@ -121,3 +121,13 @@
 | Q9/Q10 | 出库指令接收方是谁？有无外部 WMS？ | T2-9（不挡建表，挡对接） |
 | Q14 | M1/M2/M3 按自然日还是营业日？ | T2-1 |
 | R5–R8 | 对账规则口径 | recon 占位规则补全 |
+
+---
+
+## 7. 集成 TODO（代码里留了接缝，合并后必须处理）
+
+| 项 | 问题 | 处理方 | 状态 |
+|---|---|---|---|
+| **Feign JWT 传播** | `WebMvcConfig` 拦截全部 `/api/**` 且无放行。core 经 Feign 调 `GET /api/collateral-reg/registration` 时若不传播 `Authorization`，会被 401 挡下 → 走 NONE fallback → 拒付。**必须在 core 侧加 Feign 请求拦截器透传 JWT**，否则担保门禁形同虚设 | core agent（未派发） | ⬜ 待处理 |
+| **V18 表名改名** | V10 第185行已建 `collateral_registration_items`（batch_id/ledger_id/vin，批次↔车辆明细），任务卡要求的"登记流水/历史"同名会撞。PM 已批准改名为 `collateral_registration_history`，理由写进 V18 迁移注释与 collateral HANDOFF | collateral agent | ✅ 已批准，实现中 |
+| **独立验收 agent** | 开发 agent 自测有"自证"盲区。两个 agent 交付后派一个**只读** verifier，验状态机非法迁移 / CollateralClient 契约对齐 / V18 越界。**verifier 不改代码**，问题上报 PM，由 PM 让开发 agent 修——保持写入集互斥 | PM | ⬜ 待两个 agent 交付后派发 |
