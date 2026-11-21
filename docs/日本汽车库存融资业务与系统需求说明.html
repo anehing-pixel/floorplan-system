@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>汽车库存融资（Floorplan）业务与系统需求说明</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#ffffff; --ink:#1f2937; --ink2:#4b5563; --ink3:#6b7280;
+    --line:#e5e7eb; --brand:#1a4d8f; --brand2:#2d6fc4; --soft:#eaf1fa;
+    --red:#d43a3a; --redbg:#fdeeee; --green:#0e9a6a; --greenbg:#e8f6f0;
+    --amber:#b45309; --amberbg:#fdf4e6;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.75;font-size:15px;}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 64px;}
+  header{background:linear-gradient(135deg,#1a4d8f,#2d6fc4);color:#fff;border-radius:14px;padding:30px 32px;margin-bottom:22px;}
+  header h1{margin:0 0 8px;font-size:26px;font-weight:700;letter-spacing:.5px;}
+  header p{margin:0;opacity:.92;font-size:15px;}
+  .meta{margin-top:14px;font-size:13px;opacity:.8;}
+  h2{font-size:20px;margin:34px 0 14px;padding-left:12px;border-left:5px solid var(--brand);}
+  h3{font-size:16px;margin:22px 0 10px;color:var(--brand);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:16px;}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:6px;}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+  .kpi .lb{font-size:12px;color:var(--ink3);letter-spacing:.5px;}
+  .kpi .vl{font-size:22px;font-weight:700;color:var(--brand);margin-top:4px;}
+  .kpi .sub{font-size:12px;color:var(--ink3);margin-top:4px;line-height:1.5;}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;font-size:14px;margin:10px 0 4px;}
+  th{background:#f0f4f9;color:var(--brand);text-align:left;padding:11px 13px;font-weight:600;
+    border-bottom:1px solid var(--line);white-space:nowrap;}
+  td{padding:11px 13px;border-bottom:1px solid #f1f3f6;vertical-align:top;color:var(--ink2);}
+  tr:last-child td{border-bottom:none;}
+  td strong{color:var(--ink);}
+  .tag{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap;}
+  .t-red{background:var(--redbg);color:var(--red);}
+  .t-green{background:var(--greenbg);color:var(--green);}
+  .t-amber{background:var(--amberbg);color:var(--amber);}
+  .t-blue{background:var(--soft);color:var(--brand);}
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;padding:18px 14px;}
+  .step{flex:1 1 150px;min-width:140px;position:relative;padding:6px 12px;text-align:center;}
+  .step .no{width:28px;height:28px;line-height:28px;border-radius:50%;background:var(--brand);color:#fff;
+    font-size:13px;font-weight:700;margin:0 auto 8px;}
+  .step .tt{font-size:13px;font-weight:600;color:var(--ink);}
+  .step .dd{font-size:12px;color:var(--ink3);margin-top:4px;line-height:1.5;}
+  .step:not(:last-child):after{content:"";position:absolute;right:-4px;top:20px;width:8px;height:8px;
+    border-top:2px solid #c3d2e4;border-right:2px solid #c3d2e4;transform:rotate(45deg);}
+  .note{background:var(--soft);border-left:4px solid var(--brand2);border-radius:0 8px 8px 0;
+    padding:12px 16px;font-size:14px;color:var(--ink2);margin:12px 0;}
+  .warn{background:var(--redbg);border-left:4px solid var(--red);border-radius:0 8px 8px 0;
+    padding:12px 16px;font-size:14px;color:var(--ink2);margin:12px 0;}
+  ul{margin:8px 0 4px;padding-left:20px;color:var(--ink2);}
+  li{margin-bottom:6px;}
+  .mech{border:1px solid var(--line);border-radius:11px;padding:16px 18px;background:var(--card);}
+  .mech h4{margin:0 0 8px;font-size:15px;color:var(--ink);}
+  .mech p{margin:0;font-size:13.5px;color:var(--ink2);}
+  .mech .en{font-size:12px;color:var(--ink3);display:block;margin-bottom:6px;}
+  .calc{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:12px 14px;
+    font-size:13.5px;color:var(--ink2);margin-top:10px;}
+  .calc code{background:#eef2f7;padding:1px 6px;border-radius:4px;color:var(--brand);font-size:13px;}
+  footer{margin-top:34px;padding:16px 20px;background:#eceff3;border-radius:10px;
+    font-size:12.5px;color:var(--ink3);line-height:1.7;}
+  @media(max-width:860px){.grid4,.grid3,.grid2{grid-template-columns:1fr 1fr;}}
+  @media(max-width:560px){.grid4,.grid3,.grid2{grid-template-columns:1fr;}.step:not(:last-child):after{display:none;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>汽车库存融资（Floorplan）业务与系统需求说明</h1>
+  <p>车商以展厅库存车辆作抵押，向金融公司获取循环周转资金；卖掉一台，偿还一台。日本汽车金融中"以车为抵押放款"真正有规模的一块。</p>
+  <div class="meta">编制日期：2026-10-25　|　适用主体：信用销售公司 / 厂家金融 / 银行·信用金库　|　借款人：新车经销商、二手车销售店（法人）</div>
+</header>
+
+<h2>速览</h2>
+<div class="grid4">
+  <div class="kpi"><div class="lb">业务性质</div><div class="vl">B2B 循环授信</div><div class="sub">不是一次性贷款，是随借随还的额度</div></div>
+  <div class="kpi"><div class="lb">核算粒度</div><div class="vl">单台（VIN）</div><div class="sub">每一台车独立建账、独立计息</div></div>
+  <div class="kpi"><div class="lb">还款触发</div><div class="vl">售出即还</div><div class="sub">零售成交后 24–72 小时内必须结清该台垫款</div></div>
+  <div class="kpi"><div class="lb">头号风险</div><div class="vl" style="color:var(--red)">脱信销售</div><div class="sub">车卖了却不还款，是行业最严重的违约</div></div>
+</div>
+
+<h2>一、业务本质：为什么车商必须用它</h2>
+<div class="card">
+  <p>对绝大多数企业来说，库存只是资产负债表里的一项；但对车商来说，<strong>库存就是整张资产负债表</strong>。一个摆放 40 台、均价 20 万的展厅，意味着 800 万资金露天停放，每一台都要等到有人开走才能回笼。没有车商能靠自有现金支撑这种周转。</p>
+  <p>库存融资解决的正是这个错配：<strong>收车要立刻付钱，卖车要几周甚至几个月后才收钱</strong>。金融公司替车商把钱先垫给上游（厂家、批发拍卖、批发商），车停在车商场地里作为担保，卖掉后立刻归还该台的垫款，额度随之释放，可以再去收下一台。</p>
+  <div class="note"><strong>关键判断：</strong>这是标准、成熟、有真实规模的 B2B 金融业务，客户是法人不是个人。相比日本个人端"车抵押借款"的边缘长尾市场，这块业务的单客金额、系统付费意愿、流程复杂度都高得多，是做系统更值得投入的方向。</div>
+</div>
+
+<h2>二、资金与车辆的流转闭环</h2>
+<div class="flow">
+  <div class="step"><div class="no">1</div><div class="tt">授予额度</div><div class="dd">金融公司核定循环授信上限，按车商资本、周转率、经营年限定档</div></div>
+  <div class="step"><div class="no">2</div><div class="tt">车商收车</div><div class="dd">在批发拍卖或厂家渠道中标/下单，提交该台车的融资申请</div></div>
+  <div class="step"><div class="no">3</div><div class="tt">垫款支付</div><div class="dd">金融公司<strong>直接付给上游卖方</strong>，不经过车商账户，杜绝挪用</div></div>
+  <div class="step"><div class="no">4</div><div class="tt">设定担保</div><div class="dd">该台车纳入担保范围（日本实务多为所有权保留登记 / 让与担保）</div></div>
+  <div class="step"><div class="no">5</div><div class="tt">在库计息</div><div class="dd">按日计息，库龄越长成本越高，开始累计库龄天数</div></div>
+  <div class="step"><div class="no">6</div><div class="tt">零售成交</div><div class="dd">车卖给终端客户，触发该台的立即还款义务</div></div>
+  <div class="step"><div class="no">7</div><div class="tt">结清释放</div><div class="dd">还款后解除担保、释放额度，车商可继续收下一台</div></div>
+</div>
+
+<h2>三、三方角色与系统边界</h2>
+<table>
+  <tr><th style="width:14%">角色</th><th style="width:30%">要什么</th><th style="width:30%">怕什么</th><th>系统要给他什么</th></tr>
+  <tr>
+    <td><strong>金融公司</strong><br><span class="tag t-blue">系统主用户</span></td>
+    <td>担保物真实存在、账实相符、坏帐可控、资金周转效率</td>
+    <td>脱信销售（卖车不还钱）、车辆残值低于垫款、车商倒闭</td>
+    <td>额度管理、单台台账、计息引擎、盘点核查、风险预警、处置流程</td>
+  </tr>
+  <tr>
+    <td><strong>车商</strong><br><span class="tag t-blue">借款方</span></td>
+    <td>收车快、额度够用、还款操作省事、利息看得懂</td>
+    <td>额度被突然冻结、库龄减贷抽走现金流、盘点出问题</td>
+    <td>自助入口：在线申请垫款、一键还款、在库明细、利息试算、额度余额</td>
+  </tr>
+  <tr>
+    <td><strong>盘点/审计方</strong><br><span class="tag t-blue">风控执行</span></td>
+    <td>快速核完一个场地、证据留痕、差异可追溯</td>
+    <td>盘点数据与台账对不上、无法证明车辆当时在不在场</td>
+    <td>移动端盘点 App：扫码核对 VIN、拍照定位留证、差异即时上报</td>
+  </tr>
+</table>
+
+<h2>四、五大核心机制（系统的骨架）</h2>
+<div class="grid3" style="margin-bottom:14px;">
+  <div class="mech">
+    <h4>1. 单台独立核算</h4>
+    <span class="en">Unit-level accounting</span>
+    <p>每一台车一条独立账目，以车架号（VIN）为主键，记录垫款金额、起息日、利率、库龄、状态。绝不能只做一个总额。</p>
+  </div>
+  <div class="mech">
+    <h4>2. 售出即还</h4>
+    <span class="en">Pay-as-sold</span>
+    <p>零售成交即触发该台的还款义务，通常在 24–72 小时的结算窗口内必须付清。逾期哪怕一次，就可能启动违约审查。</p>
+  </div>
+  <div class="mech">
+    <h4>3. 库龄递减还款</h4>
+    <span class="en">Curtailment</span>
+    <p>车在库超过约定天数（常见 60 / 90 / 120 天）仍未售出，强制车商偿还一部分本金，防止车辆贬值到跌破垫款余额。典型为原始垫款的一定比例按周期递减。</p>
+  </div>
+</div>
+<div class="grid2">
+  <div class="mech">
+    <h4>4. 实地盘点核查</h4>
+    <span class="en">Floor check / Audit</span>
+    <p>金融公司定期派人到车商场地，逐台扫描车架号，核对"台账上有融资的车"是否真的还在场。差异（车不在场、账上没有的车）必须当场记录并升级处理。这是防止脱信销售的核心手段。</p>
+  </div>
+  <div class="mech">
+    <h4>5. 脱信销售（最严重违约）</h4>
+    <span class="en">Out of Trust (OOT)</span>
+    <p>车已经卖给终端客户，但车商没有按时归还该台的垫款——等于把担保物私自变现。一旦发现，金融公司可冻结甚至收回整个额度，对车商是致命打击。<strong>系统必须把"卖出未还款"做成最高优先级告警。</strong></p>
+  </div>
+</div>
+
+<div class="warn"><strong>为什么第 5 条决定系统成败：</strong>库存融资的全部风控逻辑，本质上都是在和"车商卖了车却不上报"这件事对抗。因此系统里任何一个能交叉验证"这台车已经不在车商手里"的信号，都极其有价值——比如车辆登记状态变更、保险退保、保养记录出现在别处、车商挂牌平台上的车辆下架、终端客户贷款申请记录等。</div>
+
+<h2>五、计息与成本模型</h2>
+<div class="card">
+  <ul>
+    <li><strong>计息方式：</strong>按日计息，未售出期间持续累计；售出结清即停止。利息是车商最敏感的成本项。</li>
+    <li><strong>定价结构：</strong>通常采用"基准利率 + 加点"的浮动方式，加点幅度取决于车商的资本实力、周转表现和信用风险；另可叠加单台手续费。</li>
+    <li><strong>成本驱动：</strong>利息是时间成本。在库 60 天的利息是 30 天的两倍，库龄 90 天以上的车，单台持有成本会明显侵蚀毛利，这也是"周转天数"成为车商第一指标的原因。</li>
+  </ul>
+  <div class="calc">
+    <strong>计息公式（示意，非报价）：</strong><br>
+    单台日息 = <code>未偿本金 × 年利率 ÷ 365</code>；累计利息 = <code>Σ 每日未偿本金 × 日利率</code><br>
+    示例：垫款 100 万，年利率 5%，在库 60 天 → 约 <code>100万 × 5% × 60/365 ≈ 8,219</code>。<br>
+    <span style="color:var(--ink3)">实际利率水平因业者、车商资质、市场利率环境而异，日本本地的具体区间需向目标客户或公开资料核实，不要直接套用海外数值。</span>
+  </div>
+</div>
+
+<h2>六、日本本地的特殊性（与美国做法对比）</h2>
+<table>
+  <tr><th style="width:18%">维度</th><th style="width:41%">美国常见做法</th><th>日本本地结构</th></tr>
+  <tr>
+    <td><strong>担保公示</strong></td>
+    <td>向州政府提交 UCC-1 融资声明，对库存设定担保权益；车辆为待售商品，不适用个人车辆的产权登记公示规则</td>
+    <td>没有统一的 UCC 式登记。实务以<strong>所有权保留</strong>（车辆登记证上所有者栏登记为金融公司或销售方）、<strong>让与担保</strong>，以及动产·债权让渡登记制度的登记为主要手段</td>
+  </tr>
+  <tr>
+    <td><strong>放款对象</strong></td>
+    <td>银行、信用合作社、厂家金融（如福特信贷、丰田金融）、专业批发贷款商</td>
+    <td>信用销售（分期）公司、厂家金融公司、地方银行与信用金库；新车与二手车渠道的玩家结构不同</td>
+  </tr>
+  <tr>
+    <td><strong>收车渠道</strong></td>
+    <td>厂家直供 + 大型批发拍卖</td>
+    <td>二手车高度依赖<strong>批发拍卖市场</strong>（车商主要收车来源），垫款常需与拍卖结算节奏对齐</td>
+  </tr>
+  <tr>
+    <td><strong>法律框架</strong></td>
+    <td>统一商法典第 9 编</td>
+    <td>民法典下的所有权保留与让与担保（以判例法为主）、《分期付款销售法》、涉及放贷时的《放贷业法》</td>
+  </tr>
+</table>
+<div class="note"><strong>对系统的直接影响：</strong>日本没有"一纸登记覆盖全部库存"的机制，担保是<strong>逐台</strong>体现在车辆登记上的。因此系统必须能把"某一台车的登记状态"作为一等公民字段管理——登记编号、所有者名义、设定日、解除日，并支持与登记事务的文书流转衔接。</div>
+
+<h2>七、系统功能模块清单</h2>
+<table>
+  <tr><th style="width:16%">模块</th><th style="width:34%">关键功能</th><th style="width:12%">优先级</th><th>要点</th></tr>
+  <tr><td><strong>客户与额度</strong></td><td>车商准入、授信评级、循环额度设定、冻结/恢复、多产品配置</td><td><span class="tag t-red">P0</span></td><td>额度要支持按车商、按品牌、按车辆类型分档；冻结动作必须可追溯、可审计</td></tr>
+  <tr><td><strong>单台台账</strong></td><td>以车架号为主键的车辆单元账：垫款、起息、库龄、状态机、担保登记</td><td><span class="tag t-red">P0</span></td><td>状态机：申请中 → 已垫款 → 在库 → 已售待还 → 已结清 / 逾期 / 处置中</td></tr>
+  <tr><td><strong>垫款支付</strong></td><td>申请受理、自动校验额度、直付上游卖方、支付凭证</td><td><span class="tag t-red">P0</span></td><td>钱必须直付上游，不经车商账户，这是防挪用的底线设计</td></tr>
+  <tr><td><strong>计息引擎</strong></td><td>按日计息、利率档位、浮动利率调整、账单生成、滞纳金</td><td><span class="tag t-red">P0</span></td><td>必须支持利率变更的历史追溯与重算，账单要有完整计算明细可供对质</td></tr>
+  <tr><td><strong>还款与核销</strong></td><td>单台结清、部分还款、库龄递减还款、自动匹配、额度回补</td><td><span class="tag t-red">P0</span></td><td>还款要能自动匹配到具体车架号；结清立即触发额度可用余额回补</td></tr>
+  <tr><td><strong>库龄与递减管理</strong></td><td>库龄自动累计、递减还款到期提醒、自动生成应付计划</td><td><span class="tag t-amber">P1</span></td><td>规则要可按车商/车型配置阈值，不能硬编码</td></tr>
+  <tr><td><strong>盘点核查</strong></td><td>移动端扫码核对、拍照与定位留证、差异上报、盘点报告</td><td><span class="tag t-amber">P1</span></td><td>盘点结果要能直接触发风控工单；证据链要防篡改</td></tr>
+  <tr><td><strong>风险预警</strong></td><td>脱信销售识别、逾期分级、车辆残值重估、异常信号聚合</td><td><span class="tag t-red">P0</span></td><td>这是整套系统的价值核心，见第八节</td></tr>
+  <tr><td><strong>处置与催收</strong></td><td>违约工单、车辆回收、残值处置、损失核算、法律程序留痕</td><td><span class="tag t-amber">P1</span></td><td>处置全流程留痕，日本对催收行为有严格规范，话术与时点要可配置、可审计</td></tr>
+  <tr><td><strong>车商自助端</strong></td><td>在线申请、在库明细、利息试算、还款、额度余额、对账单</td><td><span class="tag t-green">P2</span></td><td>能显著降低运营人力，是差异化卖点</td></tr>
+  <tr><td><strong>对接集成</strong></td><td>批发拍卖结算、核心账务系统、征信机构、车辆登记数据、支付通道</td><td><span class="tag t-amber">P1</span></td><td>日本落地的关键难点在这里，接口与数据口径要早做调研</td></tr>
+  <tr><td><strong>报表与监管</strong></td><td>资产组合报表、逾期与不良率、审计报告导出</td><td><span class="tag t-green">P2</span></td><td>法人金融业务，审计留痕要求高于个人业务</td></tr>
+</table>
+
+<h2>八、核心数据模型：单台台账应有哪些字段</h2>
+<table>
+  <tr><th style="width:22%">字段组</th><th>字段</th></tr>
+  <tr><td><strong>车辆标识</strong></td><td>车架号（VIN）、品牌、车型、年款、里程、车身颜色、排量/动力类型、车辆类别（新车/二手车/商用车）</td></tr>
+  <tr><td><strong>交易信息</strong></td><td>上游卖方、采购渠道（厂家/批发拍卖/批发商/置换）、采购价、垫款金额、垫款比例、垫款日</td></tr>
+  <tr><td><strong>担保信息</strong></td><td>担保方式（所有权保留 / 让与担保 / 其他）、登记编号、所有者名义、设定日、解除日、登记文书状态</td></tr>
+  <tr><td><strong>账务信息</strong></td><td>本金、已还本金、当前余额、年利率、利率类型、起息日、累计利息、滞纳金、最后计息日</td></tr>
+  <tr><td><strong>生命周期</strong></td><td>当前状态、入库日、售出日、应还款到期日、实际结清日、库龄天数、周转天数</td></tr>
+  <tr><td><strong>库龄递减</strong></td><td>递减规则版本、首次触发日、各期应还金额、已还期数、下一期到期日</td></tr>
+  <tr><td><strong>风险标记</strong></td><td>逾期天数、风险等级、脱信销售嫌疑标记、残值重估价、最后盘点日、盘点差异次数</td></tr>
+  <tr><td><strong>处置信息</strong></td><td>处置方式、回收日、处置价、损失金额、法律程序编号</td></tr>
+</table>
+
+<h2>九、风控规则引擎：必须内置的规则</h2>
+<div class="card">
+  <ul>
+    <li><strong>额度占用校验：</strong>新垫款申请必须实时校验"可用余额 = 总额度 − 在库未偿本金 − 冻结部分"，超额直接拒绝。</li>
+    <li><strong>结算窗口监控：</strong>车辆状态转为"已售"后开始倒计时，超过约定窗口未还款 → 自动升级为逾期并告警。</li>
+    <li><strong>库龄阈值：</strong>按配置天数触发递减还款；连续多期未付 → 触发额度冻结评估。</li>
+    <li><strong>脱信销售交叉验证：</strong>聚合外部信号（登记状态变更、保险、保养、挂牌平台下架、终端贷款申请）与台账比对，命中即最高优先级告警。</li>
+    <li><strong>残值保护：</strong>定期按市场行情重估在库车辆，当"垫款余额 / 当前残值"超过阈值时要求追加还款或追加担保。</li>
+    <li><strong>集中度限制：</strong>单品牌、单车型的占用比例上限，防止车商把额度压在单一滞销车型上。</li>
+    <li><strong>盘点差异升级：</strong>盘点发现的账实不符，按差异台数与金额自动分级，达到阈值即触发冻结流程。</li>
+  </ul>
+</div>
+
+<h2>十、落地前必须确认的事项</h2>
+<div class="card">
+  <ul>
+    <li><strong>你服务的到底是哪一方？</strong>是给金融公司做内部系统，还是给车商做管理端，还是做连接双方的平台？这决定数据主权和权限模型的根本设计。</li>
+    <li><strong>新车渠道还是二手车渠道？</strong>新车由厂家金融主导、流程标准化程度高；二手车高度依赖批发拍卖、车况非标、估值难，两套系统的复杂度差一个量级。</li>
+    <li><strong>目标客户的具体业务规则。</strong>库龄递减的天数与比例、结算窗口时长、利率结构，各家差异很大，必须从真实客户处取得，不能照搬海外惯例。</li>
+    <li><strong>日本本地的接口现实。</strong>批发拍卖结算、车辆登记数据、征信机构、银行支付通道，哪些有可用接口、哪些只能人工，直接决定系统的自动化程度与成本。</li>
+    <li><strong>合规审查。</strong>涉及放贷与担保时，务必请日本当地的法律与合规专业人士确认业务边界与系统留痕要求。</li>
+  </ul>
+</div>
+
+<footer>
+  <strong>说明与免责</strong><br>
+  1. 本文档的业务机理部分基于国际通行的库存融资（Floorplan）行业实践整理；涉及日本本地的法律结构、担保方式、参与者与业务参数，已尽可能按日本实际结构说明，但<strong>具体产品名称、利率水平、库龄阈值等需向目标客户或官方资料核实</strong>，不作为可直接引用的事实数据。<br>
+  2. 文中所有金额与利率计算均为<strong>公式示例</strong>，用于说明计息逻辑，不构成任何报价或市场行情。<br>
+  3. 涉及放贷业、担保设定、催收处置的部分，须经日本当地法律与合规专业人士确认后方可落地。
+</footer>
+
+</div>
+</body>
+</html>

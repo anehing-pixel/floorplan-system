@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.company</groupId>
+    <artifactId>floorplan-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>floorplan-infrastructure</artifactId>
+  <name>Floorplan :: Infrastructure</name>
+  <description>基础设施层：持久化、营业日历、Flyway 迁移脚本</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.company</groupId>
+      <artifactId>floorplan-domain</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <!-- Redis：仅用于分布式互斥锁（BANK_FETCH 等"临界区含外部调用"的作业）。
+         默认 floorplan.lock.provider=memory，此时 Redis 不会被使用、也不会建立连接；
+         多实例部署切到 redis 即可，业务代码一行不用改（只认 DistributedLock 接口）。
+         注意：额度/车辆/结清三处**不用**它——那里的互斥必须与数据同事务提交。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <!-- AWS SDK v2：S3 附件存储（ADR-007 决策十）。
+         只用 s3 一个模块（预签名器 S3Presigner 就在该模块内，无独立 artifact）。
+         凭证走默认凭证链（环境变量/实例 Profile），代码里不写 AccessKey。 -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+      <version>2.25.60</version>
+    </dependency>
+  </dependencies>
+</project>

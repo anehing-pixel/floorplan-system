@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · 库存融资核心系统</title>
+<link rel="icon" href="data:,">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1a2f5e 0%, #2a4a8f 60%, #3a5aa8 100%);
+  }
+  .login-card {
+    width: 380px; background: #fff; border-radius: 12px;
+    padding: 40px 36px 32px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+  }
+  .brand { text-align: center; margin-bottom: 28px; }
+  .brand .mark {
+    width: 46px; height: 46px; border-radius: 11px; margin: 0 auto 14px;
+    background: linear-gradient(135deg, #3d6fd6, #1a2f5e);
+    display: grid; place-items: center;
+    color: #fff; font-size: 17px; font-weight: 700; letter-spacing: .5px;
+    box-shadow: 0 6px 18px rgba(26,47,94,.28);
+  }
+  .brand h1 { font-size: 19px; color: #1a2f5e; letter-spacing: 1px; }
+  .brand p  { font-size: 11.5px; color: #8a94a6; margin-top: 6px; letter-spacing: .3px; }
+  .brand .flow {
+    margin-top: 14px; font-size: 10.5px; color: #9aa5b5; line-height: 1.8;
+    padding-top: 12px; border-top: 1px dashed #e2e7ef;
+  }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 13px; color: #4a5568; margin-bottom: 6px; }
+  .field input {
+    width: 100%; height: 42px; padding: 0 12px;
+    border: 1px solid #d5dbe5; border-radius: 8px;
+    font-size: 14px; outline: none; transition: border-color .2s;
+  }
+  .field input:focus { border-color: #2a4a8f; }
+  .btn-login {
+    width: 100%; height: 44px; margin-top: 8px;
+    background: #2a4a8f; color: #fff; border: none; border-radius: 8px;
+    font-size: 15px; cursor: pointer; transition: background .2s;
+  }
+  .btn-login:hover  { background: #1a2f5e; }
+  .btn-login:disabled { background: #9aa8c4; cursor: not-allowed; }
+  .error-box {
+    display: none; margin-bottom: 16px; padding: 10px 12px;
+    background: #fdeaea; border: 1px solid #f5b5b5; border-radius: 8px;
+    color: #c0392b; font-size: 13px; line-height: 1.5;
+  }
+  .hint { margin-top: 20px; padding-top: 16px; border-top: 1px dashed #e2e7ef;
+          font-size: 12px; color: #9aa5b5; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="brand">
+      <div class="mark">FP</div>
+      <h1>库存融资核心系统</h1>
+      <p>Floorplan Financing System · 管理控制台</p>
+      <div class="flow">
+        授信准入 → 验车确权 → 收车放款 → 担保监管 → 在库计息 → 库龄递减还款<br>
+        → 零售赎车 → 解押出库 → 额度恢复结清 → 违约处置 → 额度年审
+      </div>
+    </div>
+
+    <div class="error-box" id="errorBox"></div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="username">登录名</label>
+        <input type="text" id="username" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input type="password" id="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn-login" id="btnLogin">登 录</button>
+    </form>
+
+    <div class="hint">开发环境种子账号：管理员 admin / admin123 · 普通操作员 operator / operator123</div>
+  </div>
+
+<script>
+// 页面统一从网关 18080 进入：从 18080 打开时走同源相对路径（无跨域）；
+// 从预览面板/其他端口/file:// 打开时，回指网关地址（网关已放开开发期 CORS）。
+// 注意：8080 上的登录 Controller 已摘除，必须走网关切到 auth-service。
+const API_BASE = location.port === '18080' ? '' : 'http://127.0.0.1:18080';
+
+function showError(msg) {
+  const box = document.getElementById('errorBox');
+  box.textContent = msg;
+  box.style.display = 'block';
+}
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btnLogin');
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+
+  btn.disabled = true;
+  btn.textContent = '登录中…';
+  document.getElementById('errorBox').style.display = 'none';
+
+  try {
+    const resp = await fetch(API_BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+
+    const body = await resp.json();
+
+    // 后端统一响应结构是 {code:"OK", data, message}（无 success 字段）：
+    // 成功 = HTTP 2xx 且 code === 'OK'，其余一律按失败展示
+    if (!resp.ok || body.code !== 'OK') {
+      const msg = (body && (body.message || body.code))
+        || ('登录失败（HTTP ' + resp.status + '）');
+      showError(msg);
+      return;   // finally 会恢复按钮
+    }
+
+    // 登录成功：令牌存 localStorage，跳转主页
+    localStorage.setItem('fp_token', body.data.token);
+    localStorage.setItem('fp_username', username);
+    // 角色同时存在令牌载荷与本地存储里：前者是权威来源（后端签名保护的），
+    // 后者只是给页面快速读取用（FP.auth 会优先用令牌载荷）。
+    localStorage.setItem('fp_role', body.data.role || 'READONLY_USER');
+    // 一人多岗：主角色之外还有兼岗，登录后一并记住，
+    // 便于前端按权限点隐藏无权操作入口（后端仍会强制校验）。
+    try {
+      localStorage.setItem('fp_roles', JSON.stringify(body.data.roles || []));
+      localStorage.setItem('fp_perms', JSON.stringify(body.data.permissions || []));
+      localStorage.setItem('fp_role_labels', JSON.stringify(body.data.roleLabels || []));
+    } catch (e) { /* 隐私模式写不了 localStorage，忽略 */ }
+    location.href = 'index.html';
+  } catch (err) {
+    // 网络层失败：服务没起、端口不对、代理拦截（本项目踩过 502 的坑）
+    showError('无法连接网关（127.0.0.1:18080）。请确认：① 已执行 bash run-microservices.sh start 启动全部服务；'
+      + '② 在浏览器地址栏访问 http://127.0.0.1:18080/login.html；'
+      + '③ 若走系统代理，请把 localhost/127.0.0.1 加入例外');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登 录';
+  }
+});
+
+// 已登录过就直接进主页（可选：想强制重新登录就注释掉这两行）
+if (localStorage.getItem('fp_token')) {
+  location.href = 'index.html';
+}
+</script>
+</body>
+</html>

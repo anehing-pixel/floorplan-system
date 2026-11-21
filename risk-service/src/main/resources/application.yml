@@ -1,0 +1,35 @@
+server:
+  port: 8084                         # web=8080, auth=8081, bank=8082, credit=8083, risk=8084
+
+spring:
+  application:
+    name: risk-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/floorplan}
+    username: ${SPRING_DATASOURCE_USERNAME:floorplan}
+    password: ${SPRING_DATASOURCE_PASSWORD:floorplan}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  flyway:
+    enabled: false                   # 迁移由主应用统一管理
+  jackson:
+    time-zone: Asia/Tokyo
+    default-property-inclusion: non_null
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        fail-fast: false
+
+floorplan:
+  auth:
+    secret: ${FLOORPLAN_JWT_SECRET:dev-only-secret-key-change-me-in-production-0123456789}
+    token-hours: ${FLOORPLAN_TOKEN_HOURS:8}
+  # ---- 担保台账配置（CollateralLedgerApplicationService 的 @Value）----
+  collateral:
+    registration-validity-years: 5   # 让渡担保登记法定 5 年、不可续展
+    registration-warn-days: 90
+    require-account-check: true
+  lock:
+    provider: memory

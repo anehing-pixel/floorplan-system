@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志配置（2026-10-26 新增）
+
+  为什么加这个文件：
+  1) 原先没有任何日志配置，日志只打到 stdout —— 进程一重启，之前的日志就随控制台滚屏而丢失，
+     没有落盘文件可供事后追溯。对金融系统来说，"查某笔业务当时发生了什么"是硬需求。
+  2) Windows 环境 JVM 默认 file.encoding=GBK，日志里的中文全是乱码，排查时根本读不懂报错内容。
+
+  编码约定：
+  文件 appender 强制 UTF-8（<charset>UTF-8</charset>），与源码、数据库、HTTP 响应体一致；
+  启动时加 -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 让控制台也输出 UTF-8，
+  这样无论看文件还是看控制台，中文都是对的。
+
+  Spring Boot 仍会自动应用 application.yml 里的 logging.level.* 配置（例如把
+  com.company.floorplan 调到 DEBUG），本文件不覆盖该能力。
+-->
+<configuration>
+
+  <!-- 日志目录：默认落在运行目录下的 logs/，可用环境变量 LOG_HOME 覆盖 -->
+  <property name="LOG_HOME" value="${LOG_HOME:-logs}"/>
+  <property name="APP_NAME" value="floorplan"/>
+
+  <!-- 统一输出格式：时间 级别 线程 类名 - 消息 -->
+  <property name="LOG_PATTERN"
+            value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{40} - %msg%n"/>
+  <!-- 文件里堆栈信息单独成行，便于 grep 定位 -->
+  <property name="FILE_LOG_PATTERN"
+            value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{40} - %msg%n%ex"/>
+
+  <!-- 控制台：即时反馈，开发时最常看的一路 -->
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <charset>UTF-8</charset>
+      <pattern>${LOG_PATTERN}</pattern>
+    </encoder>
+  </appender>
+
+  <!--
+    文件：按天 + 按大小双重滚动。
+    单文件上限 50MB，单次压缩上限 500MB，保留 30 天。
+    金融系统的审计要求通常要留更久，这里按可配置的口径设初值，实际以运维制度为准。
+  -->
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/${APP_NAME}.log</file>
+    <encoder>
+      <charset>UTF-8</charset>
+      <pattern>${FILE_LOG_PATTERN}</pattern>
+    </encoder>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_HOME}/archive/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <maxFileSize>50MB</maxFileSize>
+      <maxHistory>30</maxHistory>
+      <totalSizeCap>2GB</totalSizeCap>
+    </rollingPolicy>
+  </appender>
+
+  <!-- 根 logger：写控制台 + 写文件 -->
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="FILE"/>
+  </root>
+
+</configuration>

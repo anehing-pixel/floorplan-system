@@ -1,0 +1,35 @@
+server:
+  port: 8081                         # 每个服务不同端口
+
+spring:
+  application:
+    name: auth-service               # 注册到 Nacos 的服务名
+  datasource:
+    # auth-service 依赖了 application/infrastructure，会加载 JDBC Repository，
+    # 故需要数据源。脚手架阶段先共用同一个库；真正拆分后再改成 auth 自己的库。
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/floorplan}
+    username: ${SPRING_DATASOURCE_USERNAME:floorplan}
+    password: ${SPRING_DATASOURCE_PASSWORD:floorplan}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: false                   # 迁移由主应用统一管理，避免多服务重复建表
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        # 没起 Nacos 时不要 fail-fast，脚手架阶段允许脱离注册中心启动
+        fail-fast: false
+
+floorplan:
+  # 业务参数走默认值（application 层各 @Value 都有 default 兜底）
+  lock:
+    provider: memory
+  auth:
+    # JWT 签名密钥：生产必须由环境变量注入，绝不用代码里的 dev 兜底值
+    # （密钥泄露 = 任何人可伪造任意身份的令牌）
+    secret: ${FLOORPLAN_JWT_SECRET:dev-only-secret-key-change-me-in-production-0123456789}
+    token-hours: ${FLOORPLAN_TOKEN_HOURS:8}

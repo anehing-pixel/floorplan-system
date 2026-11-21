@@ -1,0 +1,48 @@
+server:
+  port: 8082                         # 每个服务不同端口（auth=8081, web=8080）
+
+spring:
+  application:
+    name: bank-service               # 注册到 Nacos 的服务名
+  datasource:
+    # 脚手架阶段共用同一个库；真正拆分后再改成独立的 bank 库。
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/floorplan}
+    username: ${SPRING_DATASOURCE_USERNAME:floorplan}
+    password: ${SPRING_DATASOURCE_PASSWORD:floorplan}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      connect-timeout: 2s
+  flyway:
+    enabled: false                   # 迁移由主应用统一管理，避免多服务重复建表
+  jackson:
+    time-zone: Asia/Tokyo
+    default-property-inclusion: non_null
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        fail-fast: false             # 没起 Nacos 时也能脱离注册中心启动
+
+floorplan:
+  # ---- 鉴权：必须与 auth-service 使用同一个签名密钥，否则验签失败 ----
+  auth:
+    secret: ${FLOORPLAN_JWT_SECRET:dev-only-secret-key-change-me-in-production-0123456789}
+    token-hours: ${FLOORPLAN_TOKEN_HOURS:8}
+  # ---- 分布式锁 ----
+  lock:
+    provider: memory                 # 单实例演示用；多实例切 redis
+  # ---- 银行回款流水采集 ----
+  bank-fetch:
+    # demo：返回固定样本，同一天多次拉取 id 稳定 → 幂等可被亲眼验证（第二次 inserted=0）
+    # csv ：读 csv-dir 下的真实网银导出文件。生产必须改 csv 或接银行 API。
+    source: ${BANK_FETCH_SOURCE:demo}
+    csv-dir: ${BANK_CSV_DIR:./data/bank}
+    accounts: ${BANK_ACCOUNTS:ACC-001,ACC-002}
+    lookback-days: 3
+    lock-ttl-seconds: 300

@@ -1,0 +1,11 @@
+# 运行期日志（logback 落盘 + 归档），不入版本库
+logs/
+*.log
+
+# 构建产物
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>库存融资核心系统 · 项目与接口设计文档</title>
+<style>
+  :root{
+    --bg:#f5f7fa; --card:#ffffff; --ink:#1f2733; --sub:#5b6b7c;
+    --line:#e3e8ef; --accent:#2563eb; --accent-soft:#eff4ff;
+    --ok:#0e9a6a; --warn:#d97706; --bad:#d43a3a; --bad-soft:#fdeaea;
+    --shadow:0 1px 3px rgba(16,24,40,.06),0 1px 2px rgba(16,24,40,.04);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.65;font-size:15px;}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 24px 64px;}
+  header.top{border-bottom:2px solid var(--line);padding-bottom:18px;margin-bottom:8px;}
+  h1{font-size:26px;margin:0 0 6px;}
+  .sub{color:var(--sub);font-size:14px;}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 22px;margin:18px 0;box-shadow:var(--shadow);}
+  .toc a{color:var(--accent);text-decoration:none;margin-right:18px;font-size:14px;}
+  .toc a:hover{text-decoration:underline;}
+  section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px 26px;margin-bottom:18px;box-shadow:var(--shadow);}
+  h2{font-size:20px;margin:0 0 14px;padding-left:10px;border-left:4px solid var(--accent);}
+  h3{font-size:16px;margin:18px 0 8px;}
+  h4{font-size:14px;margin:14px 0 6px;color:var(--sub);}
+  p{margin:8px 0;}
+  ul,ol{margin:8px 0;padding-left:22px;}
+  li{margin:5px 0;}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top;}
+  th{background:#f0f4f9;color:var(--ink);font-weight:600;}
+  tr:nth-child(even) td{background:#fafcff;}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;}
+  .tag.ok{background:#e7f6ef;color:var(--ok);}
+  .tag.warn{background:#fdf2e3;color:var(--warn);}
+  .tag.bad{background:var(--bad-soft);color:var(--bad);}
+  .tag.info{background:var(--accent-soft);color:var(--accent);}
+  .box{background:var(--accent-soft);border:1px solid #c9dbff;border-radius:10px;padding:14px 16px;margin:14px 0;}
+  .box.bad{background:var(--bad-soft);border-color:#f1c4c4;}
+  .box.warn{background:#fdf6e9;border-color:#f0d9a8;}
+  .box.good{background:#e7f6ef;border-color:#bfe6d4;}
+  code{background:#eef1f5;padding:1px 6px;border-radius:5px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:10px;font-size:13px;line-height:1.6;overflow:auto;}
+  .svgwrap{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;margin:14px 0;overflow:auto;}
+  .muted{color:var(--sub);font-size:13px;}
+  footer{color:var(--sub);font-size:12px;text-align:center;margin-top:30px;}
+  .pill{font-size:12px;background:#eef1f5;color:var(--sub);padding:2px 10px;border-radius:999px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>库存融资核心系统 · 项目与接口设计文档</h1>
+    <div class="sub">新车渠道 · 金融公司内部系统 · Rails→Java 重写 · 5 人 / 18 个月 / AI 辅助编程</div>
+  </header>
+
+  <div class="toc">
+    <strong>目录：</strong>
+    <a href="#p">一、项目文档</a>
+    <a href="#b">二、业务文档</a>
+    <a href="#f">三、业务流程图</a>
+    <a href="#api">四、接口设计文档</a>
+    <a href="#c">五、注意事项</a>
+  </div>
+
+  <!-- ============ 一、项目文档 ============ -->
+  <section id="p">
+    <h2>一、项目文档</h2>
+
+    <h3>1.1 项目背景与目标</h3>
+    <p>公司战略决定<strong>所有业务统一用 Java 实现</strong>，本系统当前为 Ruby on Rails 实现的库存融资（Floorplan）核心系统，须重写为 Java。系统服务于<strong>金融公司内部</strong>，面向<strong>新车渠道</strong>：金融公司向品牌授权经销商提供以库存车为担保的周转资金，车辆售出后即时还款、额度回补。</p>
+    <p><strong>目标</strong>：在保持业务等价的条件下，完成 Rails→Java 重写；领域模型保留、实现架构按 Java 最佳实践重做；具备账务正确性、审计合规、批处理与对账能力。</p>
+
+    <h3>1.2 范围</h3>
+    <table>
+      <tr><th>做（第一版）</th><th>不做（防膨胀）</th></tr>
+      <tr>
+        <td>客户授信与额度管理、单台台账、垫款与付款、还款与结清、计息与账务、库龄递减、风控预警、实地盘点、厂家贴息结算、审计留痕、批处理</td>
+        <td>多品牌/多厂家扩展、多产品（试驾车/设备/建店资金）、规则引擎全可视化、对外车商门户、多币种、多地区部署</td>
+      </tr>
+    </table>
+
+    <h3>1.3 技术栈与架构</h3>
+    <ul>
+      <li><strong>架构</strong>：Spring Boot 模块化单体（Maven 多模块），逻辑拆、物理不拆。</li>
+      <li><strong>模块</strong>：<code>domain</code>（聚合/不变量/状态机/计息，不依赖 Spring）· <code>application</code>（用例编排+事务边界）· <code>infrastructure</code>（JPA/MyBatis/事件表/适配）· <code>web</code>（接口层）· <code>integration</code>（厂家/支付/登记对接）。</li>
+      <li><strong>ORM</strong>：简单实体用 Spring Data JPA；计息/对账/报表用 MyBatis 或 JDBC Template 手写 SQL。</li>
+      <li><strong>数据库</strong>：PostgreSQL；金额列 <code>bigint</code> 映射 Java <code>long</code>（日元无小数）。</li>
+      <li><strong>批处理</strong>：Spring Batch / <code>@Scheduled</code> + Quartz。</li>
+      <li><strong>权限</strong>：Spring Security + 自定义投票器，落实"发起与执行分离"。</li>
+    </ul>
+
+    <h3>1.4 团队与里程碑（18 个月）</h3>
+    <table>
+      <tr><th>阶段</th><th>月份</th><th>主要交付</th><th>人力重心</th></tr>
+      <tr><td>领域萃取 + 测试基准</td><td>M1–M2</td><td>业务规则规格化；RSpec→JUnit；架构骨架；共享 DB 接入</td><td>架构 + 2 后端</td></tr>
+      <tr><td>核心域 + 应用层</td><td>M3–M7</td><td>经销商/额度/车辆单元聚合；垫款/还款/结清用例；双跑比对（非关键用例先行）</td><td>2 后端 + 架构</td></tr>
+      <tr><td>计息 + 账务 + 批处理</td><td>M8–M11</td><td>计息引擎、账务、日终作业（可重跑·有执行记录）</td><td>批处理/账务专人</td></tr>
+      <tr><td>风控/盘点/集成</td><td>M12–M14</td><td>预警、盘点、厂家/支付/登记对接；剩余用例双跑</td><td>集成/运维 + 全员</td></tr>
+      <tr><td>切流 + 下线 + 加固</td><td>M15–M18</td><td>绞杀者全量切流、回归对账、压测；质量加固、监控运维化、文档沉淀</td><td>全员</td></tr>
+    </table>
+    <p class="muted">若系统未上线，可压缩前 14 个月为纯重写，后 4 个月专做双跑比对与加固。</p>
+
+    <h3>1.5 关键架构决策（ADR 摘要）</h3>
+    <div class="box good">
+      <strong>ADR-001 模块化单体</strong>：低 QPS + 强一致 + 事务密集，边界未验证前不引入分布式事务；可逆性高（模块边界清晰，未来物理拆分成本低）。
+    </div>
+    <div class="box">
+      <strong>ADR-002 等价重写优先</strong>：战略决定 Java，但禁止"翻译式迁移"；领域层保留、实现层按 Java 重做；测试资产（尤其计息边界用例）必须平移为 JUnit 作为等价证据。
+    </div>
+    <div class="box warn">
+      <strong>ADR-003 先测后码（AI 纪律）</strong>：AI 辅助编程只承接样板；计息/额度/批处理等核心 100% 人工 review + 强测试；禁止把业务规则藏在框架回调中。
+    </div>
+  </section>
+
+  <!-- ============ 二、业务文档 ============ -->
+  <section id="b">
+    <h2>二、业务文档</h2>
+
+    <h3>2.1 业务本质</h3>
+    <p>经销商的库存即资产负债表——库存车露天停放占用资金。库存融资解决"收车须即时付款、卖车数月后才回款"的错配：金融公司直接向<strong>上游（厂家）</strong>付款，车辆在经销商场地作担保，<strong>售出一台即还一台，额度自动回补</strong>。</p>
+
+    <h3>2.2 角色与权限（内部职能切分）</h3>
+    <table>
+      <tr><th>角色</th><th>职责</th><th>权限敏感点</th></tr>
+      <tr><td>授信 / 客户经理</td><td>经销商关系、核定额度</td><td>可发起额度调整，<strong>不能直接放款</strong></td></tr>
+      <tr><td>运营 / 垫款处理</td><td>受理垫款、付款、单据核对</td><td>付款需<strong>双人复核</strong></td></tr>
+      <tr><td>风控 / 盘点</td><td>库龄监控、盘点、违约处置</td><td>可发起冻结，动作<strong>全程留痕</strong></td></tr>
+      <tr><td>财务 / 会计</td><td>计息、对账、入账</td><td>利率与计息规则变更需<strong>审批流</strong></td></tr>
+    </table>
+    <div class="box">内部控制铁律：<strong>"发起"与"执行"必须分离</strong>（客户经理提额度、另一人批；运营提付款、财务执行）。任何单人走完全流程的设计都是不合规的。</div>
+
+    <h3>2.3 五大核心机制</h3>
+    <table>
+      <tr><th>机制</th><th>要点</th></tr>
+      <tr><td>单台独立核算</td><td>以<strong>车架号</strong>为主键，每台车独立建账、独立计息，绝不做总额</td></tr>
+      <tr><td>售出即还</td><td>零售成交后<strong>结算窗口</strong>（如 24–72h）内必须结清该台垫款</td></tr>
+      <tr><td>库龄递减还款</td><td>在库超 60/90/120 天未售，强制偿还部分本金，防残值跌破垫款</td></tr>
+      <tr><td>实地盘点</td><td>定期到场逐台扫描车架号，账实不符当场升级</td></tr>
+      <tr><td>脱信销售</td><td>车已售却不还款——<strong>最严重违约</strong>，可致整个额度被收回。系统价值核心即对抗此风险</td></tr>
+    </table>
+
+    <h3>2.4 领域模型（聚合根）</h3>
+    <table>
+      <tr><th>聚合根</th><th>守的不变量</th><th>关键子实体</th></tr>
+      <tr><td>经销商 Dealer</td><td>授信额度 ≤ 核定上限；额度占用 + 可用 = 核定</td><td>额度记录、经营档案</td></tr>
+      <tr><td>额度 CreditLine</td><td>占用额不得超额（并发加锁）；释放须对应还款</td><td>占用明细、冻结记录</td></tr>
+      <tr><td>车辆单元 VehicleUnit</td><td>状态机合法流转；一台车同一时刻唯一状态；售出须先结清</td><td>垫款、还款、计息记录、登记状态</td></tr>
+    </table>
+
+    <h3>2.5 术语表（中文）</h3>
+    <table>
+      <tr><th>中文</th><th>含义</th></tr>
+      <tr><td>库存融资 / Floorplan</td><td>以库存车为担保向车商提供周转资金，售车即还</td></tr>
+      <tr><td>垫款</td><td>金融公司代付给厂家的购车款，形成对车商的债权</td></tr>
+      <tr><td>结算窗口</td><td>车辆零售后须还清该台垫款的期限</td></tr>
+      <tr><td>库龄递减</td><td>在库超期强制偿还部分本金的机制</td></tr>
+      <tr><td>脱信销售</td><td>车已售但车商未上报/未还款</td></tr>
+      <tr><td>所有权保留</td><td>还清前车辆登记在金融公司/信贩名下（日本新车未上牌时无法落地，须另确认担保路径）</td></tr>
+      <tr><td>厂家贴息</td><td>厂家对部分利息的补贴，须与利息轧差结算</td></tr>
+    </table>
+
+    <h3>2.6 日本本地合规要点</h3>
+    <ul>
+      <li><strong>总量规制不适用</strong>：本场景为 B2B（金融公司对经销商），不受《放贷业法》个人借款"年收入 1/3"约束；但书面交付、登记等义务仍须关注。</li>
+      <li><strong>新车未上牌的担保落地</strong>：车辆停在经销商场地时常未完成登记，"所有权保留登记"无登记对象。担保可能靠让与担保合同 / 动产让渡登记 / 厂家回购承诺 / 经销商信用——<span class="tag warn">待确认</span>，直接决定"担保登记"模块做不做。</li>
+      <li><strong>书面交付义务</strong>：契约书、明细书等须按日本金融实务交付并留痕。</li>
+      <li>涉及放贷与担保的部分，<span class="tag bad">须经日本当地合规人士复核</span>。</li>
+    </ul>
+  </section>
+
+  <!-- ============ 三、业务流程图 ============ -->
+  <section id="f">
+    <h2>三、业务流程图</h2>
+    <p class="muted">对齐业务需求文档「资金与车辆的流转闭环」七环节：授予额度 → 车商收车申请 → 垫款支付 → 设定担保 → 在库计息 → 零售成交 → 结清释放（还款·解除担保·回补额度），并以回环体现<strong>循环授信</strong>特性。右侧为在库期间并行活动，左侧为违约分支。</p>
+    <div class="svgwrap">
+      <svg viewBox="0 0 1000 700" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif">
+        <defs>
+          <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#475569"/></marker>
+          <marker id="arrB" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/></marker>
+          <marker id="arrG" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#0e9a6a"/></marker>
+          <marker id="arrO" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#d97706"/></marker>
+          <marker id="arrR" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#d43a3a"/></marker>
+          <marker id="arrGy" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#94a3b8"/></marker>
+        </defs>
+
+        <!-- 额度回补闭环 -->
+        <path d="M400,606 H60 V66 H398" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrGy)"/>
+        <text x="66" y="330" font-size="10.5" fill="#94a3b8">额度回补 → 可再次收车</text>
+        <text x="66" y="345" font-size="10.5" fill="#94a3b8">（循环授信闭环）</text>
+
+        <!-- 主干：业务闭环七环节 -->
+        <rect x="400" y="40" width="220" height="52" rx="8" fill="#eff4ff" stroke="#2563eb"/>
+        <text x="510" y="62" text-anchor="middle" font-size="13.5" fill="#1f2733">① 授予额度</text>
+        <text x="510" y="79" text-anchor="middle" font-size="10.5" fill="#5b6b7c">核定循环授信上限</text>
+
+        <rect x="400" y="130" width="220" height="52" rx="8" fill="#eff4ff" stroke="#2563eb"/>
+        <text x="510" y="152" text-anchor="middle" font-size="13.5" fill="#1f2733">② 车商收车·申请</text>
+        <text x="510" y="169" text-anchor="middle" font-size="10.5" fill="#5b6b7c">厂家渠道中标 / 提交垫款申请</text>
+
+        <rect x="400" y="220" width="220" height="52" rx="8" fill="#eff4ff" stroke="#2563eb"/>
+        <text x="510" y="242" text-anchor="middle" font-size="13.5" fill="#1f2733">③ 垫款支付</text>
+        <text x="510" y="259" text-anchor="middle" font-size="10.5" fill="#2563eb">资金直付上游，不经车商账户</text>
+
+        <rect x="400" y="310" width="220" height="52" rx="8" fill="#eff4ff" stroke="#2563eb"/>
+        <text x="510" y="332" text-anchor="middle" font-size="13.5" fill="#1f2733">④ 设定担保</text>
+        <text x="510" y="349" text-anchor="middle" font-size="10.5" fill="#d97706">所有权保留 / 让与担保（路径待确认）</text>
+
+        <rect x="400" y="400" width="220" height="52" rx="8" fill="#eff4ff" stroke="#2563eb"/>
+        <text x="510" y="422" text-anchor="middle" font-size="13.5" fill="#1f2733">⑤ 在库计息</text>
+        <text x="510" y="439" text-anchor="middle" font-size="10.5" fill="#5b6b7c">按日计息 · 累计库龄</text>
+
+        <rect x="400" y="490" width="220" height="52" rx="8" fill="#eff4ff" stroke="#2563eb"/>
+        <text x="510" y="512" text-anchor="middle" font-size="13.5" fill="#1f2733">⑥ 零售成交</text>
+        <text x="510" y="529" text-anchor="middle" font-size="10.5" fill="#5b6b7c">售出 → 触发还款义务 · 结算窗口倒计时</text>
+
+        <rect x="400" y="580" width="220" height="52" rx="8" fill="#e7f6ef" stroke="#0e9a6a"/>
+        <text x="510" y="602" text-anchor="middle" font-size="13.5" fill="#1f2733">⑦ 结清释放</text>
+        <text x="510" y="619" text-anchor="middle" font-size="10.5" fill="#5b6b7c">还款 · 解除担保 · 回补额度</text>
+
+        <!-- 主干箭头 -->
+        <line x1="510" y1="92" x2="510" y2="128" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="510" y1="182" x2="510" y2="218" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="510" y1="272" x2="510" y2="308" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="510" y1="362" x2="510" y2="398" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="510" y1="452" x2="510" y2="488" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="510" y1="542" x2="510" y2="578" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+        <!-- 资金流 / 车辆流 标注 -->
+        <text x="522" y="196" font-size="10.5" fill="#2563eb">资金流：金融 → 上游（直付）</text>
+        <text x="522" y="210" font-size="10.5" fill="#0e9a6a">车辆流：上游 → 车商场地</text>
+        <text x="522" y="556" font-size="10.5" fill="#2563eb">资金流：车商 → 金融（还款）</text>
+        <text x="522" y="570" font-size="10.5" fill="#0e9a6a">车辆流：车商 → 终端客户</text>
+
+        <!-- 右侧：在库期间并行活动 -->
+        <rect x="720" y="390" width="200" height="40" rx="8" fill="#fff7ed" stroke="#d97706"/>
+        <text x="820" y="415" text-anchor="middle" font-size="12.5" fill="#1f2733">日终计息批处理</text>
+        <rect x="720" y="446" width="200" height="40" rx="8" fill="#fff7ed" stroke="#d97706"/>
+        <text x="820" y="471" text-anchor="middle" font-size="12.5" fill="#1f2733">库龄递减还款</text>
+        <rect x="720" y="502" width="200" height="40" rx="8" fill="#fff7ed" stroke="#d97706"/>
+        <text x="820" y="527" text-anchor="middle" font-size="12.5" fill="#1f2733">实地盘点核对</text>
+        <line x1="620" y1="426" x2="718" y2="410" stroke="#d97706" stroke-width="1.8" marker-end="url(#arrO)"/>
+        <line x1="620" y1="430" x2="718" y2="466" stroke="#d97706" stroke-width="1.8" marker-end="url(#arrO)"/>
+        <line x1="620" y1="442" x2="718" y2="522" stroke="#d97706" stroke-width="1.8" marker-end="url(#arrO)"/>
+        <text x="628" y="376" font-size="10.5" fill="#d97706">在库期间并行</text>
+
+        <!-- 左侧：违约分支 -->
+        <rect x="110" y="470" width="190" height="44" rx="8" fill="#fdeaea" stroke="#d43a3a"/>
+        <text x="205" y="497" text-anchor="middle" font-size="12.5" fill="#1f2733">脱信销售 / 逾期</text>
+        <rect x="110" y="560" width="190" height="44" rx="8" fill="#fdeaea" stroke="#d43a3a"/>
+        <text x="205" y="587" text-anchor="middle" font-size="12.5" fill="#1f2733">违约处置 · 回收</text>
+        <line x1="398" y1="430" x2="302" y2="482" stroke="#d43a3a" stroke-width="1.8" marker-end="url(#arrR)"/>
+        <line x1="398" y1="520" x2="302" y2="504" stroke="#d43a3a" stroke-width="1.8" marker-end="url(#arrR)"/>
+        <line x1="205" y1="514" x2="205" y2="558" stroke="#d43a3a" stroke-width="1.8" marker-end="url(#arrR)"/>
+        <text x="110" y="538" font-size="9.5" fill="#d43a3a">车已售未还款 / 盘点车不在场</text>
+        <text x="215" y="540" font-size="9.5" fill="#d43a3a">升级</text>
+
+        <!-- 垫款原子流程 注释框 -->
+        <rect x="690" y="196" width="250" height="86" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+        <text x="704" y="218" font-size="12" fill="#1f2733" font-weight="600">垫款原子流程（同事务）</text>
+        <text x="704" y="238" font-size="11" fill="#5b6b7c">① 校验并占用额度</text>
+        <text x="704" y="256" font-size="11" fill="#5b6b7c">② 建立单台台账</text>
+        <text x="704" y="274" font-size="11" fill="#5b6b7c">③ 向厂家付款（任一失败整体回滚）</text>
+      </svg>
+    </div>
+    <div class="box">图例：<span style="color:#2563eb">蓝</span>=主干环节与资金流；<span style="color:#0e9a6a">绿</span>=车辆流与结清；<span style="color:#d97706">橙</span>=在库期间并行活动（计息/库龄/盘点）；<span style="color:#d43a3a">红</span>=违约分支；<span style="color:#94a3b8">灰虚线</span>=额度回补闭环。</div>
+
+    <h3>3.1 业务闭环 ↔ 系统落点对照</h3>
+    <p class="muted">确保业务需求文档「资金与车辆的流转闭环」七个环节在系统设计中均有明确落点，避免环节在实现阶段被遗漏。</p>
+    <table>
+      <tr><th style="width:9%">环节</th><th style="width:26%">业务动作</th><th style="width:28%">系统落点</th><th>说明 / 风险</th></tr>
+      <tr><td><strong>① 授予额度</strong></td><td>金融公司核定车商循环授信上限</td><td><code>POST /api/credit-lines</code>（需审批）</td><td>发起与执行分离；冻结/恢复须可追溯、可审计</td></tr>
+      <tr><td><strong>② 车商收车·申请</strong></td><td>厂家渠道中标/下单，就该台车提交垫款申请</td><td><code>POST /api/advances</code>；批量到货 <code>/api/vehicles/batch-ingest</code></td><td>须记录上游卖方与采购渠道（新车渠道=厂家）</td></tr>
+      <tr><td><strong>③ 垫款支付</strong></td><td>金融公司直接付款给上游，不经车商账户</td><td>垫款原子流程：占额度 + 建台账 + 付款</td><td>防挪用底线；<span class="tag warn">付款为外部调用，事务边界待确认</span></td></tr>
+      <tr><td><strong>④ 设定担保</strong></td><td>该台车纳入担保范围（日本为逐台）</td><td>车辆单元担保字段 + 设定担保接口</td><td><span class="tag bad">新车未上牌时担保路径待确认</span>，直接决定本环节是否落地</td></tr>
+      <tr><td><strong>⑤ 在库计息</strong></td><td>按日计息、累计库龄；超阈值触发递减；定期盘点</td><td>日终计息批处理 / 库龄递减 / 实地盘点（并行）</td><td>计息须可重跑、有执行记录；盘点差异升级为风控工单</td></tr>
+      <tr><td><strong>⑥ 零售成交</strong></td><td>车卖给终端客户，触发该台立即还款义务</td><td><code>POST /api/vehicles/{vin}/sold</code></td><td>进入结算窗口倒计时；<span class="tag warn">sold 触发源待确认（零售系统对接 or 人工）</span></td></tr>
+      <tr><td><strong>⑦ 结清释放</strong></td><td>还款后解除担保、释放额度，可继续收下一台</td><td><code>POST /api/repayments</code>：还款核销 + 解除担保 + 额度回补</td><td>结清须原子完成三件事，不可只做还款而漏解除担保</td></tr>
+    </table>
+    <div class="box warn"><strong>闭环关键：</strong>第 ⑦ 步的"额度回补"必须回连到第 ①② 步——这是循环授信与一次性贷款的本质区别。系统须保证额度释放后立即可用于下一台垫款，图中灰色虚线即此闭环。原流程图为线性（止于"已结清"），未表达该循环特性，现已补正。</div>
+  </section>
+
+  <!-- ============ 四、接口设计文档 ============ -->
+  <section id="api">
+    <h2>四、接口设计文档</h2>
+
+    <h3>4.1 通用约定</h3>
+    <ul>
+      <li><strong>协议</strong>：REST/JSON（内部系统，可走内网网关）。</li>
+      <li><strong>认证</strong>：内部 SSO + 角色令牌；每个写操作须带操作人身份（审计）。</li>
+      <li><strong>金额</strong>：一律整数日元，JSON 中以数字（long）传递，<strong>禁止小数与浮点</strong>。</li>
+      <li><strong>时区</strong>：统一 JST；计息/结算日期以"营业日"为准，节假日表内置。</li>
+      <li><strong>幂等</strong>：写接口须带 <code>Idempotency-Key</code>，防止重复垫款/重复还款。</li>
+      <li><strong>错误码</strong>：统一 <code>{code, message, traceId}</code>；额度不足、状态非法、幂等冲突等区分。</li>
+    </ul>
+
+    <h3>4.2 核心接口列表</h3>
+    <table>
+      <tr><th>方法</th><th>路径</th><th>说明</th><th>权限</th></tr>
+      <tr><td>POST</td><td><code>/api/dealers</code></td><td>创建经销商档案</td><td>客户经理</td></tr>
+      <tr><td>POST</td><td><code>/api/credit-lines</code></td><td>核定/调整额度（需审批）</td><td>客户经理+审批</td></tr>
+      <tr><td>POST</td><td><code>/api/vehicles/batch-ingest</code></td><td>批量到货建账（一次多台）</td><td>运营</td></tr>
+      <tr><td>POST</td><td><code>/api/advances</code></td><td>申请垫款（原子：占额度+建台账+付款）</td><td>运营+复核</td></tr>
+      <tr><td>POST</td><td><code>/api/vehicles/{vin}/security</code></td><td>设定担保（逐台登记）<span class="tag warn">待确认</span></td><td>运营</td></tr>
+      <tr><td>POST</td><td><code>/api/vehicles/{vin}/sold</code></td><td>标记售出（进入结算窗口）</td><td>运营</td></tr>
+      <tr><td>POST</td><td><code>/api/repayments</code></td><td>还款结清（核销垫款+解除担保+释放额度）</td><td>财务</td></tr>
+      <tr><td>POST</td><td><code>/api/vehicles/{vin}/security/release</code></td><td>解除担保（结清时触发）<span class="tag warn">待确认</span></td><td>财务</td></tr>
+      <tr><td>POST</td><td><code>/api/interest/settle</code></td><td>计息结算（日终批处理触发）</td><td>系统/财务</td></tr>
+      <tr><td>GET</td><td><code>/api/vehicles/{vin}</code></td><td>单台台账查询</td><td>全部角色</td></tr>
+      <tr><td>POST</td><td><code>/api/inventory/audit</code></td><td>提交盘点结果（车架号扫描）</td><td>风控</td></tr>
+      <tr><td>POST</td><td><code>/api/credit-lines/{id}/freeze</code></td><td>冻结额度/车辆（违约处置）</td><td>风控</td></tr>
+      <tr><td>GET</td><td><code>/api/alerts</code></td><td>风险预警列表（库龄/逾期/脱信）</td><td>风控</td></tr>
+    </table>
+
+    <h3>4.3 关键接口详述</h3>
+
+    <h4>① 申请垫款（原子操作）</h4>
+    <pre>POST /api/advances
+{
+  "creditLineId": "CL-100023",
+  "vin": "JMA***********",
+  "manufacturerInvoiceAmount": 1850000,   // 厂家发票金额（日元整数）
+  "advanceRatio": 0.9,                    // 垫款比例
+  "idempotencyKey": "adv-20261025-0001"
+}
+// 响应 201
+{
+  "advanceId": "ADV-558201",
+  "status": "PAID",                        // PAID=已付款
+  "advancedAmount": 1665000,
+  "remainingCredit": 3350000,
+  "vehicleStatus": "IN_STOCK"               // 已垫款·在库
+}</pre>
+    <p class="muted">事务边界：校验额度 → 行锁占用额度 → 建车辆单元台账 → 发起厂家付款；任一失败整体回滚，绝不允许"钱付了额度没扣"。</p>
+
+    <h4>② 还款结清</h4>
+    <pre>POST /api/repayments
+{
+  "vin": "JMA***********",
+  "settlementAmount": 1679200,   // 本金 + 截至结算日利息
+  "idempotencyKey": "rep-20270115-0007"
+}
+// 响应 201
+{
+  "repaymentId": "REP-77812",
+  "vehicleStatus": "SETTLED",    // 已结清
+  "releasedCredit": 1665000,     // 额度回补
+  "interestAccrued": 14200
+}</pre>
+
+    <h4>③ 单台台账查询</h4>
+    <pre>GET /api/vehicles/{vin}
+{
+  "vin": "...",
+  "status": "IN_STOCK",
+  "advance": { "amount": 1665000, "paidAt": "2026-10-25" },
+  "agingDays": 37,
+  "accruedInterest": 5230,
+  "registration": { "owner": "FINCO", "type": "RETENTION", "status": "PENDING_PLATE" },
+  "nextAction": "NONE"           // 或 AGING_REDUCTION / AUDIT_DUE
+}</pre>
+
+    <h3>4.4 主要数据表（摘要）</h3>
+    <table>
+      <tr><th>表</th><th>关键字段</th><th>说明</th></tr>
+      <tr><td>dealers</td><td>id, name, status, risk_grade</td><td>经销商档案</td></tr>
+      <tr><td>credit_lines</td><td>dealer_id, approved_limit, used_amount, frozen</td><td>额度，used_amount 须加锁更新</td></tr>
+      <tr><td>vehicle_units</td><td>vin(PK), dealer_id, status, advance_id, invoice_amount, aging_days, security_type, security_status</td><td>单台台账主键；担保字段取决于 2.6 担保路径确认</td></tr>
+      <tr><td>advances</td><td>id, vin, amount, paid_at, status</td><td>垫款记录</td></tr>
+      <tr><td>repayments</td><td>id, vin, principal, interest, settled_at</td><td>还款核销</td></tr>
+      <tr><td>interest_ledger</td><td>vin, date, accrued, rate_snapshot</td><td>计息流水（按日）</td></tr>
+      <tr><td>audit_events</td><td>id, actor, action, before, after, ts</td><td>append-only 审计事件表</td></tr>
+    </table>
+
+    <h3>4.5 事件与对账</h3>
+    <ul>
+      <li><strong>领域事件</strong>：VehicleSold / AdvancePaid / RepaymentSettled / AgingTriggered / AuditMismatch / CreditFrozen，供风控与盘点异步消费。</li>
+      <li><strong>对账</strong>：日终批处理后生成对账文件（垫款 vs 付款通道、利息 vs 账务），与核心账务系统轧差。</li>
+      <li><strong>双跑比对</strong>（迁移期）：同一批历史数据 Rails 与 Java 并行计算，逐笔核对利息/本金/余额。</li>
+    </ul>
+  </section>
+
+  <!-- ============ 五、注意事项 ============ -->
+  <section id="c">
+    <h2>五、注意事项</h2>
+
+    <h3>5.1 迁移纪律（三条铁律）</h3>
+    <div class="box bad"><strong>① 等价重写，不趁机升级</strong>：业务范围、对外行为、字段类型保持与 Rails 一致；重写不是镀金机会。</div>
+    <div class="box"><strong>② 测试资产平移</strong>：RSpec 计息边界用例（提前还/部分还/利率变更/跨月/节假日/贴息轧差）逐条翻成 JUnit，作为等价证据。</div>
+    <div class="box"><strong>③ 数据原样不动</strong>：schema 照搬；金额 <code>bigint</code>→<code>long</code>，不改为 BigDecimal；不趁机改字段/加字段。</div>
+
+    <h3>5.2 技术踩坑</h3>
+    <table>
+      <tr><th>风险</th><th>应对</th></tr>
+      <tr><td>金额用 float / BigDecimal 小数</td><td>日元无小数 → 一律 <code>long</code> 整数日元</td></tr>
+      <tr><td>并发额度超额</td><td>额度占用用数据库行锁 / 乐观锁，禁止"读-改-写"无锁</td></tr>
+      <tr><td>JPA 懒加载 / N+1</td><td>复杂查询走 MyBatis/JDBC 手写 SQL；报表用 <code>find_in_batches</code> 等价批读</td></tr>
+      <tr><td>事务传播混乱</td><td><code>@Transactional</code> 边界只在 application 层；嵌套调用语义显式</td></tr>
+      <tr><td>时区/营业日口径错</td><td>全系统 JST；节假日表内置；计息按营业日</td></tr>
+      <tr><td>批处理不可重跑</td><td>作业幂等 + 执行记录表；失败可定位、可续跑</td></tr>
+    </table>
+
+    <h3>5.3 合规（日本）</h3>
+    <ul>
+      <li><strong>必须经日本当地合规人士复核</strong>放贷与担保相关设计。</li>
+      <li>书面交付义务（契约书/明细书）须留痕。</li>
+      <li><strong>新车未上牌担保路径待确认</strong>（让与担保/动产让渡/厂家回购/经销商信用）——直接影响"担保登记"模块。</li>
+      <li>总量规制不适用于本 B2B 场景，但不可据此忽略其他金融实务义务。</li>
+    </ul>
+
+    <h3>5.4 AI 编程纪律</h3>
+    <ul>
+      <li>AI 只出样板（entity/dto/mapper/controller 骨架、MyBatis XML、测试骨架）。</li>
+      <li>计息/额度/批处理核心 100% 人工 review + 强制测试覆盖。</li>
+      <li>维护 <code>CLAUDE.md</code> / 编码规范，约束 AI 产出（分层、金额 long、事务边界、不变量）。</li>
+      <li>禁止把业务规则藏在框架回调中（Rails 的 callback 债不得在 Java 重现）。</li>
+    </ul>
+
+    <h3>5.5 范围与节奏（18 个月专属风险）</h3>
+    <div class="box warn">
+      <strong>18 个月的最大风险是镀金与范围 creep</strong>：时间充裕易诱使加功能（规则引擎/多品牌/对外门户）。余量应用于<strong>提质量水位与吸收不确定性</strong>（压测、故障演练、监控运维、合规复核、双跑差异修复），而非加业务范围。建议按"12 个月做完主体 + 6 个月加固"推进，避免前松后紧与人员流动导致的知识丢失。
+    </div>
+
+    <h3>5.6 待确认清单</h3>
+    <ol>
+      <li>系统当前是否已上线？（决定绞杀者 vs 一次性重写）</li>
+      <li>真实业务参数：结算窗口、库龄递减天数与比例、垫款比例、利率结构、厂家贴息、违约阈值。</li>
+      <li>新车未上牌时担保落地路径。</li>
+      <li>日本本地接口现实：厂家系统、车辆登记、经销商库存、支付通道（有接口 or 人工）。</li>
+    </ol>
+  </section>
+
+  <footer>
+    本文件为项目与接口设计文档，业务参数部分以客户实际为准；涉及放贷与担保须经日本当地合规复核。<br>
+    库存融资核心系统 · 项目与接口设计文档 · 2026-10-25
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,73 @@
+server:
+  port: 18080                          # 网关统一入口（避免与 web 单体 8080 冲突）
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        fail-fast: false               # 无 Nacos 时也能启动（本地验证用 http 直连覆盖 URI）
+    gateway:
+      discovery:
+        locator:
+          enabled: false               # 不自动按服务名暴露路由，全部显式声明，避免误暴露
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
+            allowedHeaders: "*"
+      routes:
+        # ---------------- 管理控制台静态页面（前端仍由 web 服务托管）----------------
+        # 页面与 /api 统一从网关进出：浏览器同源、无跨域；本地模式由 ROUTE_CORE 覆盖为 http 直连。
+        - id: console-static
+          uri: ${ROUTE_CORE:lb://floorplan-core}
+          predicates:
+            - Path=/,/index.html,/login.html,/css/**,/js/**
+
+        # ---------------- 精确路由（specific 在前，Gateway 按顺序首个匹配即命中）----------------
+        # 车辆权属核对：从 VehicleController 拆出，归 risk（必须先于 /api/vehicles/** 核心账务）
+        - id: vehicle-lien-check
+          uri: ${ROUTE_RISK:lb://risk-service}
+          predicates:
+            - Path=/api/vehicles/*/lien-check
+        # 银行流水采集：归 bank（必须先于 /api/jobs/** 批处理）
+        - id: bank-fetch
+          uri: ${ROUTE_BANK:lb://bank-service}
+          predicates:
+            - Path=/api/jobs/bank-fetch
+
+        # ---------------- 认证服务 ----------------
+        - id: auth
+          uri: ${ROUTE_AUTH:lb://auth-service}
+          predicates:
+            - Path=/api/auth/**
+
+        # ---------------- 授信管理（经销商/额度/评级/年审）----------------
+        - id: credit
+          uri: ${ROUTE_CREDIT:lb://credit-service}
+          predicates:
+            - Path=/api/dealers/**,/api/credit-lines/**,/api/rating-configs/**,/api/annual-reviews/**
+        # 注意：/api/dealers/** 整段归 credit（含 /{id}/vehicles、/risk-grade），
+        # 因为 DealerApplicationService 已带这些查询；若日后 web 仍需 dealers 读接口，再细分。
+
+        # ---------------- 风控服务（预警/盘点/违约处置/担保台账）----------------
+        - id: risk
+          uri: ${ROUTE_RISK:lb://risk-service}
+          predicates:
+            - Path=/api/inventory/**,/api/alerts/**,/api/disposals/**,/api/collateral/**
+
+        # ---------------- 银行服务（其余 bank 端点，本阶段只有 bank-fetch）----------------
+        - id: bank
+          uri: ${ROUTE_BANK:lb://bank-service}
+          predicates:
+            - Path=/api/bank/**
+
+        # ---------------- 核心账务单体（兜底：垫款/还款/计息/车辆/供应商/附件/展期/保险/回购/采购单等）----------------
+        # 这些仍是有状态账本写入，留在 web，受本地事务 + 行锁保护。
+        - id: core
+          uri: ${ROUTE_CORE:lb://floorplan-core}
+          predicates:
+            - Path=/api/**

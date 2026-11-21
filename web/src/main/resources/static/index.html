@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理控制台 · 库存融资核心系统</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/console.css">
+</head>
+<body>
+<div class="layout">
+
+  <!-- ============ 左侧导航 ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <div class="mark">FP</div>
+      <div class="name">库存融资核心系统<small>Floorplan Core</small></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">
+      业务周期 · 11 环节<br>
+      准入 → 确权 → 放款 → 担保 → 计息 → 递减还款 → 赎车 → 解押 → 结清 → 处置 → 年审
+    </div>
+  </aside>
+
+  <!-- ============ 主区域 ============ -->
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <h1 id="crumbTitle">经营总览</h1>
+        <span class="sub" id="crumbSub">经营看板</span>
+      </div>
+      <div class="right">
+        <span class="token-chip" id="tokenChip">令牌剩余 -</span>
+        <span class="role-chip" id="roleChip">-</span>
+        <button class="btn sm gray" id="refreshBtn">刷新数据</button>
+        <div class="who">
+          <div class="avatar" id="avatar">U</div>
+          <span id="whoami">-</span>
+        </div>
+        <button class="btn sm ghost" id="logoutBtn">退出</button>
+      </div>
+    </header>
+
+    <div class="content">
+      <section class="view" id="view-dashboard"></section>
+      <section class="view" id="view-dealers"></section>
+      <section class="view" id="view-creditLines"></section>
+      <section class="view" id="view-vehicles"></section>
+      <section class="view" id="view-purchaseOrders"></section>
+      <section class="view" id="view-suppliers"></section>
+      <section class="view" id="view-audits"></section>
+      <section class="view" id="view-alerts"></section>
+      <section class="view" id="view-jobs"></section>
+      <section class="view" id="view-ratingConfigs"></section>
+      <section class="view" id="view-account"></section>
+    </div>
+  </div>
+</div>
+
+<script src="js/common.js"></script>
+<script src="js/views.js"></script>
+<script src="js/purchase-orders.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

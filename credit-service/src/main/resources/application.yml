@@ -1,0 +1,36 @@
+server:
+  port: 8083                         # 每个服务不同端口（web=8080, auth=8081, bank=8082, credit=8083）
+
+spring:
+  application:
+    name: credit-service             # 注册到 Nacos 的服务名
+  datasource:
+    # 脚手架阶段共用同一个库；真正拆分后再改成 credit 独立的库。
+    # 注意：额度的占用/释放仍由核心账务在行锁下完成，分库后跨库事务要重新设计。
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/floorplan}
+    username: ${SPRING_DATASOURCE_USERNAME:floorplan}
+    password: ${SPRING_DATASOURCE_PASSWORD:floorplan}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  flyway:
+    enabled: false                   # 迁移由主应用统一管理，避免多服务重复建表
+  jackson:
+    time-zone: Asia/Tokyo
+    default-property-inclusion: non_null
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        fail-fast: false             # 没起 Nacos 时也能脱离注册中心启动
+
+floorplan:
+  # ---- 鉴权：必须与 auth-service 使用同一个签名密钥，否则验签失败 ----
+  auth:
+    secret: ${FLOORPLAN_JWT_SECRET:dev-only-secret-key-change-me-in-production-0123456789}
+    token-hours: ${FLOORPLAN_TOKEN_HOURS:8}
+  # ---- 评级口径：加点上限（防止误配置成离谱值）----
+  rating:
+    max-rate-surcharge: ${FLOORPLAN_MAX_RATE_SURCHARGE:0.05}
+  lock:
+    provider: memory

@@ -1,0 +1,166 @@
+server:
+  port: 8080
+  # Tomcat 访问日志（2026-10-26 新增）
+  # 背景：本项目原先只有异常才写日志（GlobalExceptionHandler 等 3 处埋点），
+  # 正常请求不留痕，"刷新页面看不到任何日志输出"属于预期行为而非故障。
+  # 开启后每个 HTTP 请求记一行到 logs/access_log.<日期>.log，
+  # 含来源、方法、URI、状态码、响应字节数与处理耗时（%D，毫秒）。
+  # 业务操作轨迹仍以 audit_events 表为准（见《日志查看指南》第 2 节），这里只是请求级流水。
+  tomcat:
+    accesslog:
+      enabled: true
+      # 必须写绝对路径：该值相对于内嵌 Tomcat 的 baseDir（系统临时目录下的
+      # tomcat.8080.xxxx/），写相对路径会把日志丢到 %TEMP% 里，找不到也看不出。
+      directory: C:/Users/Administrator/WorkBuddy/2026-10-25-21-28-58/floorplan-system/logs
+      prefix: access_log
+      suffix: .log
+      rotate: true               # 按天滚动
+      # 默认 true 会缓冲，日志迟迟不落盘（表现为文件 0 字节）。
+      # 关闭缓冲以保证"刷新页面马上能看到"；高并发生产环境可改回 true 并配 buffer 大小。
+      buffered: false
+      # 注意：Tomcat 的 %D 文档标"毫秒"，实际输出的是**微秒**（历史遗留，勿信文档）。
+      # 例："132718(us)" ≈ 132 毫秒。要看整秒可用 %T。
+      pattern: '%h %l %u %t "%r" %s %b %D(us)'
+
+spring:
+  application:
+    name: floorplan-core
+  datasource:
+    # 端口说明：WSL 本机 PostgreSQL 18 占用 5432，故本项目容器使用 5434
+    url: jdbc:postgresql://localhost:5434/floorplan
+    username: floorplan
+    password: floorplan
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  # ---- Redis（仅供分布式互斥锁使用）----
+  # 未部署 Redis 时把 floorplan.lock.provider 保持 memory 即可：
+  # 自动配置会创建连接工厂，但 Lettuce 是懒连接，启动阶段不会真的去连，
+  # 因此"没装 Redis 也能启动、也能跑作业"。
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # 超时必须短：锁操作不该让业务线程卡住。拿不到就是拿不到，立刻返回。
+      timeout: 2s
+      connect-timeout: 2s
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  jackson:
+    time-zone: Asia/Tokyo
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      # 上传文件大小限制（采购清单导入与凭证附件用）
+      max-file-size: 20MB
+      max-request-size: 25MB
+
+logging:
+  level:
+    root: INFO
+    com.company.floorplan: INFO
+
+# ---- 业务参数（默认值，已定稿；调整无需改代码）----
+floorplan:
+  # 结算窗口：售出后 N 个营业日内必须结清
+  settle-window-business-days: 2
+  advance:
+    # 默认垫款比例 90%
+    default-ratio: 0.90
+    # 垫款比例上限 100%（可动态配置，绝不允许超过此上限）
+    max-ratio: 1.0
+  interest:
+    # 默认年利率（示例非报价，需客户确认）
+    default-annual-rate: 0.03
+    # 计息基准天数（预设 365；含当日=垫款/入库当天即起息）
+    days-in-year: 365
+    # 计息流水归档：按季度归档（预设）
+    quarter-archive: true
+  aging:
+    # 库龄递减首次触发天数
+    first-trigger-days: 90
+    # 每期间隔天数
+    period-days: 30
+    # 每期偿还原始垫款的比例
+    reduce-ratio: 0.10
+  # 结算窗口（业务闭环第 ⑥→⑦）：售出后 N 个营业日内必须结清（见上方 settle-window-business-days: 2）
+  # 结算窗口宽限期（营业日）—— 贴合日本实务：超窗口先"告警但允许"，
+  # 仅在宽限期内仍未还才升级为脱信销售(OOT)嫌疑（最高优先级）。预设 5 个营业日。
+  settle-window-grace-days: 5
+  # 额度年审间隔（天）：年审扫描超过该间隔且无进行中年审则自动触发复核。预设 365 天。
+  annual-review:
+    interval-days: 365
+  # 日本新车渠道默认担保方式（可在设定担保接口显式覆盖）
+  security:
+    default-type: ASSIGNMENT
+  rating:
+    # 授信评级利率加点上限（后台动态配置 /api/rating-configs；此处仅限"加点"本身的兜底上限）
+    max-rate-surcharge: 0.05
+  payment:
+    # 置 true 可模拟付款失败，验证整体回滚与 ADVANCE_002
+    simulate-failure: false
+    # 银行回调 HMAC 共享密钥（生产应由环境变量 PAYMENT_WEBHOOK_SECRET 注入，勿入库明文）。
+    # 仅用于校验 /confirm、/fail 的回调签名，与用户 JWT 体系完全独立。
+    webhook-secret: ${PAYMENT_WEBHOOK_SECRET:dev-webhook-secret-change-me}
+  # ---- 请求参数流水日志（2026-10-26 新增，实现见 RequestLoggingFilter）----
+  # access_log 受 Tomcat 变量表限制取不到 request body，POST/PUT 的业务参数在 body 里，
+  # 由本配置在应用侧补齐。日志写入 logs/floorplan.log，级别 INFO，前缀 "REQ"。
+  request-log:
+    enabled: true
+    # 单条 body 最多记录字符数；批量收车（几百台车一次提交）靠它防止撑爆日志
+    max-body-chars: 2000
+    # 【安全】白名单内的接口完全不记录请求体（连缓存都不进）。
+    # /api/auth/login 必须留在这里 —— 前端登录把用户名密码明文放 body，
+    # 落盘后按天滚动留存，密码泄露风险不可接受。新增含凭据的接口时同步加进来。
+    skip-body-paths: /api/auth/login
+    # body 中出现下列字段名（大小写不敏感，支持 "user.password" 这类层级前缀），值替换为 ***
+    sensitive-fields: password,passwd,secret,token,authorization,credential,apiKey,api_key,refreshToken,idToken
+  # ---- 附件存储（ADR-007 决策十）----
+  # 两种实现：配了 s3.bucket 用 S3，否则回退本地磁盘（开发/验证用）。
+  # 生产环境必须配 s3.bucket —— 本地磁盘没有 Object Lock 的"不可删改"强保证。
+  attachments:
+    s3:
+      # 桶名（留空则使用本地磁盘实现）。生产示例：fp-floorplan-credential
+      bucket: ${ATTACHMENTS_S3_BUCKET:}
+      # 数据驻留区域：东京 ap-northeast-1 / 大阪 ap-northeast-3
+      region: ${ATTACHMENTS_S3_REGION:ap-northeast-1}
+    local:
+      # 本地磁盘实现的根目录（仅开发/验证）
+      root: ${ATTACHMENTS_LOCAL_ROOT:./data/attachments}
+      # 本地直传授权签名密钥（仅开发/验证；生产走 S3 预签名，不需要它）
+      token-secret: ${ATTACHMENTS_LOCAL_TOKEN:dev-local-attachment-token}
+    # 上传授权时效（秒）：15 分钟。授权绑定 objectKey + 类型 + 大小，超时即失效。
+    upload-expire-seconds: 900
+    # 访问授权时效（秒）：5 分钟。库里不存永久公开链接。
+    download-expire-seconds: 300
+  # ---- 收款账户加密（ADR-007 决策七）----
+  accounts:
+    # AES-GCM 密钥（生产由环境变量注入，勿入库明文）。
+    # 变更此密钥将导致已存账号无法解密，故生产环境必须固定并妥善保管。
+    encryption-key: ${ACCOUNTS_ENCRYPTION_KEY:dev-account-key-change-me-32bytes}
+
+  # ---- 分布式互斥锁 ----
+  # memory：只在单 JVM 内有效（默认；本地开发不需要装 Redis）
+  # redis ：多实例部署必须切换。否则每个实例在各自内存里都能拿到锁 = 没锁。
+  #         切换只改这一行 —— 上层只认 DistributedLock 接口，业务代码不动。
+  lock:
+    provider: ${LOCK_PROVIDER:memory}
+
+  # ---- 银行回款流水采集（BANK_FETCH）----
+  # 每 15 分钟一次的高频作业。它不套 batch_runs 的按日幂等（那天当天第二次就跑不了），
+  # 幂等落在行级：payment_transactions.uk_payment_txn (account_ref, transaction_id)。
+  bank-fetch:
+    # csv ：读 csv-dir 下 {accountRef}-{yyyyMMdd}.csv（网银导出，日本中小银行的现实形态）
+    # demo：不读文件，返回固定样本。**生产必须改成 csv 或接入银行 API**
+    source: ${BANK_FETCH_SOURCE:demo}
+    csv-dir: ${BANK_CSV_DIR:./data/bank}
+    # 账户引用码（逗号分隔）。生产应改为从 dealer_bank_accounts 读取，此处仅作装配位。
+    accounts: ${BANK_ACCOUNTS:ACC-001,ACC-002}
+    # 拉取窗口向前多看几天：银行入账有延迟、跨行可能 T+1、文件可能晚推。
+    # 只拉当天会漏掉"昨天到账、今天才进文件"的钱 —— 漏一笔就是一笔敞口。
+    lookback-days: 3
+    # 锁租约：必须大于单账户拉取的最长耗时（含银行接口超时）。
+    # 不续期；宁可租约到期重跑一次（重复入账由唯一约束挡住），也不要无限延长。
+    lock-ttl-seconds: 300
