@@ -97,26 +97,25 @@ ALTER TABLE vehicle_units
 -- 4. 注释覆盖与新增说明（D04 §7 中与 vehicle_units 相关的两行）
 -- ---------------------------------------------------------------------
 COMMENT ON COLUMN vehicle_units.invoice_amount IS
-    '发票金额（JPY 整数最小单位）。'                                                            -- V1/V3 原语义保留
-    || 'USED 域限定（D04 §7）：USED 域**不得**作为放款基准，基准见 prudent_value / valuation_id。'
-    || 'LEGACY（vehicle_type=NEW_STOCK）域原口径不变。';
+    -- 下面首句是 V1/V3 原语义保留
+    '发票金额（JPY 整数最小单位）。USED 域限定（D04 §7）：USED 域**不得**作为放款基准，基准见 prudent_value / valuation_id。
+    LEGACY（vehicle_type=NEW_STOCK）域原口径不变。';
 
 COMMENT ON COLUMN vehicle_units.residual_value_estimated IS
-    '预估残值，仅用于预警，不作处置定价依据。'                                                    -- 原注释要点保留
-    || 'USED 域覆盖（D04 §7）：USED 域可作为处置定价依据（R3.5）；LEGACY 域原口径不变。';
+    -- 下面首句是原注释要点保留
+    '预估残值，仅用于预警，不作处置定价依据。USED 域覆盖（D04 §7）：USED 域可作为处置定价依据（R3.5）；LEGACY 域原口径不变。';
 
 COMMENT ON COLUMN vehicle_units.mileage IS
-    '主数据里程，**唯一权威**（V1:38 既有列，本迁移不加新列）。与 auction_lots.mileage_km（票面）、'
-    || 'vehicle_condition_reports.odometer_km / release_receipts.odometer_km（实车快照）是三个不同事实，'
-    || 'R2.3 勾稽=拿后两者与本列比，差异一律建工单。'
-    || '是否覆盖本列按 D06 §2.4 的来源优先级判：低优先来源（票面／申报）与主数据不一致时'
-    ||'**只建工单不覆盖**（D04 §5.1 的"按主数据不覆盖"讲的是这一类）；'
-    || '高优先实物观测（WMS_INBOUND／OWN_AUDIT）胜出时采纳其值并同步改 mileage_source'
-    || '（D06 §2.3 的"里程来源改 WMS_INBOUND"讲的是这一类）。'
-    || '两条文档字面互斥，此为本包采纳的合并口径（已登记待收口方确认）；无论走哪条都写审计。';
-COMMENT ON COLUMN vehicle_units.mileage_source IS '里程来源（MileageSource，D00 §8）。NULL 与 UNKNOWN 是两种事实：'
-    || 'NULL=从未采集（LEGACY 存量），UNKNOWN=采集过但不可信（此时 mileage 必须为 NULL）。'
-    || '两者在 D08 §4.1 取带时行为一致（都按最保守档），但不得在数据层合并成一类。';
+    '主数据里程，**唯一权威**（V1:38 既有列，本迁移不加新列）。与 auction_lots.mileage_km（票面）、
+    vehicle_condition_reports.odometer_km / release_receipts.odometer_km（实车快照）是三个不同事实，
+    R2.3 勾稽=拿后两者与本列比，差异一律建工单。
+    是否覆盖本列按 D06 §2.4 的来源优先级判：低优先来源（票面／申报）与主数据不一致时**只建工单不覆盖**（D04 §5.1 的"按主数据不覆盖"讲的是这一类）；
+    高优先实物观测（WMS_INBOUND／OWN_AUDIT）胜出时采纳其值并同步改 mileage_source
+    （D06 §2.3 的"里程来源改 WMS_INBOUND"讲的是这一类）。
+    两条文档字面互斥，此为本包采纳的合并口径（已登记待收口方确认）；无论走哪条都写审计。';
+COMMENT ON COLUMN vehicle_units.mileage_source IS '里程来源（MileageSource，D00 §8）。NULL 与 UNKNOWN 是两种事实：
+    NULL=从未采集（LEGACY 存量），UNKNOWN=采集过但不可信（此时 mileage 必须为 NULL）。
+    两者在 D08 §4.1 取带时行为一致（都按最保守档），但不得在数据层合并成一类。';
 COMMENT ON COLUMN vehicle_units.mileage_unit IS '里程单位，本期恒 KM（报文字段亦叫 mileage_km，不做换算）';
 -- 車検残存（需求书 R2.2）：本列是**录入值**，不由车検満了日推导。
 -- 推导需要两个口径：起算日（今天／建账日／入库日）与取整方向（满月截断还是向上取整），
@@ -124,20 +123,20 @@ COMMENT ON COLUMN vehicle_units.mileage_unit IS '里程单位，本期恒 KM（�
 -- 就等于替业务定了"残存 1 个月"到底是 29 天还是 31 天，且换证实时时会静默改判。
 -- 因此本列的写入口只做"照抄上游给的月数"，缺值落 NULL（＝未采集），不反推。
 COMMENT ON COLUMN vehicle_units.inspection_remaining_months IS
-    '車検残存月数（录入值，来自車検証／落札票面）。'
-    || '**不由 inspection_expiry_date 推导**：起算日与取整方向均未定源（见左注）。NULL＝未采集。';
+    '車検残存月数（录入值，来自車検証／落札票面）。
+    **不由 inspection_expiry_date 推导**：起算日与取整方向均未定源（见左注）。NULL＝未采集。';
 COMMENT ON COLUMN vehicle_units.mileage_captured_on IS '采集时点（同优先级取最新者，D06 §2.4）';
 COMMENT ON COLUMN vehicle_units.repair_history IS '修復歴枚举 NONE/MINOR/MAJOR/UNKNOWN；取严规则 MAJOR 优先、UNKNOWN 不优于已知（D03 §2.3）';
 COMMENT ON COLUMN vehicle_units.repair_history_desc IS '修復歴摘要文本（R2.1「摘要文本」）；只是说明，判定读 repair_history';
 COMMENT ON COLUMN vehicle_units.auction_grade IS '拍卖场評価点（NUMERIC(3,1)，4.5 之类）。本列是事实记录，不含任何分档推导';
-COMMENT ON COLUMN vehicle_units.valuation_id IS 'USED 域金额基准来源记录（逻辑引用 vehicle_valuations，V60 / W-U2）。'
-    || '取代 invoice_amount 推导放款基准——但**取数算法不在本包**，本包只建列并保证列语义唯一。';
+COMMENT ON COLUMN vehicle_units.valuation_id IS 'USED 域金额基准来源记录（逻辑引用 vehicle_valuations，V60 / W-U2）。
+    取代 invoice_amount 推导放款基准——但**取数算法不在本包**，本包只建列并保证列语义唯一。';
 COMMENT ON COLUMN vehicle_units.prudent_value IS '审慎值（放款时点快照，不随后续重估变化，JPY 整数）';
-COMMENT ON COLUMN vehicle_units.ltv_ratio_snapshot IS '⚠ 展示投影，非权威（D04 §5.1）：advances.ltv_ratio_snapshot（V58）才是判定/对账/D11 断言的读取源，'
-    || '因为 ADR-010 允许同 VIN 多笔垫款、车辆侧这一份会被第二笔覆盖。本列只用于"最近一笔"的列表展示，**不得进任何谓词**。';
+COMMENT ON COLUMN vehicle_units.ltv_ratio_snapshot IS '⚠ 展示投影，非权威（D04 §5.1）：advances.ltv_ratio_snapshot（V58）才是判定/对账/D11 断言的读取源，
+    因为 ADR-010 允许同 VIN 多笔垫款、车辆侧这一份会被第二笔覆盖。本列只用于"最近一笔"的列表展示，**不得进任何谓词**。';
 COMMENT ON COLUMN vehicle_units.ltv_policy_code IS '当时命中的 LTV 政策代码（可复现"当时用哪版政策"）';
-COMMENT ON COLUMN vehicle_units.inspection_certificate_id IS '一车一证指向的当前有効車検証（inspection_certificates.id，V52）。'
-    || '物理 FK 在 V53 加（V50 先跑、V52 后跑，建表顺序决定了本文件不能引用）';
+COMMENT ON COLUMN vehicle_units.inspection_certificate_id IS '一车一证指向的当前有効車検証（inspection_certificates.id，V52）。
+    物理 FK 在 V53 加（V50 先跑、V52 后跑，建表顺序决定了本文件不能引用）';
 COMMENT ON COLUMN vehicle_units.warehouse_custodian_code IS '实控位置：监管仓代码（逻辑引用 custodians，V65 / W-U4）';
 COMMENT ON COLUMN vehicle_units.wms_confirmed_at IS 'WMS 入库确认时间（IN_STOCK 前置证据，D02 环节⑥；写入口 R11 入站，属 W-U6）';
 COMMENT ON COLUMN vehicle_units.topup_required_amount IS 'LTV 突破时的追加还款额（JPY 整数，由 W-U2 的 LTV 计算写入）';
@@ -170,6 +169,6 @@ SELECT 'system:migration', NULL, 'DATA_BACKFILL', 'VEHICLE_UNIT', 'V50:vehicle_t
 
 -- purchase_channel 全 OEM 属既有事实，**不回填**（D04 §10 第 2 行：避免伪造来源）。
 COMMENT ON COLUMN vehicle_units.vehicle_type IS
-    'NEW_STOCK=新车渠道（LEGACY，ADR-USED-FLOORPLAN-001 改名后不再用 NEW），USED=二手车。'
-    || '所有 USED 用例的第一道分支就是本列=''USED''（D00 §1.2 P-2），LEGACY 走原方法不改。'
-    || 'V50 已把存量 NULL 回填为 NEW_STOCK；新写入由应用层必填（CHECK 允许 NULL 是为兼容存量）。';
+    'NEW_STOCK=新车渠道（LEGACY，ADR-USED-FLOORPLAN-001 改名后不再用 NEW），USED=二手车。
+    所有 USED 用例的第一道分支就是本列=''USED''（D00 §1.2 P-2），LEGACY 走原方法不改。
+    V50 已把存量 NULL 回填为 NEW_STOCK；新写入由应用层必填（CHECK 允许 NULL 是为兼容存量）。';

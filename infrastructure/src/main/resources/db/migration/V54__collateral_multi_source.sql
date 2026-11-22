@@ -64,22 +64,22 @@ ALTER TABLE collateral_registration_batches
 --   正确做法是把既有条款声明为唯一顺位载体（下面的 COMMENT ON），
 --   「是否改用 rank_no 替换 priority_rank」属破坏性变更，需签认后另起迁移，本包不自决。
 COMMENT ON COLUMN collateral_registration_batches.priority_rank IS
-    '顺位（V10 原注：1 为优先；新法按对抗要件具备日定序）。'
-    || 'USED 多源并存时**仍以本列为唯一顺位载体**（D04 §5.2 草案的 rank_no 与它同义，已取消，见 V54 头注）。'
-    || '顺位规则本身（哪种来源优先）[待定源 U-02/D-03]，本包不写任何比较逻辑。';
+    '顺位（V10 原注：1 为优先；新法按对抗要件具备日定序）。
+    USED 多源并存时**仍以本列为唯一顺位载体**（D04 §5.2 草案的 rank_no 与它同义，已取消，见 V54 头注）。
+    顺位规则本身（哪种来源优先）[待定源 U-02/D-03]，本包不写任何比较逻辑。';
 
 COMMENT ON COLUMN collateral_registration_batches.authoritative_source_type IS
-    '本批次的权属权威源类型（D00 §8.2 + D04 §10 的 NONE）：'
-    || 'MOVABLE_REGISTRATION=法务省动産譲渡担保登記（LEGACY 唯一来源）；INSPECTION_CERT=車検証持有；'
-    || 'VEHICLE_REGISTRY=自動車登録ファイル；MORTGAGE_REGISTRATION=抵当権設定；NONE=回填后判定为无有效来源。'
-    || '★ Q21 硬门禁读本列时**不得**绕过批次有效性（registration_no 非空 + cancellation_status 未抹消），'
-    || '本列是"来源种类"而不是"是否已登记"——把它当门禁结论用就是第二权威源（违反 ADR-Q27）。';
+    '本批次的权属权威源类型（D00 §8.2 + D04 §10 的 NONE）：
+    MOVABLE_REGISTRATION=法务省动産譲渡担保登記（LEGACY 唯一来源）；INSPECTION_CERT=車検証持有；
+    VEHICLE_REGISTRY=自動車登録ファイル；MORTGAGE_REGISTRATION=抵当権設定；NONE=回填后判定为无有效来源。
+    ★ Q21 硬门禁读本列时**不得**绕过批次有效性（registration_no 非空 + cancellation_status 未抹消），
+    本列是"来源种类"而不是"是否已登记"——把它当门禁结论用就是第二权威源（违反 ADR-Q27）。';
 COMMENT ON COLUMN collateral_registration_batches.encumbrance_conclusion IS
-    '批次级权利瑕疵聚合结论（EncumbranceType）。明细在 certificate_custody_events；'
-    || '除 NONE 外任一项硬阻断质押（P-7）。UNKNOWN 按不通过处理，不得当"没问题"。';
+    '批次级权利瑕疵聚合结论（EncumbranceType）。明细在 certificate_custody_events；
+    除 NONE 外任一项硬阻断质押（P-7）。UNKNOWN 按不通过处理，不得当"没问题"。';
 COMMENT ON COLUMN collateral_registration_batches.certificate_id IS
-    '本批次对应的車検証（inspection_certificates.id，V52）。逻辑关联用物理 FK：'
-    || '同一上下文内（担保域），且 W-U4 的放证线需要按证反查批次。';
+    '本批次对应的車検証（inspection_certificates.id，V52）。逻辑关联用物理 FK：
+    同一上下文内（担保域），且 W-U4 的放证线需要按证反查批次。';
 
 -- ---------------------------------------------------------------------
 -- 2. security_records 加列：USED 域三种设定事实（D04 §5.2）
@@ -120,10 +120,10 @@ ALTER TABLE financing_lien_checks
         ('MANUAL', 'OEM_PORTAL', 'REGISTRY_API', 'REGISTRY_AGENT')) NOT VALID;
 
 COMMENT ON COLUMN financing_lien_checks.check_source IS
-    '登记核查来源（V2:13 原义：MANUAL / OEM_PORTAL / REGISTRY_API）。'
-    || 'USED 域限定（D04 §7）：USED 域取值限 MANUAL / REGISTRY_AGENT / REGISTRY_API；'
-    || 'OEM_PORTAL 属 LEGACY（厂家门户查不到二手车权属），USED 域新写入禁用——'
-    || '该条是应用层约束，DDL CHECK 无法跨表判 vehicle_type（见上方说明）。';
+    '登记核查来源（V2:13 原义：MANUAL / OEM_PORTAL / REGISTRY_API）。
+    USED 域限定（D04 §7）：USED 域取值限 MANUAL / REGISTRY_AGENT / REGISTRY_API；
+    OEM_PORTAL 属 LEGACY（厂家门户查不到二手车权属），USED 域新写入禁用——
+    该条是应用层约束，DDL CHECK 无法跨表判 vehicle_type（见上方说明）。';
 
 -- ---------------------------------------------------------------------
 -- 4. 回填（D04 §10 V54 行：唯一允许 UPDATE 的场景，且必须留审计）
@@ -178,15 +178,15 @@ SELECT 'system:migration', NULL, 'DATA_BACKFILL', 'COLLATERAL_BATCH', 'V54:autho
 -- 回填完成前，guarantee-gate 必须保持关闭（AGENTS §8 红线）。
 -- 本迁移**不碰任何 yml / 配置开关**：开关的启停属部署与签认动作，不属包内自决。
 COMMENT ON TABLE collateral_registration_batches IS
-    '担保登记批次：一批车一次法务局登记，共享一个登记编号与一份担保合同（V10 原义）。'
-    || 'USED 多源改造（V54 / ADR-U-04）后，本表仍是**唯一权威源**（ADR-Q27 不变），'
-    || '只是多了 authoritative_source_type 说明"这批凭什么来源成立"；'
-    || '门禁判定条件不变：registration_no IS NOT NULL 且 cancellation_status NOT IN (''DONE'',''CANCELLED'')，'
-    || '再叠 encumbrance_conclusion 的瑕疵阻断。';
+    '担保登记批次：一批车一次法务局登记，共享一个登记编号与一份担保合同（V10 原义）。
+    USED 多源改造（V54 / ADR-U-04）后，本表仍是**唯一权威源**（ADR-Q27 不变），
+    只是多了 authoritative_source_type 说明"这批凭什么来源成立"；
+    门禁判定条件不变：registration_no IS NOT NULL 且 cancellation_status NOT IN (''DONE'',''CANCELLED'')，
+    再叠 encumbrance_conclusion 的瑕疵阻断。';
 
 -- V18 投影表口径再覆盖一次（V25 已改过一轮，这里只补 USED 多源后的增量语义）
 COMMENT ON COLUMN collateral_registration.status IS
-    '投影状态：由 V10 有效登记批次推导（REGISTERED/NONE）；非独立判定口径，见 ADR-Q27'  -- V25:54 原文保留
-    || '。USED 多源后：投影仍只反映"登记类来源是否成立"，'
-    || '新增来源类型（INSPECTION_CERT / VEHICLE_REGISTRY / MORTGAGE_REGISTRATION）**是否进投影值域**'
-    || '[待定源 U-02] 未签，签认前本表值域与既有断言一律不变。';
+    -- 下面首句是 V25:54 原文保留
+    '投影状态：由 V10 有效登记批次推导（REGISTERED/NONE）；非独立判定口径，见 ADR-Q27。USED 多源后：投影仍只反映"登记类来源是否成立"，
+    新增来源类型（INSPECTION_CERT / VEHICLE_REGISTRY / MORTGAGE_REGISTRATION）**是否进投影值域**
+    [待定源 U-02] 未签，签认前本表值域与既有断言一律不变。';

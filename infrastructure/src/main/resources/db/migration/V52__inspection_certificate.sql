@@ -80,20 +80,20 @@ CREATE INDEX IF NOT EXISTS idx_cert_custodian
 -- 换证链追溯（旧证→新证）
 CREATE INDEX IF NOT EXISTS idx_cert_predecessor ON inspection_certificates (predecessor_id);
 
-COMMENT ON TABLE inspection_certificates IS '車検証台账（R5.1）。写入口：建账与换证=web(core) UsedVehicleMasterApplicationService（W-U1）；'
-    || '质押/解质/放证=release-service 与 collateral-reg-service（W-U4）。'
-    || '权属权威源**不是本表**——本表是 INSPECTION_CERT 这一路证据的载体，最终结论读 collateral_registration_batches（ADR-Q27 唯一权威源）；'
-    || '多源并存时的顺位与投影见 V54。';
+COMMENT ON TABLE inspection_certificates IS '車検証台账（R5.1）。写入口：建账与换证=web(core) UsedVehicleMasterApplicationService（W-U1）；
+    质押/解质/放证=release-service 与 collateral-reg-service（W-U4）。
+    权属权威源**不是本表**——本表是 INSPECTION_CERT 这一路证据的载体，最终结论读 collateral_registration_batches（ADR-Q27 唯一权威源）；
+    多源并存时的顺位与投影见 V54。';
 COMMENT ON COLUMN inspection_certificates.cert_key IS '幂等锚点 CERT-{certificate_no}（D00 §13.1）';
 COMMENT ON COLUMN inspection_certificates.certificate_no IS '証書番号（車検証番号）。与 VIN 的一致性由 CERT_003 校验（D06 G-D1）；同号换发新证走 predecessor_id 成链';
 COMMENT ON COLUMN inspection_certificates.owner_name IS '所有者（抵押权/让渡担保结构下常≠使用者，必须分列存）';
 COMMENT ON COLUMN inspection_certificates.inspection_expiry_date IS '車検満了日（NOT NULL：无证检到期日的車検証不能作为建账依据）';
 COMMENT ON COLUMN inspection_certificates.security_type IS '本证承载的担保形态（SecurityType）。USED 域默认值 [待定源 D-03] 未签，本列只存事实不做默认';
-COMMENT ON COLUMN inspection_certificates.encumbrance_status IS '权利瑕疵聚合结论（EncumbranceType）：明细见 certificate_custody_events。'
-    || '除 NONE 外任一项均硬阻断质押（D03 §2.5 I3 / P-7）；UNKNOWN 按不通过处理，不得因"没查"放行';
+COMMENT ON COLUMN inspection_certificates.encumbrance_status IS '权利瑕疵聚合结论（EncumbranceType）：明细见 certificate_custody_events。
+    除 NONE 外任一项均硬阻断质押（D03 §2.5 I3 / P-7）；UNKNOWN 按不通过处理，不得因"没查"放行';
 COMMENT ON COLUMN inspection_certificates.holder_custodian_code IS '保管者（逻辑引用 custodians.code，V65/W-U4 扩列，本包不建 FK）';
-COMMENT ON COLUMN inspection_certificates.status IS '六态之一。状态一律经领域方法流转（domain CertificateStateMachine），禁止 UPDATE ... SET status=...；'
-    || 'REISSUED/LOST 是"退出在场"的两种终态，其余四态各只允许一张有效证（V53 的 uk_cert_active_vin 兜底）';
+COMMENT ON COLUMN inspection_certificates.status IS '六态之一。状态一律经领域方法流转（domain CertificateStateMachine），禁止 UPDATE ... SET status=...；
+    REISSUED/LOST 是"退出在场"的两种终态，其余四态各只允许一张有效证（V53 的 uk_cert_active_vin 兜底）';
 COMMENT ON COLUMN inspection_certificates.predecessor_id IS '换证链：新证指向旧证，旧证置 REISSUED（UC-R2-5「同 VIN 証書番号变更有历史」）';
 COMMENT ON COLUMN inspection_certificates.release_order_no IS '放证线关联指令号（逻辑引用 release_orders.order_no，V17；写侧属 W-U4）';
 
@@ -134,13 +134,13 @@ CREATE INDEX IF NOT EXISTS idx_cce_cert_time
 CREATE INDEX IF NOT EXISTS idx_cce_type_time
     ON certificate_custody_events (event_type, occurred_at DESC);
 
-COMMENT ON TABLE certificate_custody_events IS '車検証保管/质押/换证/核查流水（append-only，R2.5 + R5.3）。'
-    || 'actor 二义性显式建模：actor_type=USER 时 actor 是自然人（来自 AuditActor，不由请求体自报），'
-    || 'actor_type=PARTNER 时 actor 是 partner_code（R12.2）。';
-COMMENT ON COLUMN certificate_custody_events.event_type IS '九值定源（D04 §3.10）。AMENDED=换证/記載変更**在途**事件：'
-    || '因为定源状态枚举只有六态、没有"换证中"这一态，在途事实就记在这里（见 V52 头注的七态↔六态冲突）';
-COMMENT ON COLUMN certificate_custody_events.check_source IS '登记核查来源：MANUAL / REGISTRY_AGENT（代办回执）/ REGISTRY_API。'
-    || 'USED 域**禁用** LEGACY 的 OEM_PORTAL（厂家门户查不到二手车权属，R5.3）；'
-    || '存量 financing_lien_checks.check_source 仍含 OEM_PORTAL，收紧在 V54';
+COMMENT ON TABLE certificate_custody_events IS '車検証保管/质押/换证/核查流水（append-only，R2.5 + R5.3）。
+    actor 二义性显式建模：actor_type=USER 时 actor 是自然人（来自 AuditActor，不由请求体自报），
+    actor_type=PARTNER 时 actor 是 partner_code（R12.2）。';
+COMMENT ON COLUMN certificate_custody_events.event_type IS '九值定源（D04 §3.10）。AMENDED=换证/記載変更**在途**事件：
+    因为定源状态枚举只有六态、没有"换证中"这一态，在途事实就记在这里（见 V52 头注的七态↔六态冲突）';
+COMMENT ON COLUMN certificate_custody_events.check_source IS '登记核查来源：MANUAL / REGISTRY_AGENT（代办回执）/ REGISTRY_API。
+    USED 域**禁用** LEGACY 的 OEM_PORTAL（厂家门户查不到二手车权属，R5.3）；
+    存量 financing_lien_checks.check_source 仍含 OEM_PORTAL，收紧在 V54';
 COMMENT ON COLUMN certificate_custody_events.encumbrance_type IS '本条流水发现的瑕疵类型；与聚合结论列（inspection_certificates.encumbrance_status）分列存，便于"何时由谁发现"可追溯';
 COMMENT ON COLUMN certificate_custody_events.trace_id IS '链路追踪号，与 audit_events.trace_id 对齐（同一动作两处可勾稽）';

@@ -15,9 +15,9 @@
 -- 因此本迁移不新建 product_line 列——造它就等于凭空加第二把分流键，
 -- 两把键迟早分叉（D00 §1.2 P-2 明令分流键只有一把）。
 COMMENT ON COLUMN vehicle_units.vehicle_type IS
-    '业务线分流键（D00 §1.2 P-2 定源）：NEW_STOCK=新车渠道（LEGACY，存量与在途需求全部走原方法，行为零改动）；'
-    || 'USED=二手车库存垫资。USED 用例的第一道分支必须是本列=''USED''，LEGACY 分支不得被改动或反转。'
-    || '分流键只有本列这一把：release-service 的 product_line 是服务内部分流枚举，**不是**库内列，也不得用来判定 USED/LEGACY（D13 §3 G11）。';
+    '业务线分流键（D00 §1.2 P-2 定源）：NEW_STOCK=新车渠道（LEGACY，存量与在途需求全部走原方法，行为零改动）；
+    USED=二手车库存垫资。USED 用例的第一道分支必须是本列=''USED''，LEGACY 分支不得被改动或反转。
+    分流键只有本列这一把：release-service 的 product_line 是服务内部分流枚举，**不是**库内列，也不得用来判定 USED/LEGACY（D13 §3 G11）。';
 
 -- ---------------------------------------------------------------------
 -- 2. CHECK 扩展（D04 §2 把这两条明确分给 V40）
@@ -43,9 +43,9 @@ ALTER TABLE vehicle_units
         OR purchase_channel IN ('OEM', 'AUCTION', 'WHOLESALE', 'TRADE_IN', 'OTHER'));
 
 COMMENT ON COLUMN vehicle_units.purchase_channel IS
-    '采购渠道（D00 §8.1 PurchaseChannel 五值）：OEM / AUCTION / WHOLESALE / TRADE_IN / OTHER。'
-    || 'USED 域导入层做**强枚举校验**，OTHER 必须带备注（R2.1 验收点）；'
-    || '本列同时是 LEGACY 放行校验 supplierGuaranteeAbility 的路由依据（V22 口径），二者含义一致。';
+    '采购渠道（D00 §8.1 PurchaseChannel 五值）：OEM / AUCTION / WHOLESALE / TRADE_IN / OTHER。
+    USED 域导入层做**强枚举校验**，OTHER 必须带备注（R2.1 验收点）；
+    本列同时是 LEGACY 放行校验 supplierGuaranteeAbility 的路由依据（V22 口径），二者含义一致。';
 
 -- ---------------------------------------------------------------------
 -- 3. 枚举字典表：本轮**不建**（条件项，非遗漏）

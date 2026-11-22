@@ -51,21 +51,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_vcr_report_no
     ON vehicle_condition_reports (report_no)
     WHERE report_no IS NOT NULL;
 
-COMMENT ON TABLE vehicle_condition_reports IS '车况票（R2.2 三型：検査票 / 入库复核 / 自盘）。列集=D04 §3.8 全量，'
-    || '待法务/业务逐项勾选后删列（只删列、不改列名）。写入口 = UsedVehicleMasterApplicationService.recordConditionReport（UC-R2-2，web(core)）。'
-    || '本表**只追加不修改**：更正=新出一张票，历史票保留（同 VIN 多票是正常态，靠 idx_vcr_vin_date 取最新）。';
+COMMENT ON TABLE vehicle_condition_reports IS '车况票（R2.2 三型：検査票 / 入库复核 / 自盘）。列集=D04 §3.8 全量，
+    待法务/业务逐项勾选后删列（只删列、不改列名）。写入口 = UsedVehicleMasterApplicationService.recordConditionReport（UC-R2-2，web(core)）。
+    本表**只追加不修改**：更正=新出一张票，历史票保留（同 VIN 多票是正常态，靠 idx_vcr_vin_date 取最新）。';
 COMMENT ON COLUMN vehicle_condition_reports.report_no IS '外部票据编号（検査票番号等）。非空时兼作幂等键段 CRR:{report_no}；自盘票可空';
 COMMENT ON COLUMN vehicle_condition_reports.report_type IS 'AUCTION_INSPECTION=検査票 / WMS_INBOUND_RECHECK=入库复核 / OWN_AUDIT=自盘（D04 §3.8 三值，D06 §2.1 UC-R2-2）';
-COMMENT ON COLUMN vehicle_condition_reports.vin IS '車台番号。逻辑引用 vehicle_units.vin（V1:32 PK），不建物理 FK：'
-    || '建票（UC-R2-2）可能先于建账（UC-R2-1）到达（検査票在落札当晚就推送），建 FK 会让合法票被拒收';
-COMMENT ON COLUMN vehicle_condition_reports.odometer_km IS '实车/票面里程观测值，与 vehicle_units.mileage（主数据权威）勾稽。'
-    || '差异超阈值只建差异工单、**不回写主数据**（D04 §5.1 三里程名分工 + D06 §2.3 禁止静默覆盖）；'
-    || '阈值 floorplan.used.mileage-diff-threshold-km 是 [待定源]，由配置读取，不在本包硬编码';
+COMMENT ON COLUMN vehicle_condition_reports.vin IS '車台番号。逻辑引用 vehicle_units.vin（V1:32 PK），不建物理 FK：
+    建票（UC-R2-2）可能先于建账（UC-R2-1）到达（検査票在落札当晚就推送），建 FK 会让合法票被拒收';
+COMMENT ON COLUMN vehicle_condition_reports.odometer_km IS '实车/票面里程观测值，与 vehicle_units.mileage（主数据权威）勾稽。
+    差异超阈值只建差异工单、**不回写主数据**（D04 §5.1 三里程名分工 + D06 §2.3 禁止静默覆盖）；
+    阈值 floorplan.used.mileage-diff-threshold-km 是 [待定源]，由配置读取，不在本包硬编码';
 COMMENT ON COLUMN vehicle_condition_reports.structure_condition IS 'フレーム状況（车架状态）。取值集未定源 → 本列不建 CHECK，避免自造枚举';
 COMMENT ON COLUMN vehicle_condition_reports.interior_condition IS '内装状態（同上，取值集未定源）';
 COMMENT ON COLUMN vehicle_condition_reports.exterior_condition IS '外装状態（同上，取值集未定源）';
-COMMENT ON COLUMN vehicle_condition_reports.repair_history IS '修復歴判定（D00 §8.1）。与主数据不一致时按"MAJOR 优先、UNKNOWN 不优于已知"取严（D06 §2.3），'
-    || '取严动作发生在应用层，本列只存票面事实';
+COMMENT ON COLUMN vehicle_condition_reports.repair_history IS '修復歴判定（D00 §8.1）。与主数据不一致时按"MAJOR 优先、UNKNOWN 不优于已知"取严（D06 §2.3），
+    取严动作发生在应用层，本列只存票面事实';
 COMMENT ON COLUMN vehicle_condition_reports.recycle_ticket_flag IS 'リサイクル券（回收费预缴凭证）持有标志——日本二手車过户的前置要件';
 COMMENT ON COLUMN vehicle_condition_reports.compulsory_insurance_expiry IS '自賠責保険到期日';
 COMMENT ON COLUMN vehicle_condition_reports.automobile_tax_status IS '自動車税状况。取值集未定源 → 不建 CHECK';

@@ -65,6 +65,6 @@ ALTER TABLE inspection_certificates
         AND (status <> 'LOST'     OR lost_at     IS NOT NULL));
 
 COMMENT ON INDEX uk_cert_active_vin IS
-    'R2.5 一车一证的数据库兜底：应用层查重（UsedVehicleMasterApplicationService）之外必须有本索引，'
-    || '否则并发建账会插出两张有效証書（select-then-insert 竞态）。违反时接口回 CERT_002（D07 §8）。';
+    'R2.5 一车一证的数据库兜底：应用层查重（UsedVehicleMasterApplicationService）之外必须有本索引，
+    否则并发建账会插出两张有效証書（select-then-insert 竞态）。违反时接口回 CERT_002（D07 §8）。';
 COMMENT ON INDEX idx_cert_expiry IS '車検満了日扫描（R5.2 到期预警）——预警窗口天数 [待定源]，本索引只保证扫得动，不含任何天数口径';

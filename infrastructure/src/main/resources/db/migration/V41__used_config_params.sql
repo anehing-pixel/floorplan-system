@@ -49,23 +49,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_ucp_active_key
 CREATE INDEX IF NOT EXISTS idx_ucp_status_key
     ON used_config_params (status, param_key);
 
-COMMENT ON TABLE used_config_params IS 'USED 域可调参数表（R13.4 的"可调参数必须双层约束"里的数据侧那一半）。'
-    || '**本轮零种子行**：D00 §12 里标注 [待定源] 的默认值（D-02/D-05/D-06/U-02/U-11）都还没签字，'
-    || '按边界纪律不实现任何未签字数值，因此不插种子；已签字的 §12 键走 yml 载体（配置优先于表，两种载体可互换），'
-    || '本表只承载"需要运行时改且需要审计留痕"的那部分。'
-    || '签字后由**独立迁移**补种子，且每行必须写 source_ref 指明定源编号——无源号的数值不许进本表。'
-    || '写入口属后台配置域（权限点 CONFIG_MAINTAIN）；读侧当前接线见 UsedConfigRepository。';
-COMMENT ON COLUMN used_config_params.param_key IS '参数键，命名沿用 D00 §12 的统一前缀 floorplan.used.（§12 明写与 LEGACY 配置物理隔离）。'
-    || '★ 更正（2026-11-22 自查）：§12 现表内**没有**下列五个 R1 键（只给了 valuation/ltv/settlement/release 等段），'
-    || '本列把它们列出的唯一出处是 V41 自身，属"包内暂定名"，需收口方在 §12 补登记后才能落种子行。'
-    || '已知待签键位（**只列名不列值**）：floorplan.used.compliance-valid-days[D-02]、'
-    || 'floorplan.used.license-expiry-alert-days、floorplan.used.mileage-diff-threshold-km、'
-    || 'floorplan.used.master-data-diff-alert-enabled、'
-    || 'floorplan.used.dealer-rating-two-person-required（红线，签认后必须为 true）';
+COMMENT ON TABLE used_config_params IS 'USED 域可调参数表（R13.4 的"可调参数必须双层约束"里的数据侧那一半）。
+    **本轮零种子行**：D00 §12 里标注 [待定源] 的默认值（D-02/D-05/D-06/U-02/U-11）都还没签字，
+    按边界纪律不实现任何未签字数值，因此不插种子；已签字的 §12 键走 yml 载体（配置优先于表，两种载体可互换），
+    本表只承载"需要运行时改且需要审计留痕"的那部分。
+    签字后由**独立迁移**补种子，且每行必须写 source_ref 指明定源编号——无源号的数值不许进本表。
+    写入口属后台配置域（权限点 CONFIG_MAINTAIN）；读侧当前接线见 UsedConfigRepository。';
+COMMENT ON COLUMN used_config_params.param_key IS '参数键，命名沿用 D00 §12 的统一前缀 floorplan.used.（§12 明写与 LEGACY 配置物理隔离）。
+    ★ 更正（2026-11-22 自查）：§12 现表内**没有**下列五个 R1 键（只给了 valuation/ltv/settlement/release 等段），
+    本列把它们列出的唯一出处是 V41 自身，属"包内暂定名"，需收口方在 §12 补登记后才能落种子行。
+    已知待签键位（**只列名不列值**）：floorplan.used.compliance-valid-days[D-02]、
+    floorplan.used.license-expiry-alert-days、floorplan.used.mileage-diff-threshold-km、
+    floorplan.used.master-data-diff-alert-enabled、
+    floorplan.used.dealer-rating-two-person-required（红线，签认后必须为 true）';
 COMMENT ON COLUMN used_config_params.value_type IS '值类型：应用层据此解析，避免把"1000"当字符串比大小。DECIMAL 用于比例/阈值，金额为 BIGINT 整数最小单位';
 COMMENT ON COLUMN used_config_params.status IS 'DRAFT=已录入未生效（签字流程中间态）/ ACTIVE=生效（同键唯一）/ RETIRED=已停用（保留历史，不删行）';
 COMMENT ON COLUMN used_config_params.effective_on IS '生效日；判定读参数时必须带"当前日期落在 [effective_on, expired_on) 内"，否则等于给了个随时可改的数';
 COMMENT ON COLUMN used_config_params.source_ref IS '定源编号（如 D-02、U-11）。★ 本列是"这行数值凭哪份签字进来"的证据，NOT NULL 与否由评审定，暂可空但空值行不得置 ACTIVE（应用层校验）';
 COMMENT ON COLUMN used_config_params.approved_by IS '批准人（D04 §11 要求参数变更"二人审批 + 审计"；单靠 updated_by 无法把"改的人"和"批的人"分开）';
-COMMENT ON COLUMN used_config_params.param_value IS '参数值（字符串存储，按 value_type 解析）。'
-    || '★ 禁止把本列当兜底：读不到 ACTIVE 行时应用层不得猜默认值，按 fail-closed 走（见 V41 头注）';
+COMMENT ON COLUMN used_config_params.param_value IS '参数值（字符串存储，按 value_type 解析）。
+    ★ 禁止把本列当兜底：读不到 ACTIVE 行时应用层不得猜默认值，按 fail-closed 走（见 V41 头注）';

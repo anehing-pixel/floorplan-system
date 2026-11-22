@@ -61,9 +61,9 @@ CREATE INDEX IF NOT EXISTS idx_license_expiry
     WHERE status = 'ACTIVE';
 CREATE INDEX IF NOT EXISTS idx_dlic_dealer ON dealer_licenses (dealer_id);
 
-COMMENT ON TABLE dealer_licenses IS '车商（借款人）许可证档案（R1.1 古物商营业許可）：明细分层，dealers.furigusho_no 只存摘要。'
-    || '写入口=web(core) DealerQualificationController，权限点 DEALER_QUALIFICATION_MAINTAIN（D07 §7.1）。'
-    || '「无有效期」[待定源 D-02] 未签：expires_on 允许 NULL，到期天数口径不得在本包猜测。';
+COMMENT ON TABLE dealer_licenses IS '车商（借款人）许可证档案（R1.1 古物商营业許可）：明细分层，dealers.furigusho_no 只存摘要。
+    写入口=web(core) DealerQualificationController，权限点 DEALER_QUALIFICATION_MAINTAIN（D07 §7.1）。
+    「无有效期」[待定源 D-02] 未签：expires_on 允许 NULL，到期天数口径不得在本包猜测。';
 COMMENT ON COLUMN dealer_licenses.license_type IS '许可类型，本期仅 FURIGUSHO=古物商（D04 §3.1 预留扩展位，扩展值需业务定源后加入 CHECK）';
 COMMENT ON COLUMN dealer_licenses.competent_authority IS '管辖公安委员会（都道府县），是核查与函证的对接对象';
 COMMENT ON COLUMN dealer_licenses.expires_on IS '许可满了日；NULL=业务上无有效期（古物商许可无期限说，[待定源 D-02] 未签前不得当作到期风险）';
@@ -101,8 +101,8 @@ CREATE TABLE IF NOT EXISTS dealer_auction_memberships (
 CREATE INDEX IF NOT EXISTS idx_dmem_dealer_house
     ON dealer_auction_memberships (dealer_id, auction_house_code, status);
 
-COMMENT ON TABLE dealer_auction_memberships IS '车商在各拍卖场的会员关系（R1.1：按场分别维护，一个场次一条记录）。'
-    || 'auction_house_code 逻辑引用 auction_houses（V60 / W-U4），本包不建物理 FK。';
+COMMENT ON TABLE dealer_auction_memberships IS '车商在各拍卖场的会员关系（R1.1：按场分别维护，一个场次一条记录）。
+    auction_house_code 逻辑引用 auction_houses（V60 / W-U4），本包不建物理 FK。';
 COMMENT ON COLUMN dealer_auction_memberships.member_grade IS '会员分级（影響 出品制限与 LTV 上浮），分级口径 [待定源]：本列只存代码，不在本包推导任何上浮幅度';
 COMMENT ON COLUMN dealer_auction_memberships.status IS 'ACTIVE/SUSPENDED/EXPIRED/TERMINATED；只有 ACTIVE 参与 G-A2 判定';
 
@@ -143,8 +143,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_dchk_request_no
 CREATE INDEX IF NOT EXISTS idx_dchk_dealer_type
     ON dealer_compliance_checks (dealer_id, check_type, checked_on DESC);
 
-COMMENT ON TABLE dealer_compliance_checks IS '车商合规核查留痕（R1.2 反社 / AML / 本人确认 / 征信）。'
-    || 'valid_until 的有效期天数=floorplan.used.compliance-valid-days [待定源 D-02]，本包不硬编码，由应用层从配置读取后写入；配置缺省时以入参为准。';
+COMMENT ON TABLE dealer_compliance_checks IS '车商合规核查留痕（R1.2 反社 / AML / 本人确认 / 征信）。
+    valid_until 的有效期天数=floorplan.used.compliance-valid-days [待定源 D-02]，本包不硬编码，由应用层从配置读取后写入；配置缺省时以入参为准。';
 COMMENT ON COLUMN dealer_compliance_checks.result IS 'PASS/FAIL/UNKNOWN；UNKNOWN 在准入判定中按不通过处理（P-7），不得因"未知"放行';
 COMMENT ON COLUMN dealer_compliance_checks.request_no IS '外部核查请求号（幂等键组成段，D00 §13 CHK:{partner_code}:{request_no}）；人工录入为 NULL';
 COMMENT ON COLUMN dealer_compliance_checks.checked_by IS '核查执行人，同时是 COMPLIANCE_CHECK_DONE 审计动作的主体（D04 §3.3）';
