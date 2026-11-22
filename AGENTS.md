@@ -22,7 +22,7 @@
 日本汽车经销商**库存融资（floorplan）核心系统**：经销商以在库车辆做让渡担保，从资金方取得垫款，
 车辆售出后回款解押。原为 Rails 单体，正在重写为 Java 17 + Spring Boot 3.2.5 并做微服务化。
 
-**当前真实状态**：后端主干功能可运行、14 个 Maven 模块全绿、冒烟 200+ 断言通过；
+**当前真实状态**：后端主干功能可运行、全部 Maven 模块全绿（模块数不写死，以父 `pom.xml` `<modules>` 为准）、冒烟 200+ 断言通过；
 但**事件驱动层未落地**（outbox 只有表没有实现、借据没有生产者、工单表没有 Java 类），
 所以 11 个业务环节里所有跨服务的衔接仍靠人工搬数据。不要假设「表建了就是功能有了」。
 
@@ -96,6 +96,10 @@ release/recon (各自独立进程)  ──┘         └──► infrastructur
 | bank | 8082 | release | 8087 |
 | credit | 8083 | recon | 8088 |
 | risk | 8084 | gateway | **18080**（统一入口） |
+| **external-api** 🆕 | **18090** | USED 波次 W-U0 建的 DMZ 进程，**不经网关**、不连 `public` | — |
+
+> `external-api` 只有骨架（pom + 启动类 + yml），能力归 W-U3（D02 §3.3 五件套）；
+> 看到模块存在就读成「外部接口已通」正是 AGENTS §12 反模式第 1 条。
 
 ### 五个必须知道的坑
 
@@ -118,7 +122,8 @@ release/recon (各自独立进程)  ──┘         └──► infrastructur
 ## 5. 构建与验证（硬门槛）
 
 ```bash
-# 1) 全量编译 + 全量单测（15 个 build unit 必须全 SUCCESS）
+# 1) 全量编译 + 全量单测（全部 build unit 必须 SUCCESS；
+#    数 = 父 pom `<modules>` 条目数 + 父本身，**不要在文档或脚本里写死**，看 FAIL 就行）
 mvn -B clean package
 
 # 2) 单模块快速验证（改 domain/application 时用这个，快）
@@ -173,6 +178,10 @@ V26 `event_consumption` 均已落库；逐号的实时台账在 `PROGRESS.md §2
 | `V29` | 工单 SLA / 升级字段（够用则不建） | W2-WORKORDER |
 | `V30` | 经销商画像每日快照 | 预留 |
 | `V31` | `dpd_stage_rules` / `default_events` / `deduction_failures` | 预留 |
+| **`V40`–`V79`** | **二手车 USED 域整段占用**（分包 V40–V54 / V55–V64 / V65–V69 / V70–V74 / V75–V79，逐号见 D04 §2） | USED W-U1..W-U5 |
+
+> 上表只是**摘要**，且 USED 波次开进来后它落后得比 `PROGRESS.md` 快。
+> 拿号之前先读 `PROGRESS.md §2` 的号段登记行；V32–V39 是有意留的空隙，别顺手占。
 
 **开新分支前必须先在 `PROGRESS.md` 登记号段。** 教训：两个并行工作流各建了一个 `V24__*.sql`，
 Flyway 直接拒绝启动，冒烟全断。

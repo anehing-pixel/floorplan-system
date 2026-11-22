@@ -25,6 +25,12 @@
     <module>collateral-reg-service</module>
     <module>release-service</module>
     <module>recon-service</module>
+    <!-- USED 波次 W-U0 交付 ②：全设计集唯一新增部署单元（D00 §4 进程表 / D02 §3.1，端口 18090）。
+         artifactId 就叫 external-api（不加 floorplan- 前缀），注册名 external-api-service——
+         两套名按 D12 W-U0 警示 ③ 裁决固定。
+         ⚠️ 这是骨架，不是能力：D02 §3.3 五件套里只有「启动类与装配」一部分落地，
+         其余归 W-U3，验收认 D11 A5 组断言，不认本行存在。 -->
+    <module>external-api</module>
   </modules>
   <properties>
     <java.version>17</java.version>

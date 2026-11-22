@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  external-api（DMZ 外部接口层）—— W-U0 交付 ②「唯一新增构建单元」的骨架。
+
+  命名口径（D12 W-U0 警示 ③ 裁决，D00 §8 进程表已登记）：
+    模块目录 / artifactId  = external-api
+    spring.application.name = external-api-service
+  两套名混用会让 CLIENT_* 直连地址与网关 uri 写错，故在此显式写明。
+
+  ⚠️ 骨架 ≠ 能力（AGENTS §12 反模式第 1 条 / D02 §3.3 五件套 / D12 §3 W-U0 风险行）。
+  本模块的存在只满足 D02 §3.3 的第 4 件里「启动类与装配」这一半；
+  入站验签 / 出站签名 / nonce / 限流 / 密钥轮换 / integration 六表 / 端到端往返 / 冒烟断言
+  全部归 **W-U3** 交付，验收以 D11 A5 组与 smoke_used_integration.py 为准，不以目录存在为准。
+
+  INV-2（D02 §5）要求本模块**编译期不依赖 domain / application**，
+  即 DMZ 代码里不得引用任何 `*ApplicationService`。
+  但注意：floorplan-common 自身以 compile 作用域依赖 domain 与 application，
+  故 `mvn dependency:tree` 必然看到两者——该判据的「依赖树检查」一半在当前模块图下不可满足。
+  已登记为 D13 §5.2 R11 待裁决；在裁决前，本 pom 的做法是
+  **不声明 domain/application/infrastructure 直接依赖**，把「不得引用业务服务」
+  作为源码级红线执行，不用 exclusions 制造运行期 NoClassDefFoundError。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.company</groupId>
+    <artifactId>floorplan-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
+
+  <!-- 按裁决取 external-api，不加 floorplan- 前缀；D00 §8 / D12 W-U0 警示 ③ -->
+  <artifactId>external-api</artifactId>
+  <name>Floorplan :: External API (DMZ)</name>
+  <description>外部接口 DMZ 隔离层（W-U0 骨架，能力由 W-U3 交付；不跑业务规则、不连 public）</description>
+
+  <dependencies>
+    <!-- 只依赖 common：契约（common/contract）与序列化所需。
+         不依赖 domain / application / infrastructure —— INV-2 的源码级红线见文件头注释与 R11。 -->
+    <dependency>
+      <groupId>com.company</groupId>
+      <artifactId>floorplan-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- 入站 HTTP 端点（/external/** 12 个 I-*）与管理端点（/api/partners* 等） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- DMZ 自带 integration schema 的 JDBC 访问（inbound_messages / outbound_tasks /
+         call_logs / nonces / partners / partner_credentials）。
+         不走 infrastructure 模块：那里的仓储都是 public 业务表，与 INV-1 相违。
+         版本由 spring-boot-dependencies BOM 管理。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+
+    <!-- 与其余 *-service 一致的注册行为：本地不启 Nacos，fail-fast=false 只告警 -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>com.company.floorplan.external.ExternalApiServiceApplication</mainClass>
+        </configuration>
+        <executions>
+          <execution><goals><goal>repackage</goal></goals></execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

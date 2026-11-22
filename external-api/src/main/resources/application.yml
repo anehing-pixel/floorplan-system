@@ -1,0 +1,55 @@
+# external-api（DMZ 外部接口层）—— W-U0 交付 ② 骨架配置。
+#
+# 端口 18090 = D00 §4 进程表 / D02 §3.1 定值；DMZ 区内唯一对外进程。
+# 注意：不用 18080（那是 gateway），也不与 8080-8088 核心端口重叠。
+server:
+  port: ${SERVER_PORT:18090}
+
+spring:
+  application:
+    # 注册名按 D12 W-U0 警示 ③ 裁决用 external-api-service（与其余 *-service 风格一致），
+    # Maven artifactId 则是 external-api —— 两套名各有出处，勿混用。
+    name: external-api-service
+
+  datasource:
+    # INV-1（D02 §5）：DMZ 只能看见 integration schema。
+    # currentSchema 第二段 public 在这里**不能省**的规矩不适用——本进程恰恰要求「不可达 public」；
+    # 但 V5 的 gen_salt() 装在 public，属核心侧函数，DMZ 不建带 bcrypt 的表，故不需要。
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/floorplan?currentSchema=integration}
+    # 角色 floorplan_dmz：对 public 不授予任何权限，仅 USAGE ON SCHEMA integration + 该 schema 下 DML
+    # （D00 §4.1）。本地角色由 W-U0 交付 ⑤ 手工建、V70 用 DO $$ 幂等兜底；未建前本进程连不上库属预期，
+    # 不要为了让它起来而临时换成 floorplan 超管——那会把 INV-1 的实证机会直接取消。
+    username: ${FLOORPLAN_DMZ_DB_USER:floorplan_dmz}
+    password: ${FLOORPLAN_DMZ_DB_PASSWORD:floorplan_dmz}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+
+  flyway:
+    # AGENTS 坑 #3：只有 web 跑 Flyway。integration.* 六表的建表脚本（V70–V74）
+    # 物理位置仍在 infrastructure/db/migration/，由 web 统一执行（D00 §4.2）。
+    enabled: false
+
+  jackson:
+    time-zone: Asia/Tokyo
+    default-property-inclusion: non_null
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        # 本地不启 Nacos：注册失败只告警，不阻断启动（与其余服务一致）
+        fail-fast: false
+
+floorplan:
+  integration:
+    # ⚠️ 此处**不放任何 partner 密钥、密钥版本、HMAC 规范串默认值**。
+    # W-U3 硬约束 ③「密钥不落 yml/表/代码」——密钥只经 partner_credentials 的加密列 +
+    # 外部 KMS/环境变量注入；本文件长期保持为空是正常的，看到密钥值即为红线违反。
+    #
+    # 入站防重放时间窗与限流阈值为 [待定源]（D-04 接口现实 / U 系列），
+    # 签字前不在这里写死数值，由 W-U3 留显式 TODO 与可配置读取点。
+    inbound:
+      schema: integration
+    outbound:
+      schema: integration
