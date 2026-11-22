@@ -49,9 +49,10 @@ bash scripts/agent_env.sh check w2_core                # 基准仍是 67；报 -
 
 ## 背景一：接线点是 `confirmAdvance`，**不是 `disburseAdvance`**
 
-拆分方案 §11 那行原文写的是「`disburseAdvance` 成功后发 `LOAN_CREATED`」，
-而**冻结契约** `docs/接口契约-事件与Feign.md §2` 写的是「生产方触发时机 = core（**银行回调 PAID 之后**）」。
-两者不成立同一件事，代码把它们摊开了：
+拆分方案 §11 那行**原文**写的是「`disburseAdvance` 成功后发 `LOAN_CREATED`」，与**冻结契约**
+`docs/接口契约-事件与Feign.md §2`「生产方触发时机 = core（**银行回调 PAID 之后**）」直接冲突。
+本卡派单时已把方案那行更正为 `confirmAdvance`（用户 2026-11-22 授权，表下留有更正说明），
+所以两边现在一致。代码把它们摊开了：
 
 | 方法 | 位置 | 状态推进 | 钱到账了吗 |
 |---|---|---|---|
@@ -61,7 +62,8 @@ bash scripts/agent_env.sh check w2_core                # 基准仍是 67；报 -
 
 在 `PROCESSING` 就发事件，等于让借据、额度、DPD、对账四条线围着一笔**还没到账的钱**记账——
 而契约 §2.1 对 `advanceId` 的口径写得很直白：「为空表示银行未 PAID —— 建据被拒（钱没到，债不成立）」。
-**按契约接到 `confirmAdvance`。** 如果你判断应该按拆分方案那行做，停下来问用户，不要自己选。
+**按契约接到 `confirmAdvance`。** 如果你在别处（旧的 `agent/*` 分支、上一波的 HANDOFF、别人的任务卡副本）
+又看到「`disburseAdvance` 发事件」这种写法，那是更正之前的残留，**以本卡 + 契约为准，不要照抄回去**。
 
 好消息是幂等已经现成：`confirmAdvance` 在 `:533-537` 对已终态**直接早返回**，
 所以重复回调根本走不到发布那一行——这条正是「重复放款回调不重复发事件」那条验收的实现基础。
@@ -178,7 +180,7 @@ publisher.publish(OutboxPublisher.EVENT_LOAN_CREATED, String.valueOf(cmd.advance
 ## 交付
 
 - `web/HANDOFF-W2-CORE.md`：改动清单（文件:行）、traceId 透传链路、
-  **为什么接线点选 `confirmAdvance`**（把 §11 那行的冲突写明，便于收口方改方案）、
+  **为什么接线点选 `confirmAdvance`**（引用 `docs/并行开发-剩余需求拆分方案.md §11` 表下那条更正说明即可，方案已同步，不必重新论证冲突）、
   机制层那条断言的**实测输出**（贴 PASS 原文，不要写计划）、
   `financing_terms` 缺写入方这条定源需求的处置建议。
 - `scripts/smoke_w2_core.py`。主干 `smoke-test.py` 由**收口方**合并，你不要碰。
