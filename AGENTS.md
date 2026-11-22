@@ -205,7 +205,7 @@ Flyway 直接拒绝启动，冒烟全断。
 | 父 `pom.xml` | 需要新依赖写进自己服务的 pom |
 | `gateway/src/main/resources/application.yml` | 新增内部端点不经过网关，不需要加路由 |
 | `run-microservices.sh` | 由地基任务一次性注入 `CLIENT_*` 直连地址后冻结 |
-| `scripts/agent_env.sh`、`scripts/agent_smoke_lib.py` | 全部 wave 共用（隔离环境 + 冒烟公共库），改一处波及所有人。**改法**：由这两个文件的 owner（W0）提出、经用户书面点头后提交，并在信息里写明授权；其余人一律提给收口方。首例 = 2026-11-22 `check` 的表数判因提示 |
+| `scripts/agent_env.sh`、`scripts/agent_smoke_lib.py` | 全部 wave 共用（隔离环境 + 冒烟公共库），改一处波及所有人。**改法**：由这两个文件的 owner（W0）提出、经用户书面点头后提交，并在信息里写明授权；其余人一律提给收口方。两例授权改动 = 2026-11-22 `check` 的表数判因提示（`dc64865`）、同日 W0-9 把 Flyway 判据改成 schema 本地（`6a55381`，用户指令「W0-9 现在一起修」） |
 | 任何 `V1`–`V26` 迁移 | checksum |
 
 ### 7.2 分支纪律

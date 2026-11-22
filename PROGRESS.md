@@ -331,8 +331,10 @@
 > **2026-11-22 14:03 复核**：下表前 14 项（Wave1/2 与收口期）**全部 ✅ 已闭环**，保留作审计记录；
 > **W0-1…W0-8 八项 ⬜ 开放**，是事件链路的接线与部署待办，不是运行缺陷——主干冒烟 211 项全绿与这八项开放**同时成立**，
 > 因为冒烟验的是「消费框架本身可用」，而八项要的是「生产者接上、死契约定源、多实例与重放接缝」。别把绿的数字读成闭环。
-> **另 W0-9 ⬜ 开放**（不属事件链路，是隔离工具侧）：`agent_env.sh check` 的 V26 / gen_salt 两项子检查
-> 对空 schema 会顺 `search_path` 读到 `public` 而恒真，表数是唯一真正兜住的判定——已实测复现，见下表 W0-9 行。
+> **另 W0-9（隔离工具侧）已于 `6a55381` 修复**：`agent_env.sh check` 的 V26 / gen_salt 两项子检查
+> 原先不带 schema 限定，对空 schema 会顺 `search_path` 读到 `public` 而恒真，表数是唯一真正兜住的判定
+> （已实测复现，修法与复核见下表 W0-9 行 + `docs/并行开发-W1环境隔离.md §8.1`）。
+> gen_salt 那一项按设计装在 public，修复后**明确标注为非本地判据**，别再拿它的恒真当证据。
 > Q27 已由 ADR-Q27 裁决落地并纳入冒烟 ㉓ 端到端验证；第 6 节剩余项属业务书面定源，非代码缺陷。
 
 | 项 | 问题 | 处理方 | 状态 |
@@ -358,7 +360,7 @@
 | **🆕 W0-5 多实例共用一条游标** | `consumer_offsets` 按 `consumer` 一行；两个进程用同一个 consumer 名会互相覆盖游标 → 漏读或重复读。本地冒烟与当前部署都是单实例，故未加分布式锁。**多实例部署前必须**改 `FOR UPDATE SKIP LOCKED` 或按实例名分片 | W3 / 运维 | ⬜ **开放**（部署前置条件）|
 | **🆕 W0-6 credit 两条死契约互不相符** | `CreditLineClient`（`GET /available?dealerId=`，返回 `BigDecimal`）全仓无实现；`CreditLineQueryClient`（`GET /{id}/available`，返回 `Long`）实测 500 `SYS_001`「No static resource」。两者签名冲突，且金额按 `AGENTS §6.3` 应为 BIGINT 整数而非小数 | W1-CREDIT | ⬜ **开放**（实现哪条 / 删哪条需定源，W0 未擅自判定）|
 | **🆕 W0-7 `COLLATERAL_CHANGED` 聚合键与 status 取值域未定源** | 属业务口径，契约文档里**留白并标 owner**，没有按猜测填。接线前必须由业务给 | 业务 / PM | ⬜ **开放** |
-| **🆕 W0-9 `agent_env.sh check` 有两项子检查会「空过」** | `check` 的 V25+V26 记录数与 gen_salt 可达性两条查的是**不带 schema 限定**的表名/函数名，空 schema 里会顺 `search_path` 读到 `public` 的记录。实测新建空 schema `w0_hint_t`：`表数=0/67` 但 `V25+V26 记录=2/2、gen_salt 可达=2`——即这两项对「完全没迁过的 schema」恒真，**真正兜住的只有表数那一项**。今天不构成故障（表数 fail-closed，schema 残照样拦），但一旦有人因为基准表数变了而放宽表数判定（USED 并行期要设 `FLOORPLAN_PUBLIC_TABLES`，正是这个场景），这道闸就只剩一半。**修法** = 两项都改成 `${SCHEMA}.flyway_schema_history` / 按 `pg_namespace.nspname='${SCHEMA}'` 限定，属 `agent_env.sh` 改动，需按 §7.1 那行的合法改法走（owner 提出 + 用户点头） | W3 收口 / 或用户单独点头由 W0 改 | ⬜ **开放**（已实测复现，非推测）|
+| **W0-9 `agent_env.sh check` 有两项子检查会「空过」** | `check` 的 V25+V26 记录数与 gen_salt 可达性两条查的是**不带 schema 限定**的表名/函数名，空 schema 里会顺 `search_path` 读到 `public` 的记录。实测新建空 schema `w0_hint_t`：`表数=0/67` 但 `V25+V26 记录=2/2、gen_salt 可达=2`——即这两项对「完全没迁过的 schema」恒真，**真正兜住的只有表数那一项**。风险场景就是 USED 并行期有人因基准变了而放宽表数判定（要设 `FLOORPLAN_PUBLIC_TABLES`）。**已修 = `6a55381`**：V25/V26 改查 `${SCHEMA}.flyway_schema_history`（先探表在不在，不在记 `-1` + 定向提示），新增本 schema 的 V5(`users`) 判据，gen_salt 明确降级为「public 可解析」的非本地判据；`smoke_w0.py` 同一处洞一起补限定（public 模式行为零变化）。坑两条：①不存在的关系在**解析期**就报错，`CASE WHEN to_regclass(...) IS NULL THEN -1 ELSE (SELECT … FROM 表)` 兜不住；②取值别留空串——`"" != "2"` 恰好也判失败，会把「没历史表」误报成「迁到一半」，所以显式 `-1`。**复核证明加严不误伤合法环境**：新建 `w0_v9` 起 web+auth+loan 后 Flyway 确实把历史表建进 agent schema，`check` → 67/67 / 2/2 / users=1 / rc=0，隔离模式 `smoke_w0.py` 断言 35 条失败 0 | 用户点头「W0-9 现在一起修」→ W0 已改（AGENTS §7.1 owner 授权第二例） | ✅ **已修复**（`6a55381`）|
 | **🆕 W0-8 旧措辞仍留在共享代码里** | V21 迁移注释与 `OutboxPublisher` javadoc 写着「aggregate_key 通常是 vin 或借据号」，与已裁决的口径**相反**（同键 SENT 行永久保留 ⇒ 同键实际只能发一条，用 vin 会永久抑制同车第二次合法事件）。迁移与共享层本轮禁改，故只改文档：以 `docs/接口契约-事件与Feign.md` 为准，代码注释 W3 收口时一并清 | W3 收口 | ⬜ **开放**（文档已作废该措辞）|
 
 ---
