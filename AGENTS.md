@@ -38,7 +38,9 @@
 | 2 | `docs/库存融资核心系统-代码导读.md` | 代码结构导航 |
 | 3 | `docs/库存融资核心系统-十一环节闭环核查报告.md` | 业务闭环基准，断点 B1–B4 / M1–M12 的定义 |
 | 4 | `docs/库存融资核心系统-目标微服务架构设计.md` | 服务边界与职责划分 |
-| 5 | `docs/AGENT_TASK-<你的名字>.md` | 你的任务卡与写入集 |
+| 5 | `docs/接口契约-事件与Feign.md` | 事件载荷 / DTO 字段 / Feign 直连地址的**冻结源**，碰契约前必读 |
+| 6 | `docs/并行开发-W1环境隔离.md` | 只有并行开发时才读：给自己分 schema 和端口偏移 |
+| 7 | `docs/AGENT_TASK-<你的名字>.md` | 你的任务卡与写入集 |
 
 `docs/00-文档索引.md` 有全量文档目录，按需查。
 
@@ -95,7 +97,7 @@ release/recon (各自独立进程)  ──┘         └──► infrastructur
 | credit | 8083 | recon | 8088 |
 | risk | 8084 | gateway | **18080**（统一入口） |
 
-### 四个必须知道的坑
+### 五个必须知道的坑
 
 1. **`SERVER__PORT` 污染**：宿主注入的环境变量会被 Spring 宽松绑定成 `server.port`，覆盖 yml 端口。
    命令行启动一律 `env -u SERVER__PORT java -jar ...`（`run-microservices.sh` 已处理）。
@@ -105,6 +107,11 @@ release/recon (各自独立进程)  ──┘         └──► infrastructur
    `infrastructure/src/main/resources/db/migration/`。
 4. **`mvn clean` 可能被文件锁挡住**：并行构建或运行中的服务会占用 `target/*.jar`。
    遇到 `Failed to delete` 先 `jps -l` 看有没有别的 Maven/Java 进程，改用 `mvn -B package`（不带 clean）。
+5. **并行时共库共端口 = 假故障**：`consumer_offsets` 按 consumer 只有一行，别人把游标推走，你的事件
+   永远不会被消费（表现是「等不到 DONE」而代码是对的）；端口撞上是后起的服务绑不上，或者更坏——
+   请求打进上一轮没清掉的旧 jar。两个 agent 同写 `outbox_events` 时，计数类断言还会时绿时红。
+   解法是给自己分一套 schema + 端口偏移：`bash scripts/agent_env.sh init <你的名字>`，
+   详见 `docs/并行开发-W1环境隔离.md`。偏移 0 只属于「当前只有我一个人干活」。
 
 ---
 
@@ -120,6 +127,11 @@ mvn -B -pl domain,application -am test
 # 3) 起全部服务走网关跑冒烟，自动清理（一条命令内完成）
 bash run-microservices.sh smoke
 
+# 4) 并行开发：给自己分一套隔离环境（schema + 端口偏移），别抢 public/8080
+bash scripts/agent_env.sh init <你的名字>          # 建 schema
+eval "$(bash scripts/agent_env.sh env <你的名字> 100)"   # 导出连接串与端口
+bash scripts/agent_env.sh check <你的名字>         # 确认隔离真的生效（含 gen_salt 可达）
+
 # 其他
 bash run-microservices.sh start   # 前台保活，Ctrl+C 停
 bash run-microservices.sh stop    # 另开窗口停
@@ -130,10 +142,14 @@ bash run-local.sh                 # 只起 web 单体
 
 > `bash run-microservices.sh smoke` **EXIT 0，且 PASS 数 = 断言总数、FAIL = 0**。
 
-- 断言数会随开发增长（历史值 182 / 204），**不要把数字写死在文档或脚本里**，看 FAIL 就行。
+- 断言数会随开发增长（历史值 182 / 204 / 211），**不要把数字写死在文档或脚本里**，看 FAIL 就行。
 - 只跑 `-DskipTests` 的编译**不算验证**，不能作为「已完成」的依据。
 - 改了某个服务却没在冒烟里加对应断言 → 视为未完成。各 agent 写 `scripts/smoke_<agent>.py`，
   由收口方合并进 `smoke-test.py`。
+- **隔离 schema 里跑绿 ≠ 合并后绿**。并行期在自己的 schema 验语义就够，但**「已交付」这句话
+  只有回到 `public` 跑一次全量冒烟才算数**——迁移是否落库、seed 是否齐、跨服务读的是不是同一份数据，
+  只有在单一主 schema 下才暴露得出来。`unset FLOORPLAN_DB_SCHEMA SPRING_DATASOURCE_URL`
+  再跑（只清其中一个会出现「脚本查 agent schema、服务查 public」的错开，那是最难查的假绿）。
 
 ---
 
@@ -141,14 +157,17 @@ bash run-local.sh                 # 只起 web 单体
 
 ### 6.1 已落库迁移永不修改
 
-`V1`–`V25` **全员禁改**（Flyway checksum 会变，启动直接失败）。要改结构就新增一版。
+`V1`–`V26` **全员禁改**（Flyway checksum 会变，启动直接失败）。要改结构就新增一版。
 同理：不要建空迁移文件——Flyway 会把它当成一次真实迁移执行。
 
 ### 6.2 号段预分配
 
+**下一可用号 = `V27`**（V24 `release_custodian_scope`、V25 `adr_q27_authoritative_source`、
+V26 `event_consumption` 均已落库；逐号的实时台账在 `PROGRESS.md §2` 的号段登记行，以它为准）。
+
 | 号段 | 用途 | 归属 |
 |---|---|---|
-| `V26` | 消费幂等 `event_consumptions` + 游标 `consumer_offsets` | W0 |
+| `V26` | 消费幂等 `event_consumptions` + 游标 `consumer_offsets` | W0 ✅ 已落库 |
 | `V27` | 出库指令撤销字段（现有列够用则不建） | W1-RELEASE |
 | `V28` | 客户支付确认凭证表 | W2-CORE |
 | `V29` | 工单 SLA / 升级字段（够用则不建） | W2-WORKORDER |
@@ -164,6 +183,11 @@ Flyway 直接拒绝启动，冒烟全断。
 - 并发更新用 `version` 乐观锁列（`vehicle_units` / `credit_lines` 已有），不要靠 `SELECT ... FOR UPDATE` 兜全局。
 - 关键动作写 `audit_events`（操作人从 `AuditActor` 取，不要从请求体里读）。
 - 状态变更走状态机方法，**不要直接 `UPDATE ... SET status = 'XXX'`**。
+- **`outbox_events.aggregate_key` 标的是「这一次发生」，不是「这个对象」**：用 `advanceId` /
+  `paymentRef` 这类每次新建的主键，**禁止用 `vin`、禁止用 `event_type` 单键**。发布端按
+  `(event_type, aggregate_key)` 做 `WHERE NOT EXISTS` 去重，键选得太大（vin）会把同车的第二笔
+  垫款直接吞掉；选得太小或每次不同（traceId）等于没去重。消费侧的幂等键是 `(event_id, consumer)`，
+  和发布端去重是两套东西，不要混为一谈。
 
 ---
 
@@ -181,11 +205,16 @@ Flyway 直接拒绝启动，冒烟全断。
 | 父 `pom.xml` | 需要新依赖写进自己服务的 pom |
 | `gateway/src/main/resources/application.yml` | 新增内部端点不经过网关，不需要加路由 |
 | `run-microservices.sh` | 由地基任务一次性注入 `CLIENT_*` 直连地址后冻结 |
-| 任何 `V1`–`V25` 迁移 | checksum |
+| `scripts/agent_env.sh`、`scripts/agent_smoke_lib.py` | 全部 wave 共用（隔离环境 + 冒烟公共库），改一处波及所有人；要改提给收口方 |
+| 任何 `V1`–`V26` 迁移 | checksum |
 
 ### 7.2 分支纪律
 
+- **从最新基线标签开分支**，不要从 `master` HEAD 随便拉：
+  `git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/base-*` 取第一个。
+  命名规则 `base-<波次>-<日期>`（如 `base-w0-20261122`）；旧标签 `wave0-*` / `wave0b-*` 保留但不开新分支。
 - 每个 agent 一个 worktree/分支，**禁止自己 `git merge` / `git rebase` 到 master**，由收口方统一合并。
+- 并行期先按第 4 节坑 5 分一套 schema + 端口偏移，别在 `public` 和偏移 0 上互踩。
 - 合并前查越界：`git diff --name-only <baseline>..HEAD`，对照任务卡写入集。
 - 提交前 `git status --short` 确认没有把别人的 WIP 卷进来——这个项目踩过，一次提交掺进三个工作流的改动。
 
@@ -225,8 +254,10 @@ Flyway 直接拒绝启动，冒烟全断。
 
 1. **借据没有生产者** — `LoanApplicationService.createFromLoanCreated()` 全仓无调用方；`loans` 表恒空，
    DPD、画像、逾期、对账四条线一起空转。
-2. **事件机制 0 实现** — `outbox_events` 表 + `OutboxPublisher` 接口都在，无实现类、无 `@Scheduled`、
-   无消费者幂等、无死信。所有跨服务衔接都卡在这里。
+2. **事件机制只到「框架能用」，没到「业务会发」** — W0 已落地发布、轮询、游标、消费幂等、死信
+   （`JdbcOutboxPublisher` / `EventDispatcher` / `@Scheduled` / `event_consumptions`+`consumer_offsets`，
+   机制冒烟 `scripts/smoke_w0.py`），但**发布端在业务代码里仍然零调用方**。没有生产者就没有事件，
+   所有跨服务衔接照旧卡在第 1 条。接线归 W1/W2，**别把「调度器和表都在」读成「闭环已通」**。
 3. **回款匹配后不解押不回补** — `ReleaseOrchestrator` 解押只记日志，`availableAfter = before`。
 4. **工单体系 0 Java** — `work_orders` / `work_order_actions` 表齐全，零实体零 Service。
    门禁拒付说「生成 HIGH 工单」，实际只写 `risk_alerts`。
@@ -234,6 +265,9 @@ Flyway 直接拒绝启动，冒烟全断。
    担保登记批次、回款匹配全缺。后端 110+ 端点，前端实际调用约 1/4。
 
 并行拆分方案见 `docs/并行开发-剩余需求拆分方案.md`（四波：W0 地基 → W1 五服务 → W2 共享层+前端 → W3 收口）。
+W0 交付的三份地基文档是后续所有波次的输入，别绕过它们自己发明口径：
+`docs/接口契约-事件与Feign.md`（事件与 DTO 字段冻结源）、`docs/事件机制实现说明.md`（消费语义与边界）、
+`docs/并行开发-W1环境隔离.md`（schema / 端口隔离跑法）。
 
 ---
 
@@ -295,16 +329,21 @@ GuaranteeGatePolicyTest 补 noDealerBypass / unknownStatus，共 7 项。
 | 靠共库跨域直写维持原子性 | 现在能跑，物理拆库那天闭环当场断 | 新代码禁止跨域直写；补偿机制（outbox）补齐前不拆库 |
 | 用「编译通过」当验收 | 端点存在但网关不通、字段写错列 | 验收只认冒烟全绿 |
 | 分两次命令「先起服务、再跑测试」 | 后台 JVM 随 shell 回收，第二次调用全是连接失败 | 启动 + 测试 + 清理写在同一条命令 |
+| 在隔离 schema 里跑绿就报「已交付」 | 迁移没落主库、seed 不齐、跨服务读的不是同一份数据——合并当场炸 | 隔离期验语义，交付判据回 `public` 跑一次全量 |
+| 事件键用 `vin` / 每次换新值 | 前者把同车第二笔垫款吞掉，后者等于没去重 | `aggregate_key` = 这一次发生的业务主键（`advanceId`/`paymentRef`） |
 
 ---
 
 ## 13. 给新 agent 的开工检查单
 
 - [ ] 读过 `PROGRESS.md`，知道当前 HEAD 和断点
+- [ ] 分支从最新的 `base-*` 标签拉，不是从别人一半的提交上拉
+- [ ] 并行开发 → `agent_env.sh init/env/check` 分好 schema 与端口偏移，没在 `public` + 偏移 0 上抢
 - [ ] 确认自己的写入集，没碰共享禁区
-- [ ] 需要新迁移 → 号段已在 `PROGRESS.md` 登记
+- [ ] 需要新迁移 → 号段已在 `PROGRESS.md` 登记，且没撞上别人的号段
 - [ ] 涉及业务口径 → 查过第 8 节红线，没签字的不动手
 - [ ] 写完有 `scripts/smoke_<agent>.py` 断言，且能在网关侧打通
 - [ ] `mvn -B package` 全绿
 - [ ] `bash run-microservices.sh smoke` EXIT 0、FAIL 0
+- [ ] 报「已交付」前，回到 `public`（`unset FLOORPLAN_DB_SCHEMA SPRING_DATASOURCE_URL`）再跑一次全量
 - [ ] 提交信息带验证结论，`git status` 干净
