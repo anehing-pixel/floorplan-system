@@ -61,11 +61,24 @@ bank-service 的匹配逻辑（规则打分、次高分差距、人工绑定）*
    - psql 造：一条 `loans`（`status='ACTIVE'`、`vin` 固定、`principal` 固定）+ 一条 `payment_transactions`（摘要含该 VIN、金额相等）。
    - 调 `POST /api/payments/match`（走网关或直连 8082）→ 断言 `payment_matches.match_status='AUTO_MATCHED'`、`outbox_events` 多出一条 `PAYMENT_MATCHED`。
    - 再调一次 → 断言不产生第二条事件（幂等）。
+     ⚠️ **这条只证「端到端不重复」，证不到发布端**：同一 `transaction_id` 再匹配会先被任务 3 的
+     `uk_payment_match_txn` 挡住，走不到 `JdbcOutboxPublisher`。它算效果层，别在交付说明里写成
+     「已验 `NOT EXISTS` 去重」。
+   - **机制层单独钉一遍**（这段 SQL 全仓 0 覆盖，就是 `PROGRESS.md §7` W0-3 留给你的那条）：
+     上一步之后用 psql **删掉那行 `payment_matches`、别动 outbox 那行事件**，再调一次匹配。
+     此时唯一约束不再拦（键已空），压住重复的只剩发布端的 `INSERT ... WHERE NOT EXISTS`
+     （抑制条件 `status IN ('PENDING','SENT')`，实查见 `JdbcOutboxPublisher` javadoc）→
+     断言 `outbox_events` 该 `(event_type='PAYMENT_MATCHED', aggregate_key=paymentRef)` **仍只 1 行**。
+     两个前提：① 判据查库，不看 HTTP 返回码；② 若那行事件已 `DEAD`，本条不适用——`DEAD` 不在抑制条件里，
+     重发必然插新行，那是设计如此，别当 bug 追。跑不通也别硬套：首条事件的下游（release / credit）
+     若已改掉匹配前置，就为这条断言单独造一组新流水 + 新借据。
 
 ## 交付
 
 - 每任务一 commit，前缀 `[W1-BANK]`；完成后 `git tag agent/w1-bank-done`。
-- `bank-service/HANDOFF-W1.md`：三个存根的替换情况、`settled` 判定口径、留给 W3 的 TODO。
+- `bank-service/HANDOFF-W1.md`：三个存根的替换情况、`settled` 判定口径、留给 W3 的 TODO，
+  以及**任务 6 那条机制层断言的实测结果**（跑通了贴断言行；判为不适用要写清为什么，别默不作声地跳过——
+  这是 `PROGRESS.md §7` W0-3 的唯一收口证据，没有它下一轮还得重问一遍）。
 - 回复里贴：`mvn -pl bank-service -am test` 与 `smoke_w1_bank.py` 输出摘要。
 
 ## 验证
