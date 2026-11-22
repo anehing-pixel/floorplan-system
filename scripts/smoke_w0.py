@@ -25,10 +25,12 @@ server.port 后所有服务都挤到同一个端口，第二个起不来。
   4) 游标只按已订阅类型前进；
   5) 重置游标重放同一 event_id，幂等表仍只有一行（框架层幂等）。
 
-发布端 NOT EXISTS 去重（卡面第 4 步）在这里验不了：JdbcOutboxPublisher 至今零生产调用方
-（W2-CORE 才接线），冒烟只能从 HTTP/SQL 入口触发，而这条去重在 SQL 里插两条 PENDING
-并不会被拦（拦的是发布端的 WHERE NOT EXISTS，不是表约束）。已如实记入交付说明，
-需 W0 补 infrastructure 单测要另行扩权（不在卡面写集内）。
+发布端 NOT EXISTS 去重（卡面第 4 步）在这里验不了：这条去重拦的是**发布端 SQL 的
+WHERE NOT EXISTS**，不是表约束，而本脚本是直接 psql 插 PENDING，绕开了发布端。
+2026-11-22 W2-CORE 把 `confirmAdvance` 接成 `JdbcOutboxPublisher` 的第一个真实调用方之后，
+这条改在 scripts/smoke_w2_core.py 里从 HTTP 入口验（银行回调 → outbox 只一行）。
+本脚本仍只验消费机制，判据不落 loans 表——但**消费副作用现在是真实的了**：
+`LoanCreatedConsumer` 不再只写日志，会把 LOAN_CREATED 建成 `LN-<advanceId>` 借据。
 """
 import atexit
 import json
@@ -46,6 +48,13 @@ LOAN = os.environ.get("SMOKE_LOAN", "http://127.0.0.1:8085")    # 借据微服�
 CREDIT = os.environ.get("SMOKE_CREDIT", "http://127.0.0.1:8083")  # 额度微服务（仅用于登记死契约现状）
 CONSUMER = "loan-service"                                      # 幂等表/游标表的键，用服务名不是类名
 TAG = "W0%d" % (int(time.time()) % 100000)
+# 每轮唯一的 advanceId（用完整 epoch 秒，不用 TAG 里被 %100000 截掉的那段——27 小时就会绕回）。
+# 为什么不能像早期版本那样写死 900001/900002：消费端接线后 LOAN_CREATED 会真建借据，
+# 借据业务键是 loan_no='LN-'+advanceId；第二轮撞唯一键 → 走"按 VIN 复用既有"分支，
+# 而 VIN 带 TAG 每轮都新 → 复用找不到 → 抛异常 → 重试 3 次置 DEAD，
+# 于是第 1、2 步的 DONE 断言凭空白掉。这是典型的「测试数据撞业务幂等键」，不是产品缺陷。
+ADV1 = 9_000_000_000 + int(time.time())
+ADV2 = ADV1 + 1
 
 # common 里冻结的 LoanSnapshotDto 字段（驼峰，与 JSON 一一对应）。改这个列表就等于改契约，
 # 必须先更新 docs/接口契约-事件与Feign.md 并通知全部 W1 agent。
@@ -54,7 +63,37 @@ DTO_FIELDS = ["id", "vin", "advanceId", "dealerId", "status", "principal", "dueD
 # 本轮造的事件 id 与借据行，跑完清理，不给后续 wave 留脏数据
 EVENT_IDS = []
 CREATED_LOAN_IDS = []
+# 消费端接线后由 LOAN_CREATED 真实建出的借据业务键（loan_no = 'LN-' + advanceId）。
+# 它们不在 CREATED_LOAN_IDS 里——那一组是第 5 步 psql 手插的，这一组是服务自己写的，
+# 所以只能按 loan_no 删；不清就是每轮跑一次留两行，贷后/对账线的计数会被带偏。
+CONSUMED_LOAN_NOS = ["LN-%d" % ADV1, "LN-%d" % ADV2]
+DROPPED_LOAN_IDS = []           # 清理时实际删掉的 loan_id，供第 6 步自证子表也空了
 _CLEANED = False
+
+
+def drop_loans(nos, ids):
+    """按 loan_no 与/或主键删借据，连子表（还款计划、状态史）一起删；返回被删的 loan_id 列表。
+
+    loans / repayment_plans / loan_status_history **都没有外键约束**（V16 实查），
+    所以删父表不会级联，子表必须显式清，否则留下孤儿行——下一轮若复用同一 loan_id
+    就会撞 uk_rp_loan_period(loan_id, period_no)。
+    """
+    cond = []
+    if nos:
+        cond.append("loan_no IN (%s)" % ",".join("'%s'" % n for n in nos))
+    if ids:
+        cond.append("id IN (%s)" % ",".join(str(i) for i in ids))
+    if not cond:
+        return []
+    where = " OR ".join(cond)
+    rows = psql("SELECT id FROM loans WHERE %s" % where) or []
+    loan_ids = [r[0] for r in rows]
+    if loan_ids:
+        inlist = ",".join(loan_ids)
+        psql_exec("DELETE FROM repayment_plans WHERE loan_id IN (%s)" % inlist)
+        psql_exec("DELETE FROM loan_status_history WHERE loan_id IN (%s)" % inlist)
+    psql_exec("DELETE FROM loans WHERE %s" % where)
+    return loan_ids
 
 
 def cleanup_rows():
@@ -64,15 +103,14 @@ def cleanup_rows():
     credit-service，一条打印直接崩栈），第 6 步的清理根本不执行，脏事件行留在 schema 里，
     下一轮重跑撞 aggregate_key 的发布端去重、计数类断言也随之漂移——查起来像「代码偶发不稳」。
     """
-    global _CLEANED
+    global _CLEANED, DROPPED_LOAN_IDS
     if _CLEANED or not EVENT_IDS:
         return
     _CLEANED = True
     ids = ",".join(str(i) for i in EVENT_IDS)
     psql_exec("DELETE FROM event_consumptions WHERE event_id IN (%s)" % ids)
     psql_exec("DELETE FROM outbox_events WHERE id IN (%s)" % ids)
-    if CREATED_LOAN_IDS:
-        psql_exec("DELETE FROM loans WHERE id IN (%s)" % ",".join(str(i) for i in CREATED_LOAN_IDS))
+    DROPPED_LOAN_IDS = drop_loans(CONSUMED_LOAN_NOS, CREATED_LOAN_IDS)
 
 
 atexit.register(cleanup_rows)   # 崩溃路径也要清；正常路径由第 6 步显式调用并顺带断言清干净了
@@ -136,10 +174,14 @@ def q(name):
     return ("%s.%s" % (DB_SCHEMA, name)) if DB_SCHEMA else name
 
 
-tabs = psql("SELECT coalesce(to_regclass('%s')::text,'MISSING'), "
-             "coalesce(to_regclass('%s')::text,'MISSING')" % (q("event_consumptions"), q("consumer_offsets")))
-ok(tabs and "MISSING" not in tabs[0], "V26 两张表在当前 schema 已存在",
-   "解析结果=%r" % (tabs,))
+for _t in ("event_consumptions", "consumer_offsets"):
+    # 逐表单列判定。原来写的是 psql("SELECT a,b") 配 `"MISSING" not in tabs[0]`，那是**恒真**：
+    # `psql -tA` 的列分隔符是竖线不是 tab，公共库按 tab 拆完 tabs[0] 只有一个元素，
+    # 而 `x not in [列表]` 比的是元素相等，永远不成立 MISSING → 表不存在也照样 PASS。
+    # 这类「断言写成了看起来在断言」的假绿，正是本文件第 8 段自己警告过的东西。
+    # 也不比布尔文本：本库实测 (x IS NOT NULL)::text 返回 'true'，不是 psql 常见的 't'。
+    reg = psql_one("SELECT coalesce(to_regclass('%s')::text,'MISSING')" % q(_t))
+    ok(reg != "MISSING", "V26 表在当前 schema 已存在：%s" % _t, "to_regclass=%r" % reg)
 assert_eq("Flyway 在【目标 schema 自己的】历史表里就有 V26（不是顺 search_path 读到 public 的）", "26",
           psql_one("SELECT version FROM %s WHERE version = '26' AND success = true" % q("flyway_schema_history")))
 PUBLIC_MAX_BEFORE = psql_one("SELECT coalesce(max(id),0) FROM public.outbox_events")
@@ -159,7 +201,7 @@ print("   credit-service(%s)：%s" % (CREDIT, "可达" if st_probe else "未运�
 # 1. 端到端消费：插一条 LOAN_CREATED → 轮询写 DONE
 # ---------------------------------------------------------------------------
 print("\n== 1. 事件消费闭环（LOAN_CREATED → DONE）==")
-e1 = insert_event("LOAN_CREATED", TAG + "-A", payload(TAG + "VIN1", 900001, TAG + "-T1"))
+e1 = insert_event("LOAN_CREATED", TAG + "-A", payload(TAG + "VIN1", ADV1, TAG + "-T1"))
 done1, _, cost1 = wait_until(lambda: consumption(e1, "DONE") == 1, timeout=60)
 ok(done1, "60s 内 event_consumptions 出现 (%d, '%s', 'DONE')" % (e1, CONSUMER),
    "实测耗时 %.1fs，最后状态=%r" % (cost1, psql_one(
@@ -173,7 +215,7 @@ ok(psql_one("SELECT last_error FROM event_consumptions WHERE event_id = %d AND c
 # 2. 同 aggregate_key 的两次发生 → 各自独立消费（幂等键是 event_id，不是类型+聚合键）
 # ---------------------------------------------------------------------------
 print("\n== 2. per-occurrence：同 aggregate_key 二次发生不被吞 ==")
-e2 = insert_event("LOAN_CREATED", TAG + "-A", payload(TAG + "VIN2", 900002, TAG + "-T2"))
+e2 = insert_event("LOAN_CREATED", TAG + "-A", payload(TAG + "VIN2", ADV2, TAG + "-T2"))
 done2, _, cost2 = wait_until(lambda: consumption(e2, "DONE") == 1, timeout=60)
 ok(done2, "第二条同 aggregate_key 事件也被消费（aggregate_key 只用于发布端去重，不是消费去重键）",
    "耗时 %.1fs" % cost2)
@@ -276,9 +318,18 @@ else:
 print("\n== 清理 ==")
 ids = ",".join(str(i) for i in EVENT_IDS)
 cleanup_rows()
-if CREATED_LOAN_IDS:
-    assert_eq("本轮测试借据已删除", "0", psql_one(
-        "SELECT count(*) FROM loans WHERE id IN (%s)" % ",".join(str(i) for i in CREATED_LOAN_IDS)))
+loan_cond = "loan_no IN (%s) OR id IN (%s)" % (
+    ",".join("'%s'" % n for n in CONSUMED_LOAN_NOS),
+    ",".join(str(i) for i in (CREATED_LOAN_IDS or [0])))
+assert_eq("本轮借据（含消费端真实建出的两笔）已删除", "0",
+          psql_one("SELECT count(*) FROM loans WHERE %s" % loan_cond))
+if DROPPED_LOAN_IDS:
+    # 子表没有外键，父表删干净不代表没留孤儿行；孤儿还款计划会在 loan_id 复用那天撞唯一键。
+    drop_in = ",".join(DROPPED_LOAN_IDS)
+    assert_eq("本轮借据的还款计划已随之删除（无孤儿行）", "0", psql_one(
+        "SELECT count(*) FROM repayment_plans WHERE loan_id IN (%s)" % drop_in))
+    assert_eq("本轮借据的状态史已随之删除（无孤儿行）", "0", psql_one(
+        "SELECT count(*) FROM loan_status_history WHERE loan_id IN (%s)" % drop_in))
 assert_eq("本轮事件与幂等行已清空", "0", psql_one(
     "SELECT count(*) FROM outbox_events WHERE id IN (%s)" % ids))
 if DB_SCHEMA:
