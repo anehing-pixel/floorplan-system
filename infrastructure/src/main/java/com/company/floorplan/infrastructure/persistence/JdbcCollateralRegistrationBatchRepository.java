@@ -55,6 +55,7 @@ public class JdbcCollateralRegistrationBatchRepository implements CollateralRegi
         int rank = rs.getInt("priority_rank");
         b.setPriorityRank(rs.getObject("priority_rank") == null ? null : rank);
         b.setCoSignedBy(rs.getString("co_signed_by"));
+        b.setOwnerName(rs.getString("owner_name"));
         b.setVehicleCount(rs.getInt("vehicle_count"));
         b.setCreatedBy(rs.getString("created_by"));
         Timestamp createdAt = rs.getTimestamp("created_at");
@@ -131,8 +132,8 @@ public class JdbcCollateralRegistrationBatchRepository implements CollateralRegi
                             + "certificate_uploaded_at, cancellation_status, cancellation_no, "
                             + "cancellation_applied_at, cancellation_completed_at, "
                             + "cancellation_certificate_attachment_id, cancellation_requested_by, "
-                            + "cancellation_note, priority_rank, co_signed_by, vehicle_count, created_by) "
-                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
+                            + "cancellation_note, priority_rank, co_signed_by, owner_name, vehicle_count, created_by) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
                     Long.class,
                     b.getBatchNo(), b.getRegistrationNo(), b.getRegistrationType(), b.getPerfectionMethod(),
                     b.getRegistryOffice(), ts(b.getRegisteredAt()), ts(b.getExpiresAt()),
@@ -141,7 +142,7 @@ public class JdbcCollateralRegistrationBatchRepository implements CollateralRegi
                     b.getCancellationStatus(), b.getCancellationNo(), ts(b.getCancellationAppliedAt()),
                     ts(b.getCancellationCompletedAt()), b.getCancellationCertificateAttachmentId(),
                     b.getCancellationRequestedBy(), b.getCancellationNote(), b.getPriorityRank(),
-                    b.getCoSignedBy(), b.getVehicleCount(), b.getCreatedBy());
+                    b.getCoSignedBy(), b.getOwnerName(), b.getVehicleCount(), b.getCreatedBy());
             b.setId(id);
         } else {
             jdbc.update("UPDATE collateral_registration_batches SET "
@@ -151,7 +152,7 @@ public class JdbcCollateralRegistrationBatchRepository implements CollateralRegi
                             + "certificate_uploaded_at=?, cancellation_status=?, cancellation_no=?, "
                             + "cancellation_applied_at=?, cancellation_completed_at=?, "
                             + "cancellation_certificate_attachment_id=?, cancellation_requested_by=?, "
-                            + "cancellation_note=?, priority_rank=?, co_signed_by=?, vehicle_count=?, "
+                            + "cancellation_note=?, priority_rank=?, co_signed_by=?, owner_name=?, vehicle_count=?, "
                             + "updated_at=now() WHERE id=?",
                     b.getRegistrationNo(), b.getRegistrationType(), b.getPerfectionMethod(),
                     b.getRegistryOffice(), ts(b.getRegisteredAt()), ts(b.getExpiresAt()),
@@ -160,7 +161,7 @@ public class JdbcCollateralRegistrationBatchRepository implements CollateralRegi
                     b.getCancellationStatus(), b.getCancellationNo(), ts(b.getCancellationAppliedAt()),
                     ts(b.getCancellationCompletedAt()), b.getCancellationCertificateAttachmentId(),
                     b.getCancellationRequestedBy(), b.getCancellationNote(), b.getPriorityRank(),
-                    b.getCoSignedBy(), b.getVehicleCount(), b.getId());
+                    b.getCoSignedBy(), b.getOwnerName(), b.getVehicleCount(), b.getId());
         }
         return b;
     }
@@ -175,6 +176,7 @@ public class JdbcCollateralRegistrationBatchRepository implements CollateralRegi
         jdbc.update("UPDATE collateral_registration_batches SET vehicle_count = "
                 + "(SELECT COUNT(*) FROM collateral_registration_items WHERE batch_id = ?), "
                 + "updated_at = now() WHERE id = ?", batchId, batchId);
+        syncProjection(vin);
     }
 
     @Override
@@ -184,6 +186,68 @@ public class JdbcCollateralRegistrationBatchRepository implements CollateralRegi
         jdbc.update("UPDATE collateral_registration_batches SET vehicle_count = "
                 + "(SELECT COUNT(*) FROM collateral_registration_items WHERE batch_id = ?), "
                 + "updated_at = now() WHERE id = ?", batchId, batchId);
+        syncProjection(vin);
+    }
+
+    /**
+     * <b>ADR-Q27</b>：V10 是唯一权威源，V18 {@code collateral_registration} 是只读投影。
+     *
+     * <p>挂车/摘车后用<b>同一个 JdbcTemplate、同一个事务</b>按 V10 重新推导该 VIN 的
+     * 权威状态并 upsert 投影，顺便追加一条流水。这样两张表永远同源，
+     * 不需要 MQ / outbox / 分布式事务（所有服务共用一个 PostgreSQL 库）。</p>
+     *
+     * <p><b>best-effort</b>：投影是派生数据，放款门禁不读它（直接 JOIN V10），
+     * 因此投影同步失败<b>绝不阻断</b> V10 权威写入，只记日志。
+     * 这是刻意的设计——权威源的正确性不依赖派生数据的可用性。</p>
+     */
+    private void syncProjection(String vin) {
+        try {
+            List<ProjectionRow> rows = jdbc.query(
+                    "SELECT b.registration_no, b.owner_name, b.registered_at "
+                            + "FROM collateral_registration_items i "
+                            + "JOIN collateral_registration_batches b ON b.id = i.batch_id "
+                            + "WHERE i.vin = ? AND b.registration_no IS NOT NULL "
+                            + "  AND b.cancellation_status NOT IN ('DONE','CANCELLED') "
+                            + "ORDER BY b.registered_at DESC NULLS LAST, b.id DESC LIMIT 1",
+                    (rs, i) -> new ProjectionRow(
+                            rs.getString("registration_no"),
+                            rs.getString("owner_name"),
+                            rs.getTimestamp("registered_at")),
+                    vin);
+            ProjectionRow row = rows.isEmpty() ? null : rows.get(0);
+            jdbc.update("INSERT INTO collateral_registration "
+                            + "(vin, owner_name, reg_no, status, registered_at, discharged_at, source, updated_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, 'REGISTRATION_BATCH', now()) "
+                            + "ON CONFLICT (vin) DO UPDATE SET "
+                            + " owner_name = EXCLUDED.owner_name, reg_no = EXCLUDED.reg_no, "
+                            + " status = EXCLUDED.status, registered_at = EXCLUDED.registered_at, "
+                            + " discharged_at = EXCLUDED.discharged_at, source = EXCLUDED.source, "
+                            + " updated_at = now()",
+                    vin,
+                    row == null ? null : row.ownerName(),
+                    row == null ? null : row.regNo(),
+                    row == null ? "NONE" : "REGISTERED",
+                    row == null ? null : row.registeredAt(),
+                    row == null ? new Timestamp(System.currentTimeMillis()) : null);
+            jdbc.update("INSERT INTO collateral_registration_history "
+                            + "(vin, event_type, reg_no, owner_name, status, source, note, occurred_at) "
+                            + "VALUES (?, ?, ?, ?, ?, 'REGISTRATION_BATCH', ?, now())",
+                    vin,
+                    row == null ? "DISCHARGE" : "REGISTER",
+                    row == null ? null : row.regNo(),
+                    row == null ? null : row.ownerName(),
+                    row == null ? "NONE" : "REGISTERED",
+                    "V10 批次挂接/摘除后按 ADR-Q27 同步投影");
+        } catch (RuntimeException ex) {
+            // 投影同步失败不影响 V10 权威写入；门禁判定只读 V10，不受派生数据影响。
+            // 用 stderr 而非吞异常，便于运维发现投影滞后。
+            System.err.println("[ADR-Q27] V18 投影同步失败（不影响权威源与门禁）: vin=" + vin
+                    + ", cause=" + ex.getMessage());
+        }
+    }
+
+    /** 投影同步用的临时行：从 V10 有效登记批次读出。 */
+    private record ProjectionRow(String regNo, String ownerName, Timestamp registeredAt) {
     }
 
     private static Timestamp ts(LocalDateTime t) {

@@ -3,8 +3,8 @@ package com.company.floorplan.collateral.model;
 /**
  * 担保权属状态。与 CollateralClient.RegistrationVO.status 的字符串取值保持一致。
  *
- * <p>注意：本服务在 Q27 定源前不产出 REGISTERED 判定——查询一律 fail-closed 返回 NONE。
- * 枚举只描述取值，不承担判定规则。</p>
+ * <p>ADR-Q27：门禁判定由 {@code CollateralRegistrationService#getCurrent} 直读 V10
+ * 有效登记批次产出 REGISTERED / NONE；本枚举只描述取值，不承担判定规则。</p>
  */
 public enum RegistrationStatus {
     REGISTERED,

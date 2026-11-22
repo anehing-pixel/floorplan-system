@@ -5,6 +5,6 @@ public enum RegistrationEventType {
     REGISTER,
     CHANGE,
     DISCHARGE,
-    /** 权威源策略裁决后落定的权属（仅策略启用时产生）。 */
+    /** 快照裁决留痕（ADR-Q27 后策略只诊断不改账，保留取值供历史数据兼容）。 */
     SNAPSHOT_ADOPT
 }

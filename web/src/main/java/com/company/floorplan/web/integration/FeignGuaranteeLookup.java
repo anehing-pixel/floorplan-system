@@ -12,9 +12,9 @@ import org.springframework.stereotype.Component;
  * 门禁开关默认关闭，未起 collateral-reg-service 时本适配器不会被调用；
  * 一旦调用失败返回 null，判定策略按 fail-closed 阻断放款。</p>
  *
- * <p><b>TODO(Q27)</b>：契约返回的 status/regNo/ownerName 来自 collateral-reg-service 权属表，
- * 与 core 的 V10 批次表互不一致；判定源需业务书面确认后方可开启门禁。
- * 本适配器只做字段搬运，不判断哪张表权威。</p>
+ * <p><b>ADR-Q27 已裁决</b>：契约返回的 status/regNo/ownerName 由 collateral-reg-service
+ * 直读 V10 登记批次表（唯一权威源）后生成，与 core 口径一致，不再是「另一套权属表」。
+ * 本适配器只做字段搬运，不重复判定。</p>
  */
 @Component
 public class FeignGuaranteeLookup implements RoleSeparationPolicy.GuaranteeLookup {

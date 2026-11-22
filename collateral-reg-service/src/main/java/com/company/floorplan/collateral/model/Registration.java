@@ -5,8 +5,8 @@ import java.time.LocalDateTime;
 /**
  * 某 VIN 的当前担保权属——权威表 {@code collateral_registration} 的一行。
  *
- * <p>本对象只表达"当前事实"，不含判定规则。"什么算 REGISTERED、三源冲突如何裁决"
- * 由 AuthoritativeSourceStrategy 决定（默认关闭，待 Q27 定源）。</p>
+ * <p>ADR-Q27：本对象只表达 V18 投影表的"当前事实"，不含判定规则。
+ * 门禁判定由 service 直读 V10 权威源完成；三源策略降级为对账诊断，不改本表。</p>
  */
 public class Registration {
 

@@ -3,10 +3,10 @@ package com.company.floorplan.collateral.model;
 /**
  * 担保三源。priority 数字越小越优先。
  *
- * <p>默认裁决顺序为 "登记批次表 &gt; 担保台账 &gt; 车辆主数据"，
- * 理由是登记批次表是法务局公示依据。但这只是**默认实现**，
- * 由 AuthoritativeSourceStrategy 的开关控制，默认关闭，待 Q27 书面定源后再启用——
- * 本枚举不宣告业务口径已定。</p>
+ * <p><b>ADR-Q27 已裁决</b>：优先级 "登记批次表 &gt; 担保台账 &gt; 车辆主数据" 已定稿，
+ * 依据是登记批次表（V10）为法务局公示依据、后两者为派生状态。
+ * 该优先级现在用于<b>对账体检诊断</b>，不再用于门禁判定——
+ * 门禁直读 V10 权威源，不经过三源比较。</p>
  */
 public enum SourceSystem {
     REGISTRATION_BATCH(1, "登记批次表（公示依据）"),

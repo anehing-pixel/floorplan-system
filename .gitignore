@@ -7,6 +7,8 @@ logs/
 
 # 构建产物
 target/
+__pycache__/
+*.pyc
 
 # IDE
 .idea/

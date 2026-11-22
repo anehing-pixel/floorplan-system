@@ -13,10 +13,11 @@
   ⑪ 提前部分还款   ⑫ 车辆保险         ⑬ 展期续贷
   ⑭ 结清证明       ⑮ 额度年审         ⑯ 结算宽限期/OOT 升级
   ⑰ 违约处置闭环   ⑱ 评级口径动态配置 + 季度归档
-以及主数据、权限与角色矩阵（⑲~㉒）：
+以及主数据、权限与角色矩阵（⑲~㉓）：
   ⑲ 角色权限边界（角色矩阵：401 与 403 严格区分 + 自然人级职责分离）
   ⑳ 经销商主数据 CRUD（PATCH 语义 / 状态机 / 删除护栏）
   ㉑ 名下车辆聚合视图（汇总口径 == 明细逐行求和）
+  ㉓ 担保权属权威源（ADR-Q27：门禁直读 V10 / #29 权限点 / #31 批量对账不改账）
 """
 import json
 import os
@@ -105,6 +106,7 @@ ROLE_ACCOUNTS = {
     "advisory":    ("advisory123",   "RISK_ADVISORY_OFFICER"),# 增信业务岗
     "credit":      ("credit123",     "CREDIT_REVIEWER"),     # 授信审查岗
     "collection":  ("collect123",    "COLLECTION_OFFICER"),   # 催收岗
+    "collateral":  ("collateral123", "COLLATERAL_OFFICER"),   # 担保管理岗（持 COLLATERAL_MAINTAIN）
 }
 TOK = {}          # 登录名 -> 令牌
 ROLE_OF = {}      # 登录名 -> 角色代码
@@ -1121,13 +1123,70 @@ def main():
     ok(timeline is not None and timeline.strip() == "VOIDED,REDEEMED,PENDING",
        "同一 VIN 垫款时间线 -> %s（多笔历史 + 单笔有效）" % timeline)
 
+    # ㉓ 担保权属权威源（ADR-Q27）：门禁直读 V10 / #29 权限点 / #31 批量对账不改账
+    print("\n㉓ 担保权属权威源（ADR-Q27：V10 唯一权威源 · #29 权限 · #31 批量对账）")
+
+    # (1) ④ 已用 REG-001 设定担保 → V10 批次表有有效登记；门禁直读得到 REGISTERED（不是 V18 空投影）
+    st, vo = call("GET", "/api/collateral-reg/registration?vin=%s" % VIN)
+    ok(st == 200 and vo.get("status") == "REGISTERED" and vo.get("regNo") == "REG-001",
+       "门禁直读 V10 有效登记 -> %s/%s/%s（非 V18 空投影）"
+       % (st, vo.get("status"), vo.get("regNo")))
+    ok(st == 200 and vo.get("ownerName") == "金融公司",
+       "V25 owner_name 专用列生效（权利人不再误写 co_signed_by）-> %s" % vo.get("ownerName"))
+
+    # (2) 未登记 VIN fail-closed
+    q27_vin = "TESTQ27" + TS
+    st, vo = call("GET", "/api/collateral-reg/registration?vin=%s" % q27_vin)
+    ok(st == 200 and vo.get("status") == "NONE", "未知 VIN fail-closed -> %s" % vo.get("status"))
+
+    # (3) #29：无 COLLATERAL_MAINTAIN 的岗位调写端点被拒
+    reg_body = {"vin": q27_vin, "ownerName": "金融公司", "regNo": "FAKE-001",
+                "amount": 1000000, "registeredAt": datetime.now().replace(microsecond=0).isoformat(),
+                "source": "REGISTRATION_BATCH"}
+    st, r = call("POST", "/api/collateral-reg/registration", reg_body, token=login_role("import_op"))
+    ok(st == 403, "采购录入岗缺 COLLATERAL_MAINTAIN 调 /registration -> 403（#29 已封堵）")
+
+    # (4) 有权限岗位补录成功，但只写 V18 投影、不改门禁结论（ADR-Q27 裁决核心）
+    st, r = call("POST", "/api/collateral-reg/registration", reg_body, token=login_role("collateral"))
+    ok(st == 200, "担保管理岗持 COLLATERAL_MAINTAIN 调 /registration -> %s" % st)
+    st, vo = call("GET", "/api/collateral-reg/registration?vin=%s" % q27_vin)
+    ok(st == 200 and vo.get("status") == "NONE",
+       "人工投影不参与门禁：补录后仍 fail-closed NONE（ADR-Q27）")
+
+    # (5) #31：一次提交 3 条源快照，只诊断一次、绝不 adopt 改账
+    batch_sources = [
+        {"vin": q27_vin, "source": "REGISTRATION_BATCH", "status": "REGISTERED",
+         "regNo": "FAKE-001", "ownerName": "金融公司", "amount": 1000000, "rawPayload": "{}"},
+        {"vin": q27_vin, "source": "COLLATERAL_LEDGER", "status": "REGISTERED",
+         "regNo": "FAKE-001", "ownerName": "金融公司", "amount": 1000000, "rawPayload": "{}"},
+        {"vin": q27_vin, "source": "VEHICLE_UNITS", "status": "NONE", "rawPayload": "{}"},
+    ]
+    st, r = call("POST", "/api/collateral-reg/snapshot/import-batch", {"sources": batch_sources})
+    d = r.get("data", {}) if isinstance(r, dict) else {}
+    ok(st == 200 and d.get("importedCount") == 3 and len(d.get("sources") or []) == 3,
+       "批量三源快照一次落库 -> %s/importedCount=%s" % (st, d.get("importedCount")))
+    ok(st == 200 and d.get("adopted") is False,
+       "只诊断不改账 -> adopted=%s（ADR-Q27）" % d.get("adopted"))
+    st, vo = call("GET", "/api/collateral-reg/registration?vin=%s" % q27_vin)
+    ok(st == 200 and vo.get("status") == "NONE", "快照诊断后门禁仍为 NONE（未被派生状态覆盖）")
+
+    # (6) #29：无 JOB_TRIGGER 的岗位不能触发批量快照导入
+    st, r = call("POST", "/api/collateral-reg/snapshot/import-batch",
+                 {"sources": [batch_sources[0]]}, token=login_role("import_op"))
+    ok(st == 403, "采购录入岗缺 JOB_TRIGGER 调 /snapshot/import-batch -> 403（#29 已封堵）")
+
+    # (7) 入参护栏：不同 VIN 混在一次批量里被拒
+    mixed = [batch_sources[0], dict(batch_sources[1], vin="OTHER" + TS)]
+    st, r = call("POST", "/api/collateral-reg/snapshot/import-batch", {"sources": mixed})
+    ok(st == 400, "批量快照混用不同 VIN 被拒 -> %s/VALID_001（参数错误不冒泡成 500）" % st)
+
     print("\n" + "=" * 68)
     if FAILS:
         print("冒烟测试失败 %d 项：" % len(FAILS))
         for f in FAILS:
             print("  - " + f)
         sys.exit(1)
-    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉒）验证通过")
+    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉓）验证通过")
     print("=" * 68)
 
 

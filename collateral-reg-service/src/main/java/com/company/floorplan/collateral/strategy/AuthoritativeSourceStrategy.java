@@ -6,15 +6,15 @@ import com.company.floorplan.collateral.model.SourceSnapshot;
 import java.util.List;
 
 /**
- * 三源冲突裁决策略——把"担保以哪张表为准"做成可替换的策略，而不是写死在查询里。
+ * 三源<b>对账体检</b>策略——产出「三源是否一致 / 建议采信哪个源」的诊断结论。
  *
- * <p><b>Q27 阻塞</b>：业务口径尚未书面确认。因此：
- * <ul>
- *   <li>默认实现 {@link DefaultAuthoritativeSourceStrategy} 由开关控制，<b>默认关闭</b>；</li>
- *   <li>关闭时不采纳任何裁决，调用方保持当前权属不变（fail-closed，不放行放款）；</li>
- *   <li>开启时的优先级只是占位默认值，待 Q27 定源后确认或替换实现。</li>
- * </ul>
- * 这样既把骨架搭好，又不把未确认的业务规则伪装成既定事实。</p>
+ * <p><b>ADR-Q27（已裁决）</b>：V10 登记批次表是唯一权威源，三源快照都是派生状态。
+ * 因此本策略<b>不参与放款门禁判定</b>，也不改任何权属表；
+ * 门禁由 {@code CollateralRegistrationService#getCurrent} 直读 V10 决定。
+ * 本接口的产物只用于运营对账报告与冲突告警，避免派生状态反过来污染法律事实。</p>
+ *
+ * <p>开关 {@code floorplan.collateral.authoritative-source.enabled} 仅控制是否产出诊断，
+ * 默认关闭时返回 skipped；关闭<b>不影响</b>门禁（门禁走 V10），也不会放行或阻断放款。</p>
  */
 public interface AuthoritativeSourceStrategy {
 

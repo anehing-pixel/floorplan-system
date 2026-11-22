@@ -1,7 +1,6 @@
 package com.company.floorplan.collateral;
 
 import com.company.floorplan.application.service.AuthApplicationService;
-import com.company.floorplan.collateral.controller.CollateralRegController;
 import com.company.floorplan.collateral.repository.JdbcCollateralRegistrationRepository;
 import com.company.floorplan.collateral.service.CollateralRegistrationService;
 import com.company.floorplan.collateral.strategy.DefaultAuthoritativeSourceStrategy;
@@ -21,7 +20,8 @@ import org.springframework.context.annotation.Import;
  * vehicle_units / collateral_ledger / 批次表 的"三源不一致"收敛到一个权威源。</p>
  *
  * <p><b>对外契约</b>：实现 common 的 {@code CollateralClient#getRegistration(vin)}，
- * 供 core 放款前做 B1 担保门禁。Q27 业务定源未下发前，只建表和服务骨架，不实现门禁判定。</p>
+ * 供 core 放款前做 B1 担保门禁。<b>ADR-Q27 已裁决</b>：门禁直读 V10 登记批次表
+ * （唯一权威源），本服务的 V18 三张表只作投影与留痕，不参与判定。</p>
  */
 @SpringBootApplication(scanBasePackages = "com.company.floorplan.collateral")
 @Import({
@@ -30,11 +30,11 @@ import org.springframework.context.annotation.Import;
         JwtAuthInterceptor.class,
         WebMvcConfig.class,
         GlobalExceptionHandler.class,
-        // 担保权属服务：本包下的类不加 stereotype，统一在此显式装配，避免与组件扫描重复注册
+        // 担保权属服务：service / repository / strategy 不加 stereotype，统一在此显式装配；
+        // CollateralRegController 已用 @RestController 交给组件扫描注册，勿重复 @Import（否则映射冲突）
         JdbcCollateralRegistrationRepository.class,
         DefaultAuthoritativeSourceStrategy.class,
-        CollateralRegistrationService.class,
-        CollateralRegController.class
+        CollateralRegistrationService.class
 })
 @EnableDiscoveryClient
 public class CollateralRegServiceApplication {

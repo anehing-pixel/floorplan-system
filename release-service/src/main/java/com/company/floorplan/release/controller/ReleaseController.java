@@ -30,6 +30,10 @@ import java.util.UUID;
  * <p><b>权限点沿用既有 {@code SECURITY_MAINTAIN}</b>（担保设定与解除）：
  * 设计稿 §6 建议新增 RELEASE_ORDER_ISSUE，但新增权限点要改 common/domain，
  * 超出本 agent 的写入边界，见 HANDOFF.md 的 TODO。</p>
+ *
+ * <p><b>接收方与确认权威</b>：创建时可用 {@code custodianByItem} 按释放项指定接收方
+ * （放车线 / 放证线）；确认时可用 {@code confirmationAuthority} 声明凭什么有权确认，
+ * 二者都是 Q9/Q10 建议口径的 HTTP 入口。</p>
  */
 @RestController
 @RequestMapping("/api/releases")
@@ -49,17 +53,19 @@ public class ReleaseController {
         String operator = AuditActor.resolve(http);
         ReleaseOrder order = service.create(new CreateReleaseCommand(
                 req.redemptionId(), req.dealerId(), req.vin(), req.certificateNo(),
-                req.custodianId(), req.releaseItems(), req.validUntil(), operator, req.deliveryChannel()));
+                req.custodianId(), req.releaseItems(), req.validUntil(), operator,
+                req.deliveryChannel(), req.custodianByItem()));
         return ApiResponse.ok(Map.of("order", order), traceId());
     }
 
-    /** 回执确认：SENT → CONFIRMED。 */
+    /** 回执确认：SENT → CONFIRMED（代录回执 + 记确认权威）。 */
     @PostMapping("/{id}/confirm")
     @RequirePermission(Permission.SECURITY_MAINTAIN)
     public ApiResponse<Map<String, Object>> confirm(@PathVariable long id,
                                                     @RequestBody(required = false) ReleaseActionRequest body,
                                                     HttpServletRequest http) {
-        ReleaseOrder order = service.confirm(id, AuditActor.resolve(http), reasonOf(body));
+        ReleaseOrder order = service.confirm(id, AuditActor.resolve(http),
+                reasonOf(body), authorityOf(body));
         return ApiResponse.ok(Map.of("order", order), traceId());
     }
 
@@ -91,6 +97,10 @@ public class ReleaseController {
 
     private static String reasonOf(ReleaseActionRequest body) {
         return body == null ? null : body.reason();
+    }
+
+    private static String authorityOf(ReleaseActionRequest body) {
+        return body == null ? null : body.confirmationAuthority();
     }
 
     private static String traceId() {

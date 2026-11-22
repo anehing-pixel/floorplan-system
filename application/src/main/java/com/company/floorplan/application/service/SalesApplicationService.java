@@ -152,9 +152,12 @@ public class SalesApplicationService {
             String batchNo;
             Optional<CollateralRegistrationBatch> existing = batchRepository.findByRegistrationNo(regNo);
             if (existing.isPresent()) {
-                // 幂等：同一法务省登记编号重复回填不重复建批次
+                // 幂等：同一法务省登记编号重复回填不重复建批次。
+                // ADR-Q27：复用既有批次时必须把本次 VIN 挂进 items（V10 唯一权威源），
+                // 否则 vehicle_units 显示 REGISTERED 而门禁直读 V10 查不到 → 误判 NONE 拒付。
                 batchId = existing.get().getId();
                 batchNo = existing.get().getBatchNo();
+                collateralService.attachVinToExistingBatch(batchId, vin);
             } else {
                 Map<String, Object> reg = collateralService.registerCollateralBatch(
                         List.of(vin), regNo, type, null, null, LocalDateTime.now(), null,
@@ -162,14 +165,14 @@ public class SalesApplicationService {
                 batchId = (Long) reg.get("batchId");
                 batchNo = (String) reg.get("batchNo");
             }
-            // TODO(Q27): ownerName（担保权人）在 V10 批次表无专用列，暂记 co_signed_by。
-            // Q27 定权威源后再归一（collateral-reg-service 权属表已有 dedicated ownerName）。
+            // ADR-Q27：V25 已给 V10 批次表加 owner_name 专用列，权利人不再误写
+            // co_signed_by（共同申请对方＝经销商，两者不是同一主体）。
             batchRepository.findById(batchId).ifPresent(b -> {
                 // B-1（CORE_VERIFIER_REPORT）：幂等分支不得无条件覆盖已有权属人。
                 // 同一登记编号重复回填时以首次写入为准，避免第二次调用用不同
                 // ownerName 悄悄改写权属留痕（审计链被覆盖 = 合规问题）。
-                if (b.getCoSignedBy() == null || b.getCoSignedBy().isBlank()) {
-                    b.setCoSignedBy(ownerName);
+                if (b.getOwnerName() == null || b.getOwnerName().isBlank()) {
+                    b.setOwnerName(ownerName);
                     batchRepository.save(b);
                 }
             });

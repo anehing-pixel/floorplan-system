@@ -420,6 +420,29 @@ public class CollateralLedgerApplicationService {
     }
 
     /**
+     * <b>ADR-Q27</b>：把一台车挂到<b>既有</b>登记批次（幂等）。
+     *
+     * <p>{@code SalesApplicationService#setSecurity} 命中「同一登记编号重复回填」的幂等分支时，
+     * 早期实现只复用批次 ID，没把本次 VIN 写进 {@code collateral_registration_items}。
+     * 结果是 {@code vehicle_units.security_status=REGISTERED}，但 V10 权威源里查不到这台车，
+     * 放款门禁直读 V10 会误判为 NONE（fail-closed 拒付）。本方法补齐该挂接：
+     * 一次登记本就可覆盖多台车（见 V10 表注释），重复挂同一台由仓储的
+     * {@code ON CONFLICT (batch_id, vin) DO NOTHING} 保证幂等。</p>
+     *
+     * <p>无担保物台账行（未放款确认）时跳过，与 {@code registerCollateralBatch} 的 skip 口径一致。</p>
+     */
+    @Transactional
+    public void attachVinToExistingBatch(Long batchId, String vin) {
+        CollateralLedger ledger = ledgerRepository.findByVin(vin).orElse(null);
+        if (ledger == null) {
+            return;
+        }
+        batchRepository.addItem(batchId, ledger.getId(), vin);
+        ledger.setSecurityStatus(SecurityStatus.REGISTERED.name());
+        ledgerRepository.save(ledger);
+    }
+
+    /**
      * 发起抹消登记待办（双方共同申请）。
      *
      * @param registrationId 登记档案 ID

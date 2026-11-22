@@ -4,9 +4,12 @@
 
 ## 1. 改了哪些文件
 
-### 新增（迁移，唯一号段 V19）
+### 新增（迁移，V19 + V24）
 - `infrastructure/src/main/resources/db/migration/V19__release_orders.sql`
   —— 六张表 + `release_order_no_seq` 序列。未触碰 V16/V17/V18/V20/V21。
+- `infrastructure/src/main/resources/db/migration/V24__release_custodian_scope.sql`
+  —— Q9/Q10 建议口径落地：三列新增 + 覆盖旧注释。**V19 已执行、保持字节不变**，
+  改 V19 会让 Flyway checksum 失配、服务启动失败。
 
 ### 新增（release-service）
 | 包 | 文件 | 职责 |
@@ -17,8 +20,10 @@
 | `release.model` | `ReleaseOrderItem.java` | 释放项明细（对应 `release_order_items`） |
 | `release.model` | `ReleaseStateHistory.java` | 状态流转历史（对应 `release_state_history`） |
 | `release.statemachine` | `ReleaseStateMachine.java` | 纯函数状态机：`canTransit` / `requireTransition` / `nextStates` |
-| `release.channel` | `ReleaseChannel.java` | 下发通道接口（Q9/Q10 接缝） |
-| `release.channel` | `LoggingReleaseChannel.java` | 默认实现：只打日志，TODO 接真实 WMS |
+| `release.channel` | `ReleaseChannel.java` | 下发通道接口（Q9/Q10 收敛后的可扩展接缝） |
+| `release.channel` | `ManualReleaseChannel.java` | 起步实现：MANUAL 人工转交交接单（替换原日志占位 `LoggingReleaseChannel`） |
+| `release.model` | `CustodianType.java` | 接收方类型：两类主用 + 两类须业务书面启用 |
+| `release.model` | `CustodianResolver.java` | 按释放项解析实际接收方（纯函数） |
 | `release.repository` | `JdbcReleaseOrderRepository.java` | `NamedParameterJdbcTemplate` 读写六表中的三张运行时表 |
 | `release.service` | `CreateReleaseCommand.java` / `ReleaseDetail.java` | 命令对象与查询结果对象 |
 | `release.service` | `ReleaseApplicationService.java` | 创建 / 确认 / 放车 / 解抵 / 查询，每步状态机校验 + 落历史 |
@@ -30,9 +35,12 @@
 ### 修改（均在允许边界内）
 - `release-service/pom.xml`：新增 `junit-jupiter`（test scope，仅用于状态机单测）。
 - `release-service/src/main/java/.../ReleaseServiceApplication.java`：`@Import` 增加
-  `LoggingReleaseChannel` / `JdbcReleaseOrderRepository` / `ReleaseApplicationService`；
+  `ManualReleaseChannel` / `JdbcReleaseOrderRepository` / `ReleaseApplicationService`；
   更新 Javadoc。`ReleaseController` 带 `@RestController`，由原有 `scanBasePackages` 扫描装配，
   未重复加入 `@Import` 以免生成两个 bean。
+- V24 配套改造：`ReleaseOrderItem` / `ReleaseStateHistory` / `CreateReleaseRequest` /
+  `CreateReleaseCommand` / `ReleaseActionRequest` / `ReleaseController` /
+  `ReleaseApplicationService` / `JdbcReleaseOrderRepository` / `ReleaseItemType`。
 
 **未修改**：父 `pom.xml`、任何 `application.yml`、`common/`、`run-microservices.sh`、
 其他服务目录、`web/`、`domain/`、`application/`、`infrastructure/` 的既有 Java 文件、
@@ -91,40 +99,85 @@ CANCELLED       → （终态）
 以任务卡为准；设计稿的 `issued_at / acknowledged_at / delivery_channel / rejected_reason / receipt_id`
 等字段在 `release_orders` 中均保留，后续要扩充状态只需改枚举 + 状态机白名单 + 单测。
 
-## 4. Q9/Q10 接缝在哪
+## 4. Q9/Q10 口径收敛与接缝（2026-11-22 落地，最终仍待业务书面确认）
 
-- **接口**：`release.channel.ReleaseChannel#dispatch(ReleaseOrder, List<ReleaseOrderItem>)`。
-- **默认实现**：`release.channel.LoggingReleaseChannel`——只打日志（含指令号/VIN/接收方/通道），
-  不连任何外部系统；类注释里有编号 TODO。
-- **装配**：`ReleaseServiceApplication` 的 `@Import` 注册 `LoggingReleaseChannel`。
-  将来接真实 WMS/监管门户时，**只需新增一个 `ReleaseChannel` 实现并替换 `@Import` 中的类型**，
-  `ReleaseApplicationService` 一行不改。
-- **相关表字段**：`release_orders.delivery_channel`（MANUAL/PORTAL/API/MQ）、`custodian_id`；
-  `custodians.api_endpoint / api_secret_ref` 为外部对接预留（密钥只存引用）。
-- **ADR-009**：真实通道必须走 DMZ 入口签名鉴权，回执确认人记 `partner_code` 而非自然人——已写入 TODO。
+### 结论：不再四选一，按释放项分两条线
 
-## 5. 单测与验证结果
+《业务流程文档》§6 已由用户确认本系统面向**日本新车渠道**：物理监管只做实地盘点，
+不做扣押钥匙 / GPS / 封签 / 驻场监管（那是中国第三方监管公司对二手车、高风险车商的做法），
+兜底靠厂家回购承诺 + 经销商信用 + 让与担保。车物理上就在经销商自己的库里，
+金融公司没有第三方替它看车，真正握住的控制手段是权属凭证。
 
-```
-cd C:/Users/Administrator/Documents/GitHub/wt-release
-mvn -q -pl release-service -am test       → 退出码 0
-mvn -q -pl release-service -am package    → 退出码 0
-```
+| 释放项 | 接收方类型 | 说明 |
+|---|---|---|
+| `VEHICLE` / `KEY` | `DEALER_WAREHOUSE` | 放车线：经销商库执行交付 |
+| `CERTIFICATE` | `CERTIFICATE_DEPOSITORY` | 放证线：凭证保管点交出权属凭证 |
+| `THIRD_PARTY_WAREHOUSE` / `ON_SITE_SUPERVISOR` | 须业务书面启用 | 与已确认口径冲突，枚举保留但不作为默认 |
 
-- `ReleaseStateMachineTest`：**Tests run: 45, Failures: 0, Errors: 0, Skipped: 0**。
-  - 6×6=36 种状态对由 `canTransit` 反向生成合法/非法两组，全部覆盖；
-  - 专项红线用例：`releaseWithoutConfirmationIsRejected`（跳步放车）、
-    `dischargeLienBeforeReleaseIsRejected`（未放车先解抵）；
-  - 终态/自迁移 + null 入参场景。
-- 产物：`release-service/target/floorplan-release-service-1.0.0-SNAPSHOT.jar`。
-- **未做数据库集成测试**：本服务 `application.yml` 中 `spring.flyway.enabled=false`，
-  当前环境未启动 PostgreSQL；单测是纯状态机测试，不依赖数据源。
-  编译、单测、打包均已通过；V19 SQL 需在有 PG 的环境由运维手工执行/开启 Flyway 验证。
+### 落地点
+
+- **表**：V24 给 `release_order_items` 加 `custodian_id`（NULL 继承主表
+  `release_orders.custodian_id`），给 `release_state_history` 与 `release_receipts`
+  加 `confirmation_authority`；覆盖 `custodians` 等 5 处旧注释。
+- **模型**：`CustodianType`（`isPrimary()` / `requiresWrittenApproval()`）、
+  `ReleaseItemType.defaultCustodianType()`、纯函数 `CustodianResolver`
+  （显式按项覆盖 > 继承主表 > null，键名大小写不敏感）。
+- **HTTP**：`POST /api/releases` 可传 `custodianByItem`；`confirm` 可传
+  `confirmationAuthority`（默认 `INTERNAL_WITNESS`）。
+- **通道**：`release.channel.ManualReleaseChannel` 起步实现——打印逐项交接单
+  （指令号 / VIN / 该项接收方 / 期望接收方类型），不连任何外部系统；
+  `ReleaseServiceApplication` 的 `@Import` 注册它，替换原 `LoggingReleaseChannel`。
+- **回执闭环**：`confirm` 时落 `release_receipts`（`source=MANUAL`、
+  `confirmed_by`=我方担保管理岗、`confirmation_authority`），并把同一权威写进状态历史。
+  **执行接收方与权威确认方解耦**，回应设计稿 §7 #10「回执不能由我方代填 / 经销商自证」。
+- **Q10 同步收敛**：起步无外部 WMS 可直连，MANUAL 为主（设计稿 §7 #6、
+  ADR-009「人工路径一等公民」）；PORTAL/API/MQ 待真有 partner 系统再实现。
+
+### 接缝仍在
+
+`ReleaseChannel#dispatch(ReleaseOrder, List<ReleaseOrderItem>)` 接口不变：
+将来接真实 WMS/监管门户时只需新增一个实现并替换 `@Import`，
+`ReleaseApplicationService` 一行不改；签名走 ADR-009 DMZ 入口，
+回执 `source` 改为对应通道、确认人记 `partner_code`。
+
+## 5. 单测与验证结果（2026-11-22 收口）
+
+**全量构建**：`mvn -B package` → **BUILD SUCCESS，15/15 模块**，退出码 0。
+（`mvn -B clean package` 会被 VSCode Java 语言服务器锁住
+`infrastructure/target/classes/db/migration` 而失败，属环境干扰；按项目既定绕法
+用增量 `package`，必要时清掉单个模块的 `target` 再跑即可全绿。）
+
+**单测**：
+- `ReleaseStateMachineTest`：**46 例全绿**（6×6 穷举 + 两条红线 + 终态/null）。
+- `CustodianResolutionTest`（V24 新增）：**9 例全绿**——按项覆盖、继承主表、
+  键名大小写不敏感、两类主用类型与书面启用标记。
+- release-service 合计 **55 例，Failures 0 / Errors 0**；全仓各模块单测均全绿。
+
+**数据库与端到端**（PostgreSQL 5434 已起，V24 由 web 的 Flyway 执行）：
+- `flyway_schema_history` 实证 `24 release custodian scope` 已落库。
+- `bash run-microservices.sh start` 10 服务全就绪（网关 18080），走网关冒烟
+  **184 PASS / 0 FAIL / 全部通过 ✅**（`SMOKE_BASE=http://127.0.0.1:18080`）。
+- **release 专项 13 项断言全绿**：结算岗登录 → 创建（带 `custodianByItem`）→
+  查询逐项接收方 → confirm → release → discharge-lien → 跳步放车 422 红线 →
+  未覆盖时继承主接收方。
+- **直接查库核对**：`release_order_items` 三项 `custodian_id` =
+  VEHICLE/KEY 101、CERTIFICATE 202；`release_state_history` 的 CONFIRM 行
+  `confirmation_authority=INTERNAL_WITNESS`；`release_receipts` 落
+  `RR-RO-2026-000001 / source=MANUAL / confirmed_by=settlement /
+  confirmation_authority=INTERNAL_WITNESS`。
+- 验证后已清理测试 VIN 数据并停止全部服务，端口全释放。
+
+产物：`release-service/target/floorplan-release-service-1.0.0-SNAPSHOT.jar`。
+本服务 `spring.flyway.enabled=false`，建表/加列由 web 服务 Flyway 完成（V19→V24）；
+单测为纯函数，不依赖数据源。
 
 ## 6. TODO（跨边界，未改代码）
 
-1. **Q9/Q10 确认后**接真实下发通道（监管门户 / API / MQ），实现签名（ADR-009 §2.5）、
-   失败重试 + 降级人工 + 告警，回执落 `release_receipts` 与 `integration_calls`。
+1. **业务书面确认 Q9/Q10 后**（当前建议口径已落地）：若确认存在 partner 系统，
+   再实现 `PortalReleaseChannel` / `ApiReleaseChannel` / `MqReleaseChannel`
+   （ADR-009 §2.5 签名、失败重试 + 降级人工 + 告警），回执 `source` 改为对应通道，
+   确认人记 `partner_code`；当前 `source=MANUAL` 我方见证代录已闭环，
+   但 `integration_calls` 尚未落库。
 2. **新增错误码**：`RELEASE_001` 出库指令状态非法流转，需在 `domain/exception/ErrorCode.java` 加；
    当前复用 `VEHICLE_002`（HTTP 422 行为一致）。
 3. **新增权限点**：设计稿建议 `RELEASE_ORDER_ISSUE`（担保管理岗），需在 `domain/model/Permission.java`

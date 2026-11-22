@@ -35,6 +35,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.valueOf(code.getHttpStatus())).body(body);
     }
 
+    /**
+     * 入参校验异常（如三源快照批量导入的 VIN / 来源校验）：归 400 VALID_001，
+     * 不再落到 {@code handleUnknown} 冒泡成 500 SYS_001——客户端传错参数不是系统故障。
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex,
+                                                                   HttpServletRequest request) {
+        String traceId = String.valueOf(request.getAttribute("traceId"));
+        if ("null".equals(traceId)) {
+            traceId = java.util.UUID.randomUUID().toString();
+        }
+        log.warn("入参校验失败 traceId={} msg={}", traceId, ex.getMessage());
+        ApiResponse<Void> body = ApiResponse.fail(
+                ErrorCode.VALID_001.getCode(), ex.getMessage(), traceId, null);
+        return ResponseEntity.status(HttpStatus.valueOf(ErrorCode.VALID_001.getHttpStatus())).body(body);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception ex, HttpServletRequest request) {
         String traceId = java.util.UUID.randomUUID().toString();

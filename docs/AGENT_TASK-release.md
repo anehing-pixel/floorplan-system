@@ -28,6 +28,14 @@ git log -1 --format='%h %s'      # wave0 那条 aab5295
 
 Q9/Q10"接收方是谁、有无外部 WMS"业务未确认——这不影响你建表和状态机，把"对接外部 WMS"做成 TODO 接缝（`ReleaseChannel` 接口 + 一个 log 实现），不要写死。
 
+> **⚠️ 状态更新（2026-11-22，后续 agent 落地，本任务卡保留原貌作审计轨迹）**
+> Q9/Q10 已按项目内证据收敛，见 `release-service/HANDOFF.md` §4 与
+> `infrastructure/src/main/resources/db/migration/V24__release_custodian_scope.sql`：
+> 默认实现已由 `LoggingReleaseChannel` 替换为 **`ManualReleaseChannel`**（MANUAL 人工转交
+> 交接单，不再是日志占位）；接收方按释放项分放车线 / 放证线，起步无外部 WMS，
+> confirm 时落 `source=MANUAL` 的我方见证代录回执。V19 已执行、保持字节不变，
+> 所有口径调整走 V24 新迁移（避免 Flyway checksum 失配）。
+
 ## 你的任务（对应 T2-9，设计稿已完成的落地）
 1. **六张表**（迁移 `V19__release_orders.sql`）：按《放车放证指令设计》的六张表建，含 `release_orders` + 明细表 + 状态历史表等。金额 BIGINT、时间 TIMESTAMPTZ，风格照抄 V15。
 2. **领域模型**（`...release.model`）：ReleaseOrder / ReleaseOrderItem / ReleaseStateHistory + 状态枚举（PENDING_RELEASE / SENT / CONFIRMED / RELEASED / LIEN_DISCHARGED / CANCELLED）。

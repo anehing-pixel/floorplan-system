@@ -18,13 +18,16 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 出库指令仓储（V19 六表读写）。
+ * 出库指令仓储（V19 六表 + V24 新增列的读写）。
  *
  * <p><b>为什么用 NamedParameterJdbcTemplate</b>：与
  * {@code JdbcPaymentTransactionRepository} 同风格——SQL 显式可读，
- * 命名参数避免 `?` 顺序错位，且本服务没有任何 ORM 映射需求。
- * 类放在自己的包内，不依赖 infrastructure 里的任何既有 Java 文件
- * （硬性边界：不改别人的代码）。</p>
+ * 命名参数避免 {@code ?} 顺序错位，且本服务没有任何 ORM 映射需求。
+ * 类放在自己的包内，不依赖 infrastructure 里的任何既有 Java 文件。</p>
+ *
+ * <p><b>依赖 V24 已执行</b>：本服务 {@code spring.flyway.enabled=false}，
+ * 建表与加列由 web 服务的 Flyway 完成（V19 → V24）。这与既有约定一致：
+ * 只有 web 跑迁移，其余服务共库不建表。</p>
  *
  * <p><b>时间统一转 {@link Timestamp} 写入</b>：PostgreSQL 的 TIMESTAMPTZ
  * 用 {@code Timestamp.from(Instant)} 传参最稳，读回用 {@code getTimestamp().toInstant()}。
@@ -80,6 +83,8 @@ public class JdbcReleaseOrderRepository {
         item.setVin(rs.getString("vin"));
         item.setItemType(com.company.floorplan.release.model.ReleaseItemType.valueOf(rs.getString("item_type")));
         item.setItemNo(rs.getString("item_no"));
+        Object custodianId = rs.getObject("custodian_id");   // V24
+        item.setCustodianId(custodianId == null ? null : ((Number) custodianId).longValue());
         item.setReleased(rs.getBoolean("released"));
         item.setReleasedAt(toInstant(rs.getTimestamp("released_at")));
         item.setCreatedAt(toInstant(rs.getTimestamp("created_at")));
@@ -96,6 +101,7 @@ public class JdbcReleaseOrderRepository {
         h.setAction(rs.getString("action"));
         h.setOperator(rs.getString("operator"));
         h.setReason(rs.getString("reason"));
+        h.setConfirmationAuthority(rs.getString("confirmation_authority"));  // V24
         h.setCreatedAt(toInstant(rs.getTimestamp("created_at")));
         return h;
     };
@@ -139,22 +145,51 @@ public class JdbcReleaseOrderRepository {
         return id;
     }
 
-    /** 批量写释放项明细。 */
+    /**
+     * 批量写释放项明细（V24：逐项带 {@code custodian_id}）。
+     * 为 {@code null} 时落 NULL，语义是「继承主表主接收方」。
+     */
     public void saveItems(long orderId, List<ReleaseOrderItem> items) {
         if (items.isEmpty()) {
             return;
         }
-        String sql = "INSERT INTO release_order_items (order_id, vin, item_type, item_no) "
-                + "VALUES (:orderId, :vin, :itemType, :itemNo) "
+        String sql = "INSERT INTO release_order_items (order_id, vin, item_type, item_no, custodian_id) "
+                + "VALUES (:orderId, :vin, :itemType, :itemNo, :custodianId) "
                 + "ON CONFLICT (order_id, item_type) DO NOTHING";
         MapSqlParameterSource[] batch = items.stream()
                 .map(item -> new MapSqlParameterSource()
                         .addValue("orderId", orderId)
                         .addValue("vin", item.getVin())
                         .addValue("itemType", item.getItemType().name())
-                        .addValue("itemNo", item.getItemNo()))
+                        .addValue("itemNo", item.getItemNo())
+                        .addValue("custodianId", item.getCustodianId()))
                 .toArray(MapSqlParameterSource[]::new);
         jdbc.batchUpdate(sql, batch);
+    }
+
+    /**
+     * 人工转交后代录回执（Q10 起步口径：无外部 WMS，MANUAL 为主）。
+     *
+     * <p>{@code receipt_no = "RR-" + orderNo}：指令编号全局唯一，一张指令
+     * 只能 CONFIRM 一次（状态机 CAS 保证），因此回执号天然唯一；
+     * {@code ON CONFLICT DO NOTHING} 让重试幂等，不产生第二条证据。</p>
+     */
+    public void saveReceipt(String orderNo, long orderId, String releasedItems, Instant now,
+                            String confirmedBy, String source, String confirmationAuthority) {
+        String sql = "INSERT INTO release_receipts "
+                + "(receipt_no, release_order_id, released_items, released_at, confirmed_by, "
+                + " source, confirmation_authority) "
+                + "VALUES (:receiptNo, :orderId, :releasedItems, :releasedAt, :confirmedBy, "
+                + " :source, :confirmationAuthority) "
+                + "ON CONFLICT (receipt_no) DO NOTHING";
+        jdbc.update(sql, new MapSqlParameterSource()
+                .addValue("receiptNo", "RR-" + orderNo)
+                .addValue("orderId", orderId)
+                .addValue("releasedItems", releasedItems)
+                .addValue("releasedAt", toTimestamp(now))
+                .addValue("confirmedBy", confirmedBy)
+                .addValue("source", source)
+                .addValue("confirmationAuthority", confirmationAuthority));
     }
 
     /**
@@ -200,18 +235,20 @@ public class JdbcReleaseOrderRepository {
                         .addValue("id", orderId));
     }
 
-    /** 追加一条状态历史。只追加不修改。 */
+    /** 追加一条状态历史。只追加不修改；V24 起可带确认权威。 */
     public void appendHistory(ReleaseStateHistory h) {
         String sql = "INSERT INTO release_state_history "
-                + "(order_id, from_status, to_status, action, operator, reason) "
-                + "VALUES (:orderId, :fromStatus, :toStatus, :action, :operator, :reason)";
+                + "(order_id, from_status, to_status, action, operator, reason, confirmation_authority) "
+                + "VALUES (:orderId, :fromStatus, :toStatus, :action, :operator, :reason, "
+                + " :confirmationAuthority)";
         jdbc.update(sql, new MapSqlParameterSource()
                 .addValue("orderId", h.getOrderId())
                 .addValue("fromStatus", h.getFromStatus() == null ? null : h.getFromStatus().name())
                 .addValue("toStatus", h.getToStatus().name())
                 .addValue("action", h.getAction())
                 .addValue("operator", h.getOperator())
-                .addValue("reason", h.getReason()));
+                .addValue("reason", h.getReason())
+                .addValue("confirmationAuthority", h.getConfirmationAuthority()));
     }
 
     public Optional<ReleaseOrder> findById(long id) {

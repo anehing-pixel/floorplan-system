@@ -81,11 +81,14 @@ public class AdvanceApplicationService {
     private final CollateralLedgerApplicationService collateralService;
     /**
      * T1-5（B1）担保门禁查询端口：由 web 层 CollateralClient Feign 适配器实现。
-     * TODO(Q27)：判定源未定，开关默认关闭，默认不参与放款判定。
+     * ADR-Q27：判定源已定为 V10 登记批次表，由 collateral-reg-service 直读后返回。
      */
     private final RoleSeparationPolicy.GuaranteeLookup guaranteeLookup;
 
-    /** T1-5（B1）：担保门禁总开关，默认关闭——Q27 定源前绝不默认开启。 */
+    /**
+     * T1-5（B1）：担保门禁总开关，默认 false 仅为本地原型/冒烟保留；
+     * 置 true 后按 ADR-Q27 判定（Q21 硬阻断，不放宽）。
+     */
     @Value("${floorplan.core.guarantee-gate.enabled:false}")
     private boolean guaranteeGateEnabled;
     /** Q21 已定「硬阻断」：不设按经销商放宽白名单，避免门禁被配置绕过。 */
@@ -375,10 +378,13 @@ public class AdvanceApplicationService {
     /**
      * T1-5（B1）放款前担保门禁。
      *
-     * <p><b>TODO(Q27) 明确阻塞项</b>：担保判定源（三张表 + 权属服务）尚未由业务书面确认，
-     * 本门禁只通过 {@link RoleSeparationPolicy.GuaranteeLookup} 消费上层视图，不自定判定源；
-     * 开关 {@code floorplan.core.guarantee-gate.enabled} 默认 false，
-     * 默认关闭时<b>连权属服务都不查询</b>，绝不改变现有放款行为。</p>
+     * <p><b>ADR-Q27 已裁决</b>：判定源是 V10 {@code collateral_registration_batches + items}
+     * （唯一权威源），由 {@code collateral-reg-service} 直读、按「登记编号非空且抹消未完成」
+     * 返回 {@code REGISTERED} / {@code NONE}。本门禁只通过
+     * {@link RoleSeparationPolicy.GuaranteeLookup} 消费该视图，不再自定判定源。</p>
+     *
+     * <p>开关 {@code floorplan.core.guarantee-gate.enabled} 默认 false，
+     * 默认关闭时<b>连权属服务都不查询</b>，绝不改变本地原型/冒烟行为。</p>
      *
      * <p><b>Q21 已定源（2026-11-22）：硬阻断</b>。开关开启后，查不到 REGISTERED 登记
      * （含服务不可达）一律拒付，<b>不存在按经销商放宽的白名单</b>；拒付的同时生成 HIGH 级
@@ -396,7 +402,8 @@ public class AdvanceApplicationService {
                 RoleSeparationPolicy.evaluateGuarantee(view, guaranteeGateEnabled);
         if (decision.blocked()) {
             supportRepository.createAlert(dealerId, pending.getVin(), "GUARANTEE_PENDING", "HIGH",
-                    "B1 担保门禁硬阻断放款：" + decision.reason() + "（TODO(Q27)：判定源待业务确认，需强制工单补登）");
+                    "B1 担保门禁硬阻断放款：" + decision.reason()
+                            + "（ADR-Q27：判定源为 V10 登记批次表，工单催办补登）");
             throw new BusinessException(ErrorCode.GUARANTEE_001, decision.reason());
         }
     }

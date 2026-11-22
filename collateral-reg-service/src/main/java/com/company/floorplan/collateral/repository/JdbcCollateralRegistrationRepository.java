@@ -18,7 +18,10 @@ import java.util.Optional;
  * 担保权属仓储：权威表 collateral_registration + 流水 + 三源快照，表结构见 V18。
  *
  * <p>当前权属用 upsert（ON CONFLICT 按 VIN 覆盖），流水与快照只追加不更新——
- * 这样"当前事实"与"历史留痕"分离，Q27 定源后可回看每次裁决依据。</p>
+ * 这样"当前事实"与"历史留痕"分离，可回看每次变更依据。</p>
+ *
+ * <p><b>ADR-Q27</b>：本类读写的是 V18 投影/留痕表；放款门禁的权威查询走
+ * {@link #findAuthoritativeByVin(String)} 直读 V10，不经过本表。</p>
  */
 public class JdbcCollateralRegistrationRepository {
 
@@ -78,6 +81,38 @@ public class JdbcCollateralRegistrationRepository {
         List<Registration> rows = jdbc.query(
                 "SELECT * FROM collateral_registration WHERE vin = :vin",
                 new MapSqlParameterSource("vin", vin), REGISTRATION_MAPPER);
+        return rows.stream().findFirst();
+    }
+
+    /**
+     * <b>ADR-Q27</b>：放款门禁的权威查询——直读 V10 登记批次表（system of record）。
+     *
+     * <p>刻意<b>不读</b> V18 投影表：投影是派生数据，允许延迟或缺失，
+     * 拿它做门禁判定会误放行。这里按 VIN 从 {@code items → batches} 取最新有效批次：
+     * 登记编号非空且抹消未完成（{@code cancellation_status NOT IN ('DONE','CANCELLED')}）
+     * 才是 {@code REGISTERED}；查不到就返回 empty，由 service 兜底成 {@code NONE}（fail-closed）。</p>
+     *
+     * <p>所有服务共用同一个 PostgreSQL 库，V10 三表由 web 的 Flyway 统一建立，
+     * 因此本服务可只读 JOIN；将来拆库时把本方法换成 outbox 投影查询即可，接口不变。</p>
+     */
+    public Optional<Registration> findAuthoritativeByVin(String vin) {
+        List<Registration> rows = jdbc.query(
+                "SELECT i.vin, b.registration_no, b.owner_name, b.registered_at "
+                        + "FROM collateral_registration_items i "
+                        + "JOIN collateral_registration_batches b ON b.id = i.batch_id "
+                        + "WHERE i.vin = :vin "
+                        + "  AND b.registration_no IS NOT NULL "
+                        + "  AND b.cancellation_status NOT IN ('DONE','CANCELLED') "
+                        + "ORDER BY b.registered_at DESC NULLS LAST, b.id DESC "
+                        + "LIMIT 1",
+                new MapSqlParameterSource("vin", vin),
+                (rs, i) -> Registration.registered(
+                        rs.getString("vin"),
+                        rs.getString("owner_name"),
+                        rs.getString("registration_no"),
+                        null,
+                        toLocalDateTime(rs.getTimestamp("registered_at")),
+                        "REGISTRATION_BATCH"));
         return rows.stream().findFirst();
     }
 

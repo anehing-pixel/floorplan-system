@@ -110,6 +110,15 @@ public class CollateralRegistrationBatch {
     /** 顺位（1 为优先）。 */
     private Integer priorityRank;
 
+    /**
+     * 担保权人（权利人）姓名。
+     *
+     * <p><b>ADR-Q27</b>：V25 新增专用列。此前 CORE 曾把 {@code ownerName} 误写入
+     * {@link #coSignedBy}（共同申请对方＝登记义务人＝经销商），两者不是同一主体。
+     * 本列承载权利人，{@code coSignedBy} 保留其本义，不再混用。</p>
+     */
+    private String ownerName;
+
     /** 共同申请对方（登记义务人＝经销商）。 */
     private String coSignedBy;
 
@@ -367,6 +376,14 @@ public class CollateralRegistrationBatch {
 
     public void setPriorityRank(Integer priorityRank) {
         this.priorityRank = priorityRank;
+    }
+
+    public String getOwnerName() {
+        return ownerName;
+    }
+
+    public void setOwnerName(String ownerName) {
+        this.ownerName = ownerName;
     }
 
     public String getCoSignedBy() {

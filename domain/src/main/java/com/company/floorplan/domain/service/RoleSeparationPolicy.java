@@ -216,11 +216,11 @@ public final class RoleSeparationPolicy {
      * 白名单绕过会让"硬阻断"退化成软放行，与定源结论冲突。拒付时上层仍生成 HIGH 级
      * 「担保待登记」工单催办，但那是追补动作，不是放行。</p>
      *
-     * <p><b>TODO(Q27) 明确阻塞项</b>：门禁以哪张表为准（{@code vehicle_units} /
-     * {@code collateral_ledger} / {@code collateral_registration_batches} /
-     * collateral-reg-service 权属表）尚未由业务书面确认，三源互不一致。
+     * <p><b>ADR-Q27 已裁决</b>：判定源为 V10
+     * {@code collateral_registration_batches + items}（唯一权威源），
+     * 由 collateral-reg-service 直读后把视图传进来。
      * 本策略<b>只消费上层传入的视图，不自作主张选择判定源</b>；
-     * 且开关默认关闭，默认不参与任何放款判定。</p>
+     * 开关默认 false，本地原型/冒烟不参与放款判定。</p>
      *
      * @param view        权属查询结果（null 表示服务不可达/无记录）
      * @param gateEnabled 门禁开关（默认 false）
@@ -228,7 +228,7 @@ public final class RoleSeparationPolicy {
     public static GuaranteeDecision evaluateGuarantee(GuaranteeLookup.GuaranteeView view,
                                                       boolean gateEnabled) {
         if (!gateEnabled) {
-            return GuaranteeDecision.allow("担保门禁默认关闭（Q27 判定源未定），不参与放款判定");
+            return GuaranteeDecision.allow("担保门禁默认关闭，不参与放款判定（ADR-Q27 判定源已定为 V10）");
         }
         if (view == null) {
             return GuaranteeDecision.block("担保权属查询无结果或服务不可达，fail-closed 硬阻断放款");
