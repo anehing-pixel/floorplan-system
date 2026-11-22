@@ -27,7 +27,7 @@
 |---|---|---|
 | `V1:43 vehicle_units.invoice_amount` | 「厂家发票金额（必填）」，唯一金额入口 | 保留列与 LEGACY 行为；USED 域注释覆盖为「不得作为放款基准」（D04 §7） |
 | `VehicleDraft.java:29-30` | 建账强校验 `invoice_amount > 0` | USED 域校验改为 `prudent_value > 0`；`invoice_amount` 在 USED 域允许为 0（拍卖场不出具厂家发票） |
-| `AdvanceApplicationService.java:172-177` | `advanceAmount = invoiceAmount × 0.90` 硬编码 | **不修改该方法**；USED 域走新方法 `calcUsedAdvanceCeiling(...)`，由 `vehicle_type` 显式路由（D03 §1.3） |
+| `AdvanceApplicationService.java:172-177` | `advanceAmount = invoiceAmount × 0.90` 硬编码 | **不修改该方法**；USED 域走新方法 `calcUsedAdvanceCeiling(...)`，由 `vehicle_type` 显式路由（域隔离见 D03 §1.2 聚合关系与 §6 包结构；原稿误引「D03 §1.3」，该节不存在，2026-11-22 D13 §4.4 WU2-05 修正） |
 | `PurchaseOrderImportParser.java:52-60` | 导入模板固定列 `invoiceAmount` | 新增 USED 导入模板（落札明细驱动），旧模板保留给 LEGACY |
 | `smoke-test.py:327` | 断言 `invoice×0.90` 公式 | **该断言不得改动**（LEGACY 回归基准）。USED 新增独立断言组，见 D11 §4 |
 | 派生链 | `purchase_orders.total_amount` / `aging_plans.reduce_amount` / `loans.principal` / `credit_lines.used_amount` 全由 `invoice_amount` 派生 | USED 域全部改由 `prudent_value × LTV` 派生；派生源唯一化（§5） |
@@ -99,11 +99,18 @@ prudent_value =
 |---|---|---|---|
 | 落札 + 查定 + 相場 | 三者取小 | 取胜者所属源 | ✔ |
 | 落札 + 相場 | 二者取小 | 取胜者 | ✔（记 `inputs` 仅 2 项） |
-| 仅落札 | = 落札价 | `AUCTION_WON_PRICE` | ✔（要求 `[D-05]` 确认：单源是否足够，本文**默认允许**并打 `single_source` 标记 + 告警） |
-| 仅查定 | = 查定价 | `THIRD_PARTY_APPRAISAL` | ✔ 同上 |
+| 仅落札 | = 落札价 | `AUCTION_WON_PRICE` | **✘**（与 §3.1「至少 2 源」取同一侧，见本节下方的裁决说明；仍写估值行并打 `single_source` 标记 + 告警，用途限 `PERIODIC_RECHECK`/`DISPOSAL_PRICING`） |
+| 仅查定 | = 查定价 | `THIRD_PARTY_APPRAISAL` | **✘** 同上 |
 | 仅相場 | = 相場 | `MARKET_MATRIX` | ✘ 相場是同类车批量价，不足以支撑单台敞口；**只能 `REVALUATION`** |
-| 仅人工 | = 人工值 | `MANUAL_OVERRIDE` | ✔ 仅当二人签认 + 理由（`VALU_004` 若无签认） |
+| 仅人工 | = 人工值 | `MANUAL_OVERRIDE` | ✔ 仅当二人签认 + 理由（`VALU_004` 若无签认）——**这是唯一的单源放款例外**，因为它本身就是一条被显式审批的覆盖动作，不是「凑巧只拿到一个源」 |
 | 空集 | 无估值 | — | ✘ `VALU_001` |
+
+**「单源能否作为放款基准」此前自相矛盾，现取保守侧**（2026-11-22 D13 §4.4 WU2-06）：
+§3.1 `ADVANCE_BASE` 行写「至少 2 个可用源」，而 §3.2 退化表把「仅落札 / 仅查定」判成 ✔ 可放款，
+两句话中间隔 15 行、都能被引用，实现者挑哪一句都自认有据——这正是「无绕过」这条红线最容易被凿开的形状。
+现统一为：**除 `MANUAL_OVERRIDE`+二人签认之外，单源一律不可作 `ADVANCE_BASE`**（`VALU_001`，
+按「无有效放款基准估值」处理并告警）。宽限窗口与「落札价单源是否最终放行」仍属 `[待定源 D-05]`，
+签字前若业务要求放宽，**必须同时改掉 §3.1 那一行**，不许两处各留一套说法。
 
 **加权规则的使用限制**：`WEIGHTED` 只能由 `LtvPolicy` 显式开启（`prudent_rule` 在政策层固定），
 **不允许**逐台临时选择规则——否则「哪台用哪种算法」会变成可协商口径，事后无法审计。
@@ -153,7 +160,7 @@ prudent_value =
 | `grade`（評価点） | `auction_grade` | 落札票 | 无評価点（相谈车）→ 只允许命中 `grade_min IS NULL` 的带 |
 | `inspection_remaining`（月） | `inspection_expiry_date − valuation_date` | 車検証 | < `inspection_remaining_min` → 拒或降档，见 §4.5 |
 | `model_heat` | 由 `valuation_market_snapshots.trend_30d` + `sample_count` 推导 | 行情 | `UNKNOWN`（样本 < 阈值）按 `LOW` 处理（保守） |
-| `dealer_grade` | 双维评分合成后的车商等级 `[D-07]` | 评级引擎 | 评级是**第二道闸**，不与单台维度混合加权（否则不可解释） |
+| `dealer_grade` | 双维评分合成后的车商等级 `[待定源 U-11]`（原稿误标 `D-07`，见 D00 §16.1） | 评级引擎 | 评级是**第二道闸**，不与单台维度混合加权（否则不可解释） |
 
 ### 4.2 规则表结构与不变式
 
@@ -167,7 +174,7 @@ ltv_policy_bands(policy_id, priority, age_band_min/max, mileage_band_min/max,
 | 不变式 | 表述 | 校验时点 | 违反后果 |
 |---|---|---|---|
 | **L1 唯一命中** | 任意合法输入组合，至多命中一条 band | 政策保存时全枚举抽样 + 运行时断言 | `LTV_002` 拒放款，工单政策缺陷 |
-| **L2 全覆盖** | 任意合法输入组合，至少命中一条或落入兜底带 | 保存时校验「维度笛卡尔积的边界样本」全通过 | 兜底带生效，告警 `LTV_003` 并**计入缺口报表** |
+| **L2 全覆盖** | 任意合法输入组合，至少命中一条或落入兜底带 | 保存时校验「维度笛卡尔积的边界样本」全通过 | 兜底带生效，告警 `LTV_005`（码位定源见 D00 §9 下表 B；原稿写 `LTV_003` 与「突破需追加还款」撞码）并**计入缺口报表** |
 | **L3 兜底保守** | `default_ratio` 必须 < 该政策所有 band 的 `min(max_ratio)` | 政策审批时 | 拒绝保存 |
 | **L4 比率上界** | 所有 `max_ratio <= 1.0`（禁止融资本息之外的超额融资） | CHECK 约束 + 领域断言 | 拒绝保存 |
 | **L5 版本不可变** | `status='ACTIVE'` 的政策不得改 band；只能新版本 + 旧版本 `RETIRED` | 应用层 + 无 UPDATE 权限 | `LTV_004` |
@@ -312,6 +319,21 @@ max_advance = FLOOR( prudent_value × max_ratio )              -- 整数日元�
 > 有了这张表，「这单当时为什么放 148 万」在三年后仍可完整复现：`policy_version` + `valuation_id` +
 > `inputs` + `prudent_value` + `ratio_snapshot`。这是本项目对「可追溯」的最低要求。
 
+**⚠️ 快照的权威落点只有一个：`advances`（2026-11-22 由 D13 §4.4 WU2-15 定源）**
+
+V58 在 `advances` 上建了同名的 `valuation_id` / `prudent_value` / `ltv_ratio_snapshot` / `policy_code`，
+V50 又在 `vehicle_units` 上建了一份（D04 §5.1），本表原稿只写 `vehicle_units.*` ⟹ 同一事实两处可各存各的。
+ADR-010 明确允许**同一 VIN 多笔垫款**，所以车辆侧那份在第二笔放款时必然被覆盖或写错行，
+「当时用哪版政策」就退化成「最近一笔用哪版」。定源如下，别再各写各的：
+
+| 落点 | 角色 | 可变性 | 允许用途 |
+|---|---|---|---|
+| `advances.ltv_ratio_snapshot` 等四列（V58） | **唯一权威** | 随借据一次性固化，之后不得改 | 判定、对账、审计复现、**D11 全部断言** |
+| `vehicle_units.ltv_ratio_snapshot` 等列（V50） | 最近一笔的**只读展示投影** | 会被下一笔覆盖 | 列表页展示；**禁止进任何 WHERE / 门禁谓词 / 报表口径** |
+
+> 需要同一条纪律的还有 `authoritative_source_type`（D04 §5.1 已按 ADR-Q27 撤销车辆侧列，见 D13 G13）。
+> 两者的共同形状是：**「为了查得快」在别的聚合上留一份判定输入，早晚变成第二权威源。**
+
 ### 5.3 放款闸门顺序（与 D05 §4 一致）
 
 ```
@@ -434,7 +456,7 @@ top_up_amount      = target_reduction 中尚未由实际回款冲抵的部分
 | 递减封顶 | `aging_day_decay_cap` | 是 | 是 |
 | 車検触发阈值 | `certificate_decay_trigger_months` | 否 | 否（技术性阈值） |
 | 突破告警线 `breach_threshold` | `ltv_policy_bands` 行内 | 是（随政策版本） | 是 |
-| 豁免规则 | `aging_plans` + 二人 | 是 | 是（`AGING_RULE_EXEMPT`） |
+| 豁免规则 | **`aging_exempt_rules`**（规则本体，D04 §3.14.1）+ `aging_plans.rule_code`（命中留痕）+ 二人 | 是 | 是（`AGING_RULE_EXEMPT`） |
 
 > **`breach_threshold` 从独立参数表移进 band 行**：本文修订点。
 > 理由是它与 `max_ratio` 描述同一档位的双重属性（比率上界 + 预警线上界），拆两张表会出现版本不同步，
@@ -556,4 +578,4 @@ vehicle_valuations                   ← 全部历史与输入，权威账，任
 - §1 列出的 LEGACY 污染点（`invoice_amount`、`smoke-test.py:327`、`PurchaseOrderImportParser`）全部只读保留，未提议改动既有公式。
 - §4.3 主动暴露两个不自洽（兜底带违反 L3、高龄与臨催的优先级），不掩盖。
 - 数值示例经复核，其中 2 处刻意保留为「反面示例」（§4.3 第 3 点、§7.3 表注）用于说明参数必须成对校准，不是计算疏漏。
-- 未签字项：`D-05`（估值周期与源要求、递减参数与豁免）、`D-06`（分档表数值、绝对上限、盈余归属）、`D-07`（双维评级合成，D03 §3.1）、`U-05`（与 `ResidualValueEstimator` 并存/替代）。
+- 未签字项：`D-05`（估值周期与源要求、递减参数与豁免）、`D-06`（分档表数值、绝对上限、盈余归属）、`U-11`（双维评级合成，D03 §3.1；**原稿误标 D-07**，D-07 实为解押顺序）、`U-05`（与 `ResidualValueEstimator` 并存/替代）。
