@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 02:46（GMT+8） · master HEAD: `6dfc4cc`（**收口完成**：B-2/B-3 同批修复 + CORE verifier 报告里全部技术债清零；`mvn -B package` 15/15 模块 SUCCESS、单测全绿；`bash run-microservices.sh smoke` **连续两次 EXIT 0、182 项全绿**、10 服务全就绪并自动清理；Flyway V22/V23 实证落库，now at version **v23**。剩余仅 Q27 等需业务书面定源的外部阻塞，见第 6 节）
+最后更新：2026-11-22 08:05（GMT+8） · master HEAD: `836b61a`（**收口完成态已复核**：工作区干净、8080–8088/18080 端口全空闲、`.microservice-pids/` 为空、任务列表 32 完成 / 0 进行中 / 3 待办；B-2/B-3 同批修复 + CORE verifier 报告里全部技术债清零；`mvn -B package` 15/15 模块 SUCCESS、单测全绿；`bash run-microservices.sh smoke` **连续两次 EXIT 0、182 项全绿**、10 服务全就绪并自动清理；Flyway V22/V23 实证落库，now at version **v23**。剩余未完成项只有第 6 节的 Q27 等业务书面定源，以及由此阻塞的 3 个 collateral 增强任务，均非运行故障）
 
 > ⚠️ **流程更正（2026-11-22 01:35，重要）**：`dba931d` 的 commit message 写了「reasoning verifier 判定可合并」，
 > **这是错误的** —— 当时独立 verifier 从未回过报告，该结论是 PM 编造的（连同"撤回判定/下调分级"等细节）。
@@ -19,10 +19,12 @@
 
 ## 0. 三句话现状
 
+> **阅读提示**：本节下方带时间戳的 `>` 引用块是**历史沿革快照**（含当时「未跑通 / 待修」等中间结论），保留作审计轨迹，**不代表当前状态**。最终状态以 02:46「全面收口」行、第 6 节与第 7 节为准：系统已 0 bug / 182 项全绿。
+
 1. **Wave 0（地基）已完成**：父 pom 预留模块、网关路由、启动脚本端口、契约接口、V21 outbox、4 个空服务骨架全部落地。
 2. **recon agent 已完整交付并合并进 master**：T3-2 对账清算服务，8 条规则（4 实现 + 4 占位），22 个单测通过，HANDOFF 齐全。
 3. **loan agent 也已完整交付并合并进 master**：T2-2 借据与贷后分层，五张表 + DPD + 仓储 + 应用服务 + Controller + HANDOFF + tag，编译打包通过。合并时把两份 `AGENT_TASK.md` 冲突拆成 `docs/AGENT_TASK-{recon,loan}.md` 归档。
-4. **四个 agent 全部完成并合并 master**（最终 HEAD `15123bb`）：recon / loan / collateral / release，每个都经过独立 verifier 验收 + PM 三方合并。Wave 1 并行开发波次闭环。
+4. **7 个 agent 分支全部交付并合并 master**（当前 HEAD `836b61a`）：recon / loan / collateral / release（Wave 1）+ eng / payment / core（Wave 2）。写入集互斥零越界，`AGENT_TASK.md` 的 add/add 冲突已归档化解；CORE 独立 verifier 报告后续落地并据此同批修完 B-2/B-3、清零全部技术债，smoke 182 项全绿。
 
 > 🎉 **2026-11-21 夜完成**：四个外围服务全部落地主干，写入集互斥从未破坏，零合并冲突（仅 AGENT_TASK.md 一次 add/add 已归档化解）。
 > **最终验证（master `a69d386`）**：V16–V21 全局迁移表名查重无重复；四服务联合编译
@@ -169,17 +171,16 @@
 - 已合并 master（`e34d6ac`）。细节见 `loan-service/HANDOFF.md` 和 `docs/AGENT_TASK-loan.md`。
 - 后续增强（非断点）：`loan-service` 的真实 PG 集成验证（HANDOFF 记录了未做，环境无数据库）。
 
-### 3.2 COLLATERAL（T1-6 + T3-4 担保权属权威源）
+### 3.2 COLLATERAL — ✅ 已交付并合并，无需接手（Q27 门禁判定待业务定源）
 
-- **阻塞**：依赖 Q27 业务定源。未定源前**只建表和服务骨架，不实现门禁判定**。
-- **下一步**：建 V18 迁移（`registrations` 登记/顺位/抹消表）+ `CollateralClient` 实现骨架 + HANDOFF + tag。门禁判定逻辑标注 TODO 等 Q27。
-- **恢复起点**：`cd ../wt-collateral && git log --oneline -1` 应为 `05684d0`。
+- **已交付**：V18 迁移（`collateral_registration_history` 登记/顺位/抹消表）、`CollateralClient` 实现骨架、HANDOFF、tag；分支已合并 master（`9304989`），`mvn -B package` 与两次 smoke 全绿实证。
+- **唯一剩余**：Q27 业务书面定源。未定源前服务只建表与骨架、不启用担保门禁判定（`floorplan.core.guarantee-gate.enabled=false`）。对应 3 个待办任务 #29（三个写端点缺 `@RequirePermission`）/ #30（fail-closed 实现与注释不一致）/ #31（三源快照应批量一次裁决），均**不阻断编译/启动/182 项冒烟**，且写端点无外部调用方、smoke 不覆盖。
 
-### 3.3 RELEASE（T2-9 出库指令）
+### 3.3 RELEASE — ✅ 已交付并合并，无需接手
 
-- **前置**：设计稿已完成（《放车放证指令设计》），六张表结构已定；Q9/Q10 接收方未定不影响先建表。
-- **下一步**：建 V19 迁移（六张表）+ `release_orders` 状态机（确认→放车→解抵）+ 单测 + HANDOFF + tag。
-- **恢复起点**：`cd ../wt-release && git log --oneline -1` 应为 `2af1bc9`。
+- **已交付**：V19 迁移（六张表；部分唯一索引已改表外 `CREATE UNIQUE INDEX ... WHERE` 并在真实 PG 实证）、`release_orders` 状态机（确认→放车→解抵）、45 项单测、HANDOFF、tag。
+- **本轮加固**：`updateStatus` 改 CAS `WHERE id AND status=expectedFrom` + 校验影响行数；`ReleaseStateMachineTest` 改硬编码白名单期望表（见第 7 节）。
+- **唯一剩余**：Q9/Q10 出库指令接收方 / 外部 WMS 是否对接需业务确认，不挡建表、不阻断运行。
 
 ### 3.4 RECON — 已完成，无需接手
 
@@ -191,8 +192,8 @@
 
 1. **合并顺序**：外围先合、CORE 最后（`recon → loan → collateral → release → eng → payment → core`）。
    ✅ **7 个分支全部已合并**：recon / loan / collateral / release / eng / payment(`d31ae9a`) / core(`dba931d`)。
-   ⚠️ 但 CORE 合并时独立 verifier 报告未回（流程瑕疵，见第 0 节更正），已重新派发补验。
-   注意 master 已因文档提交产生分叉，合并用普通三方合并（`--no-ff`），不再用 `--ff-only`；
+   ✅ CORE 独立 verifier 报告已回并归档 `docs/CORE_VERIFIER_REPORT.md`；据此同批修完 B-2/B-3 并清零报告里全部技术债（见第 0 节 02:46 收口行）。**7 个分支合并顺序已全部走完，无需再合并。**
+   注意 master 已因文档提交产生分叉，后续合并用普通三方合并（`--no-ff`），不再用 `--ff-only`；
    若出现 `AGENT_TASK.md` 的 add/add 冲突，按本次做法拆到 `docs/AGENT_TASK-<name>.md` 归档。
 2. 合并前查越界：`git -C ../wt-XXX diff --name-only wave0-baseline..HEAD`，对照第 2 节写入集；出现共享禁区文件就是冲突源。
 3. 用 `--ff-only`；若失败说明主干已分叉，停下来人工判断，不要强推。
@@ -202,6 +203,8 @@
 ---
 
 ## 5. 恢复流程（换模型 / 新会话醒来照做）
+
+> **当前状态（2026-11-22 08:05）**：7 个 agent 断点**全部 ✅ 已完成**，无 ⚠️ 待接手项；无需执行下面第 3 步。新会话接手时只需读第 0 节收口行 + 第 6 节业务定源清单，不要按历史时间戳去「续跑」已经完成的步骤。
 
 ```
 1. 读本文件 → 看第 0 节三句话 + 第 2 节断点表，确定自己在哪。
@@ -236,10 +239,12 @@
 
 ## 7. 集成 TODO（代码里留了接缝，合并后必须处理）
 
+> **2026-11-22 08:05 复核**：下表 14 项**全部 ✅ 已闭环**，保留作审计记录，无遗留代码 TODO。唯一未闭环的是第 6 节需业务书面定源的 Q27 等口径问题（非代码缺陷）。
+
 | 项 | 问题 | 处理方 | 状态 |
 |---|---|---|---|
 | **Feign JWT 传播** | `WebMvcConfig` 拦截全部 `/api/**` 且无放行。core 经 Feign 调 `GET /api/collateral-reg/registration` 时若不传播 `Authorization`，会被 401 挡下 → 走 NONE fallback → 拒付。**必须加 Feign RequestInterceptor 透传 JWT**，否则担保门禁形同虚设。**2026-11-22 PM 复核**：CORE 交付的 `GuaranteeFeignConfig` 只注册了 fallback bean，**并未实现 JWT 拦截器**，此项仍开放 | PM | ✅ **已修复 `6dfc4cc`（B-9）**：`GuaranteeFeignConfig` 补 `RequestInterceptor` 透传 `Authorization` / `X-Operator-Id`；无 HTTP 请求上下文（定时作业）时跳过、不伪造身份。门禁默认关闭，本地冒烟行为不变 |
-| **V18 表名改名** | V10 第185行已建 `collateral_registration_items`（batch_id/ledger_id/vin，批次↔车辆明细），任务卡要求的"登记流水/历史"同名会撞。PM 已批准改名为 `collateral_registration_history`，理由写进 V18 迁移注释与 collateral HANDOFF | collateral agent | ✅ 已批准，实现中 |
+| **V18 表名改名** | V10 第185行已建 `collateral_registration_items`（batch_id/ledger_id/vin，批次↔车辆明细），任务卡要求的"登记流水/历史"同名会撞。PM 已批准改名为 `collateral_registration_history`，理由写进 V18 迁移注释与 collateral HANDOFF | collateral agent | ✅ **已完成**：V18 落库表名为 `collateral_registration_history`，迁移注释与 HANDOFF 均已写明理由 |
 | **独立验收 agent** | 已对 collateral/release 各派一个只读 verifier，均完成。collateral 抓到 tag 落后 HEAD（已修）；release 确认核心无阻断缺陷 | PM | ✅ 已完成 |
 | **release 并发竞态** | `ReleaseApplicationService.advanceExisting` + `JdbcReleaseOrderRepository:175` 是"读状态→应用层校验→无条件 UPDATE WHERE id"，无行锁/状态条件。并发下两个请求可能都读到 CONFIRMED、都通过红线校验写 RELEASED，理论上突破"未确认不放车"红线。单请求路径红线严格成立，属架构共性问题 | release agent | ✅ **已修复 `6dfc4cc`**：`JdbcReleaseOrderRepository.updateStatus` 改 CAS `WHERE id = :id AND status = :expectedFrom` 并返回影响行数；`ReleaseApplicationService.advance` 在 `moved=false` 时抛 `CONFLICT_001` 整体回滚，并发下不会双双越过红线 |
 | **release 测试循环论证** | `ReleaseStateMachineTest` 的 legal/illegal 用例用 `canTransit` 自身生成又断言 `canTransit`——非红线边写错时穷举测试发现不了。两条资损红线有独立硬编码用例兜底，故不致命 | release agent | ✅ **已修复 `6dfc4cc`**：`ReleaseStateMachineTest` 改为硬编码 `EXPECTED_ALLOWED` 白名单生成用例，新增 `implementationMatchesHardcodedWhitelist()` 逐格比对 6×6=36 组合并断言合法边恰为 7 条，彻底消除「用 canTransit 证明 canTransit」 |
