@@ -50,7 +50,7 @@
 Q27「担保以哪张表为准 / 三源冲突如何裁决 / 什么算 REGISTERED」业务口径尚未书面确认。本实现**不把未确认规则伪装成既定事实**，标注位置：
 
 1. **V18 迁移头部注释**：明确"只提供结构与留痕，不写死判定规则"，开关打开前查询 fail-closed 返回 NONE。
-2. **`DefaultAuthoritativeSourceStrategy` 类 javadoc + `decide()` 中的 `TODO(Q27)`**：说明优先级只是占位默认值，不是业务结论。
+2. **已裁决（ADR-Q27）**：`DefaultAuthoritativeSourceStrategy` 已从「判定器」降级为「三源对账诊断器」，不参与门禁、不改账；优先级只用于诊断建议。原 `TODO(Q27)` 表述作废。
 3. **`@Value` 开关**：`floorplan.collateral.authoritative-source.enabled`，**默认 `false`（关闭）**。关闭时 `decide()` 返回 `Decision.skipped(...)`，调用方保持当前权属不变，不据此放行门禁。
 4. **`CollateralRegistrationService.importSnapshot()`**：`skipped` 分支只留痕、不改当前权属。
 5. **本文件本节**。

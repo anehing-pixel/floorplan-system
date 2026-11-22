@@ -24,7 +24,7 @@ recon-service（21 个 java + pom + 启动类改动）：
 - `repository/JdbcReconRepository.java`：`NamedParameterJdbcTemplate` 实现；R1-R4 账本只读 SQL、
   批次写入/收尾、差异批量写入（`ON CONFLICT DO NOTHING`）、差异条件查询。
 - `rule/`：`ReconRule`（纯函数契约）、`AbstractReconRule`（final evaluate 模板）、
-  `ReconRuleCode`（8 条目录）、`R1/R2/R3/R4*Rule`（实现）、`PlaceholderReconRule`（占位）、
+  `ReconRuleCode`（8 条目录）、`R1/R2/R3/R4*Rule`（实现）、`ExactValueReconRule`（R5–R8 共用精确相等判定）、
   `ReconRuleSet` + `ReconRuleConfig`（固定 R1..R8 执行顺序）。
 - `service/ReconApplicationService.java`：开跑 → 逐规则取数判定 → 差异落库 → 收尾；
   异常路径把 RUNNING 改 FAILED 并保留已执行规则数。
@@ -39,13 +39,15 @@ recon-service（21 个 java + pom + 启动类改动）：
 | R2 | 在库车辆状态 vs 垫款未结清 | **已实现** | 债权存续车辆状态（FINANCED/IN_STOCK/SOLD_PENDING/OVERDUE/DISPOSING）编码 1 vs 存在未终结垫款编码 1，按 VIN；`STATE_MISMATCH` |
 | R3 | 额度占用 vs 在途垫款合计 | **已实现** | `credit_lines.used_amount` = `SUM(advances.amount WHERE status IN PENDING/PROCESSING/PAID)`，按额度；`CREDIT_MISMATCH` |
 | R4 | 银行流水入账 vs 还款核销 | **已实现** | 已匹配且金额>0 的 `payment_transactions` 合计 = `SUM(repayments.total_amount)`，按 VIN，FULL OUTER JOIN 覆盖单侧有记录；`CASH_MISMATCH` |
-| R5 | 利息计提 vs 计息流水累计 | **占位（TODO）** | 需业务确认计提日切与舍入口径；不读库、产出 0 差异 |
-| R6 | 担保登记状态 vs 担保物台账 | **占位（TODO）** | 需业务确认登记编号与台账状态映射；不读库、产出 0 差异 |
-| R7 | 库龄递减计划 vs 实际还款进度 | **占位（TODO）** | 需业务确认期数口径与逾期容差；不读库、产出 0 差异 |
-| R8 | 处置损失 vs 账务核销 | **占位（TODO）** | 需业务确认损失认定与冲销时点差；不读库、产出 0 差异 |
+| R5 | 利息计提 vs 计息流水累计 | **已实现** | `vehicle_units.accrued_interest` = `SUM(interest_ledger + interest_ledger_archive.daily_interest)`，按 VIN；`INTEREST_MISMATCH` |
+| R6 | 担保登记状态 vs 担保物台账 | **已实现** | V10 有效登记编码 1/0 = `collateral_ledger.security_status='REGISTERED'` 编码 1/0，按 VIN；`COLLATERAL_MISMATCH` |
+| R7 | 库龄递减计划 vs 实际还款进度 | **已实现** | `aging_plans.paid_periods` = `COUNT(curtailment_payments)`，按 VIN；`CURTAILMENT_MISMATCH` |
+| R8 | 处置损失 vs 账务核销 | **已实现** | 处置 CLOSED_* 编码 1/0 = 借据 DEFAULTED/WRITTEN_OFF 编码 1/0，按 VIN；`WRITEOFF_MISMATCH` |
 
 实现规则均为纯函数判定（`AbstractReconRule.evaluate` 为 final，禁止 IO/时钟），
-SQL 只负责取数。占位规则列入执行清单但不产出"看起来通过"的假差异。
+SQL 只负责取数。**2026-11-22 起 8 条全部真实实现**：占位类 `PlaceholderReconRule` 已删除，
+`ReconApplicationService` 去掉 `implemented=false → continue` 短路，`ruleCount` 恒为 8。
+口径见 `docs/ADR-业务口径总定源.md` §10。
 
 ## 3. 本地验证结果
 
@@ -60,11 +62,11 @@ mvn -q -pl recon-service -am package   → EXIT 0
 
 ## 4. 留了哪些 TODO
 
-1. **R5-R8 规则细节待业务确认**，口径见上表；落地方式：新增 `AbstractReconRule` 子类 +
-   `JdbcReconRepository.loadComparisons` 的 SQL 分支，并把 `ReconRuleCode` 的
-   `implemented` 置 true，编排层无需改动。
-2. **R4 账期时差**：银行入账与还款核销存在 T+1/节假日/人工补录的时差，
-   当前对拍不做时间窗匹配，可能报出在途差异；切分规则与容差待确认。
+1. ~~R5-R8 规则细节待业务确认~~ **已闭环（2026-11-22）**：按《业务口径总定源》ADR 裁决，
+   R5–R8 已补真实取数 SQL + `ExactValueReconRule` 精确相等判定，8 条全 `implemented=true`。
+   原「待业务确认」表述作废。
+2. **R4 账期时差**：**已裁决**（ADR §0.2 / §1.5）——不引入时间窗与容差猜测，
+   精确相等才无差异，不等即报 CASH_MISMATCH，由人工复核判断是否属于在途。
 3. **人工闭环接口**：`recon_diffs.status` 的 CONFIRMED/IGNORED/RESOLVED 流转尚无接口，
    当前只对拍写 OPEN；需与权限/工作流方案一并确认。
 4. **审计留痕**：`ReconApplicationService.run` 的 `actor` 参数目前未写 `audit_events`

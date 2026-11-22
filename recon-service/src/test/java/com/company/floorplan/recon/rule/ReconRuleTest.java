@@ -2,11 +2,6 @@ package com.company.floorplan.recon.rule;
 
 import com.company.floorplan.recon.model.Comparison;
 import com.company.floorplan.recon.model.ReconDiff;
-import com.company.floorplan.recon.rule.ReconRuleConfig;
-import com.company.floorplan.recon.rule.R1AdvanceVsRepaymentRule;
-import com.company.floorplan.recon.rule.R2VehicleVsAdvanceRule;
-import com.company.floorplan.recon.rule.R3CreditVsAdvanceRule;
-import com.company.floorplan.recon.rule.R4BankVsRepaymentRule;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -18,7 +13,6 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -26,6 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>纯函数约束在此被直接验证：差异不带批次号、不带检测时间——
  * 若哪天有人在规则里塞了 UUID.now() 或 JdbcTemplate，这些断言会立刻失败。</p>
+ *
+ * <p><b>2026-11-22</b>：R5–R8 从占位改为真实判定后，单测同步改为
+ * 「相等 → 0 差异 / 不等 → 1 差异且差异类型正确」。原占位用例无论输入如何都断言 0 差异，
+ * 属于用测试证明占位实现的循环论证，已删除。</p>
  */
 class ReconRuleTest {
 
@@ -35,6 +33,10 @@ class ReconRuleTest {
         ReconRule r2 = new R2VehicleVsAdvanceRule();
         ReconRule r3 = new R3CreditVsAdvanceRule();
         ReconRule r4 = new R4BankVsRepaymentRule();
+        ReconRule r5 = new ExactValueReconRule(ReconRuleCode.R5, "台账累计计提利息", "计息流水累计(主表+归档)");
+        ReconRule r6 = new ExactValueReconRule(ReconRuleCode.R6, "V10 有效登记(1=有)", "担保台账 REGISTERED(1=是)");
+        ReconRule r7 = new ExactValueReconRule(ReconRuleCode.R7, "递减计划已付期数", "递减核销流水笔数");
+        ReconRule r8 = new ExactValueReconRule(ReconRuleCode.R8, "处置认定损失", "借据 WRITTEN_OFF 未偿敞口");
         return Stream.of(
                 // ---- R1 垫款金额 vs 未偿本金+累计核销 ----
                 Arguments.of(r1, 100_000L, 100_000L, 0, null, null),
@@ -52,11 +54,21 @@ class ReconRuleTest {
                 Arguments.of(r4, 120_000L, 120_000L, 0, null, null),
                 Arguments.of(r4, 120_000L, 100_000L, 1, "CASH_MISMATCH", "差额(银行-核销)=20000"),
                 Arguments.of(r4,       0L,  30_000L, 1, "CASH_MISMATCH", "差额(银行-核销)=-30000"),
-                // ---- R5-R8 占位：无论事实如何都不产出差异 ----
-                Arguments.of(new PlaceholderReconRule(ReconRuleCode.R5), 1L, 2L, 0, null, null),
-                Arguments.of(new PlaceholderReconRule(ReconRuleCode.R6), 1L, 2L, 0, null, null),
-                Arguments.of(new PlaceholderReconRule(ReconRuleCode.R7), 1L, 2L, 0, null, null),
-                Arguments.of(new PlaceholderReconRule(ReconRuleCode.R8), 1L, 2L, 0, null, null));
+                // ---- R5 台账累计计提 vs 计息流水（含归档）：精确相等 ----
+                Arguments.of(r5, 12_000L, 12_000L, 0, null, null),
+                Arguments.of(r5, 12_000L, 11_500L, 1, "INTEREST_MISMATCH", "差额(期望-实际)=500"),
+                // ---- R6 V10 有效登记编码 vs 担保台账编码：精确相等 ----
+                Arguments.of(r6, 1L, 1L, 0, null, null),
+                Arguments.of(r6, 0L, 0L, 0, null, null),
+                Arguments.of(r6, 1L, 0L, 1, "COLLATERAL_MISMATCH", "V10 有效登记(1=有)=1"),
+                Arguments.of(r6, 0L, 1L, 1, "COLLATERAL_MISMATCH", "差额(期望-实际)=-1"),
+                // ---- R7 递减已付期数 vs 核销流水笔数：精确相等 ----
+                Arguments.of(r7, 3L, 3L, 0, null, null),
+                Arguments.of(r7, 3L, 2L, 1, "CURTAILMENT_MISMATCH", "递减计划已付期数=3"),
+                // ---- R8 处置已结案编码 vs 借据已终止编码：精确相等 ----
+                Arguments.of(r8, 1L, 1L, 0, null, null),
+                Arguments.of(r8, 0L, 0L, 0, null, null),
+                Arguments.of(r8, 1L, 0L, 1, "WRITEOFF_MISMATCH", "处置认定损失=1"));
     }
 
     @ParameterizedTest(name = "{0} 期望={1} 实际={2} → 差异数={3}")
@@ -83,16 +95,38 @@ class ReconRuleTest {
         assertNull(d.getDetectedAt(), "规则是纯函数，不得读取时钟");
     }
 
-    /** 规则清单必须恰好 8 条、按 R1..R8 排列，且实现标记与目录一致。 */
+    /** 规则清单必须恰好 8 条、按 R1..R8 排列，且 8 条全部为已实现（不再有占位）。 */
     @Test
-    void ruleSetContainsAllEightInOrder() {
+    void ruleSetContainsAllEightImplementedInOrder() {
         List<ReconRule> rules = new ReconRuleConfig().reconRuleSet().rules();
         assertEquals(8, rules.size());
         for (int i = 0; i < 8; i++) {
             ReconRuleCode code = ReconRuleCode.values()[i];
             assertEquals(code.name(), rules.get(i).code());
-            assertEquals(code.name().charAt(1) <= '4', code.implemented(),
-                    "R1-R4 应实现、R5-R8 应占位");
+            assertTrue(code.implemented(), code.name() + " 必须已实现（R5-R8 已按 ADR 裁决落地）");
+        }
+        // 反向护栏：一旦有人把某条改回占位，这条断言立刻失败
+        assertEquals(8, java.util.Arrays.stream(ReconRuleCode.values())
+                .filter(ReconRuleCode::implemented).count());
+    }
+
+    /** 8 条规则的差异类型必须是真实类型，绝不残留 TODO（防止报告里出现不可统计的脏类型）。 */
+    @ParameterizedTest
+    @EnumSource(ReconRuleCode.class)
+    void diffTypeIsNeverPlaceholder(ReconRuleCode code) {
+        assertTrue(code.implemented(), code + " 应已实现");
+        assertTrue(!code.diffType().isBlank() && !"TODO".equals(code.diffType()),
+                code + " 差异类型必须是真实类型");
+    }
+
+    /** 反假绿护栏：8 条规则面对同一个「不等」事实，都必须产出 1 条差异。 */
+    @Test
+    void everyRuleReportsMismatchOnUnequalFacts() {
+        Comparison unequal = new Comparison("VIN-UNEQUAL", 10L, 20L, "护栏事实");
+        for (ReconRule rule : new ReconRuleConfig().reconRuleSet().rules()) {
+            List<ReconDiff> diffs = rule.evaluate(List.of(unequal));
+            assertEquals(1, diffs.size(), rule.code() + " 面对不等事实必须报差异，不得静默通过");
+            assertEquals(rule.code(), diffs.get(0).getRuleCode());
         }
     }
 
@@ -104,16 +138,5 @@ class ReconRuleTest {
         assertTrue(rule.evaluate(List.of()).isEmpty());
         assertTrue(rule.evaluate(java.util.Arrays.asList(
                 null, new Comparison(null, 1, 2), new Comparison("  ", 1, 2))).isEmpty());
-    }
-
-    /** 占位规则构造时必须确实是未实现的编号，防止误把 R1 标成占位。 */
-    @ParameterizedTest
-    @EnumSource(value = ReconRuleCode.class, names = {"R5", "R6", "R7", "R8"})
-    void placeholderRejectsImplementedCode(ReconRuleCode placeholderCode) {
-        PlaceholderReconRule rule = new PlaceholderReconRule(placeholderCode);
-        assertEquals(placeholderCode.name(), rule.code());
-        assertTrue(rule.evaluate(List.of(new Comparison("VIN", 9, 9))).isEmpty());
-        assertThrows(IllegalArgumentException.class,
-                () -> new PlaceholderReconRule(ReconRuleCode.R1));
     }
 }

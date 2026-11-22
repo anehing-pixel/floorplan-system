@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Q9 建议口径的纯函数单测：接收方按释放项解析 + 两类主用类型。
+ * Q9（ADR 已定稿口径）的纯函数单测：接收方按释放项解析 + 两类主用类型。
  * 不依赖 Spring / 数据库，可直接穷举。
  */
 class CustodianResolutionTest {

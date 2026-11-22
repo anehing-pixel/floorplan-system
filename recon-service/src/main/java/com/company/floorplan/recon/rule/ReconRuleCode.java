@@ -3,13 +3,15 @@ package com.company.floorplan.recon.rule;
 /**
  * 8 条对拍规则的总目录。编号、名称、是否实现、差异类型在这里唯一收敛。
  *
- * <p><b>为什么把未实现的 4 条也列进枚举</b>：对拍报告要能回答"8 条都跑了吗"。
- * 若未实现的规则连编号都不存在，报告里就只剩 4 条，读者会误以为另外 4 条通过了；
- * 列出来并标记 implemented=false，才能把"未实现"与"无差异"明确区分。</p>
+ * <p><b>2026-11-22 全量落地</b>：R5–R8 原为占位（{@code implemented=false} / {@code diffType=TODO}），
+ * 现按《业务口径总定源》ADR 裁决全部补成真实判定。8 条规则一律采用
+ * 「取数 SQL + 纯函数精确相等判定」：两口径数值精确相等才无差异，不等即产出差异，
+ * 不做容差、不做舍入猜测。至此 8 条全部 {@code implemented=true}，
+ * 对拍报告的 {@code ruleCount} 恒为 8，不再有「跑了但没实现」的假绿。</p>
  *
- * <p><b>TODO（R5-R8）</b>：规则细节需业务确认后再落地，当前以占位实现列出，
- * 不读库、不产出差异。确认口径后按 R1-R4 的同构方式补齐即可，
- * 不需要改应用服务的编排逻辑。</p>
+ * <p><b>为什么把规则目录留成一处</b>：差异类型由目录统一分配，避免各实现自由命名
+ * 导致下游统计对不上；{@code implemented} 是编排层唯一的取数开关，
+ * 新增规则只需加枚举 + 一条 SQL + 一个 {@link ExactValueReconRule} 装配。</p>
  */
 public enum ReconRuleCode {
 
@@ -25,15 +27,15 @@ public enum ReconRuleCode {
     /** R4：银行已匹配入账 = 还款核销总额。 */
     R4("银行流水入账 vs 还款核销", true, "CASH_MISMATCH"),
 
-    // ---- 以下 4 条为占位：规则细节待业务确认 ----
-    /** TODO：利息计提 vs 计息流水累计——需确认计提口径（日切时点/舍入）与流水汇总范围。 */
-    R5("利息计提 vs 计息流水累计", false, "TODO"),
-    /** TODO：担保登记状态 vs 担保物台账——需确认登记编号与台账状态的映射关系。 */
-    R6("担保登记状态 vs 担保物台账", false, "TODO"),
-    /** TODO：库龄递减计划 vs 实际还款进度——需确认期数口径与逾期容差。 */
-    R7("库龄递减计划 vs 实际还款进度", false, "TODO"),
-    /** TODO：处置损失 vs 账务核销——需确认损失认定与账务冲销的时点差。 */
-    R8("处置损失 vs 账务核销", false, "TODO");
+    // ---- R5-R8：按《业务口径总定源》ADR 裁决落地，取数口径见 JdbcReconRepository ----
+    /** R5：台账累计计提利息 = 计息流水累计（主表 + 季度归档表），按 VIN。 */
+    R5("利息计提 vs 计息流水累计", true, "INTEREST_MISMATCH"),
+    /** R6：V10 有效登记编码 1/0 = 担保台账 REGISTERED 编码 1/0，按 VIN。 */
+    R6("担保登记状态 vs 担保物台账", true, "COLLATERAL_MISMATCH"),
+    /** R7：库龄递减计划已付期数 = 递减核销流水笔数，按 VIN。 */
+    R7("库龄递减计划 vs 实际还款进度", true, "CURTAILMENT_MISMATCH"),
+    /** R8：已结案处置认定损失 = 借据 WRITTEN_OFF 未偿敞口，按 VIN。 */
+    R8("处置损失 vs 账务核销", true, "WRITEOFF_MISMATCH");
 
     private final String title;
     private final boolean implemented;

@@ -97,6 +97,95 @@ public class JdbcReconRepository {
                 ON r.vin = p.vin
             """;
 
+    /**
+     * R5：台账累计计提利息 vs 计息流水累计（主表 + 季度归档表），按 VIN。
+     *
+     * <p><b>口径裁决</b>：DAILY_INTEREST 作业每次同时写 {@code interest_ledger} 流水
+     * 与 {@code vehicle_units.accrued_interest} 累加，两者本就应精确相等；
+     * INTEREST_ARCHIVE 只把流水从主表搬到 {@code interest_ledger_archive}，不减台账，
+     * 因此取数必须 UNION ALL 两张流水表，否则归档后必然报出假差异。
+     * FULL OUTER JOIN 覆盖「只有台账 / 只有流水」的单侧事实。</p>
+     */
+    private static final String R5_SQL = """
+            SELECT COALESCE(v.vin, f.vin) AS subject,
+                   COALESCE(v.accrued, 0) AS expected,
+                   COALESCE(f.flow, 0) AS actual,
+                   '台账累计计提利息 vs 计息流水累计(主表+归档)' AS note
+              FROM (SELECT vin, accrued_interest AS accrued FROM vehicle_units) v
+              FULL OUTER JOIN (
+                    SELECT vin, SUM(daily_interest) AS flow
+                      FROM (SELECT vin, daily_interest FROM interest_ledger
+                            UNION ALL
+                            SELECT vin, daily_interest FROM interest_ledger_archive) il
+                     GROUP BY vin) f
+                ON f.vin = v.vin
+            """;
+
+    /**
+     * R6：V10 有效登记编码 1/0 vs 担保台账 REGISTERED 编码 1/0，按 VIN。
+     *
+     * <p><b>口径裁决（ADR-Q27）</b>：V10 {@code collateral_registration_batches + items}
+     * 是唯一权威源，有效登记定义为 {@code registration_no IS NOT NULL}
+     * 且 {@code cancellation_status NOT IN ('DONE','CANCELLED')}；
+     * {@code collateral_ledger.security_status} 是台账标记，理应与权威源一致。
+     * 两边不一致（如结清后台账已 RELEASED 而登记簿仍待抹消）正是本规则要暴露的账实差异。</p>
+     */
+    private static final String R6_SQL = """
+            SELECT COALESCE(r.vin, l.vin) AS subject,
+                   COALESCE(r.registered, 0) AS expected,
+                   COALESCE(l.registered, 0) AS actual,
+                   'V10 有效登记(1=有) vs 担保台账 REGISTERED(1=是)' AS note
+              FROM (SELECT i.vin, 1 AS registered
+                      FROM collateral_registration_items i
+                      JOIN collateral_registration_batches b ON b.id = i.batch_id
+                     WHERE b.registration_no IS NOT NULL
+                       AND b.cancellation_status NOT IN ('DONE','CANCELLED')
+                     GROUP BY i.vin) r
+              FULL OUTER JOIN (
+                    SELECT vin, CASE WHEN security_status = 'REGISTERED' THEN 1 ELSE 0 END AS registered
+                      FROM collateral_ledger) l
+                ON l.vin = r.vin
+            """;
+
+    /**
+     * R7：库龄递减计划已付期数 vs 递减核销流水笔数，按 VIN。
+     *
+     * <p><b>口径裁决</b>：CurtailmentApplicationService 每偿付一期同时做
+     * {@code aging_plans.paid_periods + 1} 与写一条 {@code curtailment_payments}（含幂等键），
+     * 两者本就应精确相等。不做「期数容差」——差一期就是账实不符。</p>
+     */
+    private static final String R7_SQL = """
+            SELECT COALESCE(a.vin, c.vin) AS subject,
+                   COALESCE(a.paid_periods, 0) AS expected,
+                   COALESCE(c.cnt, 0) AS actual,
+                   '递减计划已付期数 vs 递减核销流水笔数' AS note
+              FROM aging_plans a
+              FULL OUTER JOIN (SELECT vin, COUNT(*) AS cnt FROM curtailment_payments GROUP BY vin) c
+                ON c.vin = a.vin
+            """;
+
+    /**
+     * R8：处置已结案编码 1/0 vs 借据已终止编码 1/0，按 VIN。
+     *
+     * <p><b>口径裁决</b>：规则名「处置损失 vs 账务核销」原被误读成金额对拍，
+     * 但 {@code disposal_cases.loss_amount}（= 应收 - 变现所得）与借据未偿本金
+     * <b>本就不该相等</b>，直接比金额会产出 100% 噪音差异、毫无判别力。
+     * 因此按 R2 同款做法归一为布尔关系：处置进入 CLOSED_* 终态 ↔ 借据进入
+     * DEFAULTED/WRITTEN_OFF 终态，两者应同时成立。当前系统处置结案未联动借据减记，
+     * 本规则会如实报出该缺口（正是它的价值），而非假装通过。</p>
+     */
+    private static final String R8_SQL = """
+            SELECT COALESCE(d.vin, l.vin) AS subject,
+                   CASE WHEN d.vin IS NOT NULL THEN 1 ELSE 0 END AS expected,
+                   CASE WHEN l.vin IS NOT NULL THEN 1 ELSE 0 END AS actual,
+                   '处置已结案 CLOSED_*(1) vs 借据 DEFAULTED/WRITTEN_OFF(1)' AS note
+              FROM (SELECT DISTINCT vin FROM disposal_cases
+                     WHERE status IN ('CLOSED_LOSS','CLOSED_RECOVERED')) d
+              FULL OUTER JOIN (SELECT DISTINCT vin FROM loans
+                                WHERE status IN ('DEFAULTED','WRITTEN_OFF')) l
+                ON l.vin = d.vin
+            """;
+
     private static final RowMapper<Comparison> COMPARISON_MAPPER = (rs, i) -> new Comparison(
             rs.getString("subject"),
             rs.getLong("expected"),
@@ -130,7 +219,7 @@ public class JdbcReconRepository {
     // ------------------------------------------------------------------
 
     /**
-     * 读取某条规则的账本事实。R5-R8 是占位规则，返回空列表（不读库、不产出差异）。
+     * 读取某条规则的账本事实。8 条规则全部真实取数，取数口径写在各自 SQL 常量上。
      *
      * @param ruleCode 规则编号 R1..R8
      * @return 待判定的 Comparison 列表
@@ -147,7 +236,11 @@ public class JdbcReconRepository {
             case "R2" -> jdbc.query(R2_SQL, params, COMPARISON_MAPPER);
             case "R3" -> jdbc.query(R3_SQL, params, COMPARISON_MAPPER);
             case "R4" -> jdbc.query(R4_SQL, Map.of(), COMPARISON_MAPPER);
-            case "R5", "R6", "R7", "R8" -> List.of(); // TODO 占位规则：规则细节待业务确认
+            // R5-R8 无列表参数：《业务口径总定源》ADR 裁决后按真实账本取数
+            case "R5" -> jdbc.query(R5_SQL, Map.of(), COMPARISON_MAPPER);
+            case "R6" -> jdbc.query(R6_SQL, Map.of(), COMPARISON_MAPPER);
+            case "R7" -> jdbc.query(R7_SQL, Map.of(), COMPARISON_MAPPER);
+            case "R8" -> jdbc.query(R8_SQL, Map.of(), COMPARISON_MAPPER);
             default -> throw new IllegalArgumentException("未知对拍规则：" + ruleCode);
         };
     }

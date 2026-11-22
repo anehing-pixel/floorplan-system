@@ -6,7 +6,7 @@ import com.company.floorplan.release.model.ReleaseOrderItem;
 import java.util.List;
 
 /**
- * 指令下发通道接缝（Q9/Q10 建议口径落地后的可扩展点）。
+ * 指令下发通道接缝（Q9/Q10 已由 ADR 裁决；真有 partner 系统时加 adapter，不动状态机）。
  *
  * <p><b>Q9/Q10 已按项目内证据收敛</b>：接收方按释放项分放车线（经销商库）与
  * 放证线（凭证保管点），起步无外部 WMS、以 MANUAL 人工转交为主，

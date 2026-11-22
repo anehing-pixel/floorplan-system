@@ -33,7 +33,7 @@ import java.util.UUID;
  *
  * <p><b>接收方与确认权威</b>：创建时可用 {@code custodianByItem} 按释放项指定接收方
  * （放车线 / 放证线）；确认时可用 {@code confirmationAuthority} 声明凭什么有权确认，
- * 二者都是 Q9/Q10 建议口径的 HTTP 入口。</p>
+ * 二者都是 Q9/Q10（已由《业务口径总定源》ADR §2 定稿）的 HTTP 入口。</p>
  */
 @RestController
 @RequestMapping("/api/releases")

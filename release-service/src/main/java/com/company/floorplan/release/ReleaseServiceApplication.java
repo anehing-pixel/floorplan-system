@@ -20,7 +20,7 @@ import org.springframework.context.annotation.Import;
  * 是跨机构异步协同的独立状态机。从 core 剥离的理由：不能让账本同步事务被外部响应时间拖住。</p>
  *
  * <p>T2-9 已落地：V19 六表 + 领域模型 + 状态机 + 下发接缝 + 仓储/服务/Controller。
- * V24 起按 Q9/Q10 建议口径收敛：接收方按释放项分线、起步 MANUAL 人工转交 + 我方见证代录回执。</p>
+ * V24 起按 Q9/Q10（ADR 已定稿口径）收敛：接收方按释放项分线、起步 MANUAL 人工转交 + 我方见证代录回执。</p>
  */
 @SpringBootApplication(scanBasePackages = "com.company.floorplan.release")
 @Import({

@@ -1,5 +1,7 @@
 # AGENT TASK · RECON（对账清算服务）
 
+> **⚠️ 状态注记（2026-11-22）**：本任务卡「其余 4 条以占位实现列出、规则细节需业务确认」的约束**已失效**——R5–R8 已按《业务口径总定源》ADR 全部落地为真实对拍规则，8 条全 `implemented=true`。本卡保留作审计轨迹。
+
 ## 你的身份
 你是 recon agent，在独立 worktree `C:/Users/Administrator/Documents/GitHub/wt-recon` 工作，分支 `agent/recon`。
 所有命令先 `cd` 到该 worktree。中文交流。
@@ -30,7 +32,7 @@ git log -1 --format='%h %s'      # 必须是 wave0 那条 aab5295
    - R2 在库车辆状态 vs 垫款未结清
    - R3 额度占用 vs 在途垫款合计
    - R4 银行流水入账 vs 还款核销（用 payment_transactions 与 repayments）
-   其余 4 条以枚举 + 占位实现列出，标注 TODO（规则细节需业务确认）。
+   其余 4 条以枚举 + 占位实现列出，标注 TODO（规则细节需业务确认）。  ⚠️ **本约束已失效（见文首状态注记）：ADR-Q27 / 《业务口径总定源》已裁决定稿。**
    **重要**：对拍是只读的，绝不修改账本表。
 3. **仓储**（放 `...recon.repository`）：`JdbcReconRepository`，用 `NamedParameterJdbcTemplate`（参考 `infrastructure/.../JdbcPaymentTransactionRepository.java` 的写法，但你自己的类放 recon-service 包内，不要改 infrastructure 里已有的类）。负责写 recon_diffs / recon_runs，读账本做对拍。
 4. **应用服务**（放 `...recon.service`）：`ReconApplicationService`，编排对拍批次：开跑→逐规则对拍→差异落库→收尾。

@@ -36,7 +36,7 @@
 3. **T1-3 M9 登记编号落库（完成，有一处口径待定）**
    - `VehicleUnit.setSecurity(SecurityType, String registrationNo)`：带登记编号时担保状态推进 `REGISTERED`，不再永远 PENDING。
    - `SalesApplicationService.setSecurity`：老接口 `regNo`/`ownerName` 委托 V10 `registerCollateralBatch` 落批次表，按登记编号可查、重复编号幂等；返回 `registrationNo`/`batchNo`/`ownerName`。
-   - **限制**：V10 批次表无 `ownerName` 专用列，暂记 `co_signed_by`（已标 TODO(Q27)）；collateral-reg-service 权属表与 core V10 批次表数据不互通（即 Q27 判定源问题）。
+   - **已裁决（ADR-Q27 + V25 落地）**：V10 批次表已加 `owner_name` 专用列，权利人不再误写 `co_signed_by`；V10 为唯一权威源、V18 为只读投影，门禁直读 V10。原 TODO(Q27) 表述作废。
    - 单测：`VehicleUnitSecurityRegistrationTest`（4 项）。
 
 4. **T1-4 M12 授信审批双段（完成，兼容入口有限制）**
@@ -46,7 +46,7 @@
    - 单测：`CreditLineApprovalTest`（4 项）。
 
 5. **T1-5 B1 担保门禁（接缝完成，默认关闭，判定源待 Q27）**
-   - 见第三节"开关与 TODO(Q27)"。
+   - 见第三节"开关与门禁口径"。
    - 单测：`GuaranteeGatePolicyTest`（6 项，含 fail-closed、经销商放宽、默认关闭放行）。
 
 6. **T1-7 B1b 提前还本金误伤（完成）**
@@ -76,7 +76,7 @@
    - 单测：`VehicleUnitCustomerPaymentTest`（4 项）。
    - **未完成**：确认记录（金额/付款人/凭证/幂等）需新表 `customer_payment_confirmations`；与 B2 出库指令的前置门禁待对接（已留 TODO）。
 
-## 三、B1 开关与 TODO(Q27) 位置
+## 三、B1 开关与门禁口径位置
 
 - **总开关（默认关闭）**：`application/src/main/java/com/company/floorplan/application/service/AdvanceApplicationService.java`
   - `@Value("${floorplan.core.guarantee-gate.enabled:false}") private boolean guaranteeGateEnabled;`
@@ -85,7 +85,7 @@
 - **判定接缝（不自定判定源）**：`domain/src/main/java/com/company/floorplan/domain/service/RoleSeparationPolicy.java`
   - `GuaranteeLookup` 端口 + `GuaranteeView` 只读视图；`evaluateGuarantee(view, gateEnabled, dealerRelaxed)` 只消费上层传入的视图。
 - **Feign 适配**：`web/src/main/java/com/company/floorplan/web/integration/FeignGuaranteeLookup.java`（调用 common 冻结契约 `CollateralClient.getRegistration`，失败返回 null → fail-closed）。
-- **TODO(Q27) 标注**：`RoleSeparationPolicy.evaluateGuarantee` 方法注释、`AdvanceApplicationService.enforceGuaranteeGate` 方法注释、`FeignGuaranteeLookup` 类注释、本 HANDOFF。
+- **口径定稿（ADR-Q27）**：门禁以 V10 `collateral_registration_batches + items` 为唯一权威源，`RoleSeparationPolicy.evaluateGuarantee` / `AdvanceApplicationService.enforceGuaranteeGate` / `FeignGuaranteeLookup` 均按该口径实现；生产置 `guarantee-gate.enabled=true` 即启用。
 - **依赖处理**：core 各模块 pom 不依赖 common（common 反向依赖 application，直接引用会循环）。按边界只在 `web/pom.xml` 加 common 依赖 + `FloorplanApplication` 加 `@EnableFeignClients`，并用显式 `@ComponentScan` 正则排除 `com.company.floorplan.common..*`（否则 common 与 web 的同名 config bean 冲突导致启动失败）。未改契约签名、未改父 pom。
 
 ## 四、验证结果

@@ -67,11 +67,10 @@ public class ReconApplicationService {
         int executed = 0;
         try {
             for (ReconRule rule : ruleSet.rules()) {
-                ReconRuleCode definition = ReconRuleCode.valueOf(rule.code());
-                if (!definition.implemented()) {
-                    // 占位规则：列入执行清单但不读库、不判定，避免被误读成"已通过"
-                    continue;
-                }
+                // 8 条规则全部已实现（见《业务口径总定源》ADR）。此处不再有
+                // "implemented=false 就 continue" 的短路：那条分支曾让 R5-R8 只列名不取数，
+                // 报告的 ruleCount=4 却被读成"8 条都跑了"。现在每条都真实取数、真实判定。
+                ReconRuleCode.valueOf(rule.code()); // 校验编号仍在目录中，新增规则漏配即快速失败
 
                 // 取数与判定分离：仓储读事实，规则做纯函数判定
                 List<Comparison> facts = repository.loadComparisons(rule.code());

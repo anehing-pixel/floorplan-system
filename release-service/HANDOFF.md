@@ -8,7 +8,7 @@
 - `infrastructure/src/main/resources/db/migration/V19__release_orders.sql`
   —— 六张表 + `release_order_no_seq` 序列。未触碰 V16/V17/V18/V20/V21。
 - `infrastructure/src/main/resources/db/migration/V24__release_custodian_scope.sql`
-  —— Q9/Q10 建议口径落地：三列新增 + 覆盖旧注释。**V19 已执行、保持字节不变**，
+  —— Q9/Q10（ADR 已定稿口径）落地：三列新增 + 覆盖旧注释。**V19 已执行、保持字节不变**，
   改 V19 会让 Flyway checksum 失配、服务启动失败。
 
 ### 新增（release-service）
@@ -99,7 +99,7 @@ CANCELLED       → （终态）
 以任务卡为准；设计稿的 `issued_at / acknowledged_at / delivery_channel / rejected_reason / receipt_id`
 等字段在 `release_orders` 中均保留，后续要扩充状态只需改枚举 + 状态机白名单 + 单测。
 
-## 4. Q9/Q10 口径收敛与接缝（2026-11-22 落地，最终仍待业务书面确认）
+## 4. Q9/Q10 口径收敛与接缝（2026-11-22 落地，已由《业务口径总定源》ADR §2 定稿）
 
 ### 结论：不再四选一，按释放项分两条线
 
@@ -173,7 +173,7 @@ CANCELLED       → （终态）
 
 ## 6. TODO（跨边界，未改代码）
 
-1. **业务书面确认 Q9/Q10 后**（当前建议口径已落地）：若确认存在 partner 系统，
+1. **Q9/Q10 已由 ADR 定稿**（V24 口径即最终口径，不再等书面确认）：若将来真存在 partner 系统，
    再实现 `PortalReleaseChannel` / `ApiReleaseChannel` / `MqReleaseChannel`
    （ADR-009 §2.5 签名、失败重试 + 降级人工 + 告警），回执 `source` 改为对应通道，
    确认人记 `partner_code`；当前 `source=MANUAL` 我方见证代录已闭环，

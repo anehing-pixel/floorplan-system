@@ -13,12 +13,13 @@
   ⑪ 提前部分还款   ⑫ 车辆保险         ⑬ 展期续贷
   ⑭ 结清证明       ⑮ 额度年审         ⑯ 结算宽限期/OOT 升级
   ⑰ 违约处置闭环   ⑱ 评级口径动态配置 + 季度归档
-以及主数据、权限与角色矩阵（⑲~㉔）：
+以及主数据、权限与角色矩阵（⑲~㉕）：
   ⑲ 角色权限边界（角色矩阵：401 与 403 严格区分 + 自然人级职责分离）
   ⑳ 经销商主数据 CRUD（PATCH 语义 / 状态机 / 删除护栏）
   ㉑ 名下车辆聚合视图（汇总口径 == 明细逐行求和）
   ㉓ 担保权属权威源（ADR-Q27：门禁直读 V10 / #29 权限点 / #31 批量对账不改账）
   ㉔ 外围微服务网关可达性（loan / recon / release / bank / collateral-reg 全部端点经网关可达，不被 core 兜底）
+  ㉕ 对拍 8 条规则全实现（业务口径总定源 ADR：R5-R8 真实取数 / ruleCount==8 / 差异类型非 TODO）
 """
 import json
 import os
@@ -1223,13 +1224,47 @@ def main():
     ok(st == 200 and isinstance(r.get("data"), list),
        "collateral-reg-service /registration/history 可达 -> %s" % st)
 
+    # ㉕ 对拍 8 条规则全实现（业务口径总定源 ADR §10）：R5-R8 曾为占位，被编排层
+    # "implemented=false → continue" 跳过，报告的 ruleCount=4 却被读成"8 条都跑了"。
+    # 现在 8 条全部真实取数：ruleCount 必须为 8，且 status=SUCCEEDED 证明
+    # 4 条新增 SQL（利息/担保登记/库龄递减/处置）在真实 PostgreSQL 上全部执行成功。
+    print("\n㉕ 对拍 8 条规则全实现（业务口径总定源 ADR：R5-R8 不再是占位）")
+    st, run = call("POST", "/api/recon/run", {})
+    rd = run.get("data") or {}
+    ok(st == 200 and rd.get("status") == "SUCCEEDED",
+       "对拍批次成功（4 条新增取数 SQL 全部在真实 PG 执行通过）-> %s/%s" % (st, rd.get("status")))
+    ok(rd.get("ruleCount") == 8,
+       "ruleCount==8（8 条规则全部真实执行，无占位短路）-> %s" % rd.get("ruleCount"))
+    ok(isinstance(rd.get("diffCount"), int) and rd["diffCount"] >= 0,
+       "diffCount 为非负整数 -> %s" % rd.get("diffCount"))
+    batch_no = rd.get("batchNo")
+    ok(bool(batch_no), "批次号已落库 -> %s" % batch_no)
+
+    # 差异明细：任何一条差异的 ruleCode 必须属于 R1-R8、diffType 必须是真实类型
+    # （绝不残留 TODO 占位类型），且差异对象/数值字段完整可落库。
+    st, diffs_res = call("GET", "/api/recon/diffs", None)
+    diffs = diffs_res.get("data") or []
+    ok(st == 200 and isinstance(diffs, list),
+       "GET /recon/diffs 返回差异列表 -> %s/%d 条" % (st, len(diffs)))
+    legal_codes = {"R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"}
+    bad = [d for d in diffs
+           if d.get("ruleCode") not in legal_codes
+           or not d.get("diffType") or d.get("diffType") == "TODO"
+           or not d.get("subject") or d.get("status") is None]
+    ok(not bad, "全部差异 ruleCode∈R1-R8 / diffType 为真实类型 / subject 非空 -> %d 条脏记录" % len(bad))
+    # 真实类型集合：若本批次产出 R5-R8 差异，类型必须是 ADR 裁决的 4 个新类型之一
+    new_types = {"INTEREST_MISMATCH", "COLLATERAL_MISMATCH", "CURTAILMENT_MISMATCH", "WRITEOFF_MISMATCH"}
+    seen_types = {d.get("diffType") for d in diffs if d.get("ruleCode") in {"R5", "R6", "R7", "R8"}}
+    ok(seen_types.issubset(new_types),
+       "R5-R8 差异类型均为 ADR 裁决的真实类型 -> %s" % (sorted(seen_types) or "本批次无 R5-R8 差异"))
+
     print("\n" + "=" * 68)
     if FAILS:
         print("冒烟测试失败 %d 项：" % len(FAILS))
         for f in FAILS:
             print("  - " + f)
         sys.exit(1)
-    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉓）+ 外围服务网关可达性（㉔）验证通过")
+    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉓）+ 外围服务网关可达性（㉔）+ 对拍 8 条规则全实现（㉕）验证通过")
     print("=" * 68)
 
 

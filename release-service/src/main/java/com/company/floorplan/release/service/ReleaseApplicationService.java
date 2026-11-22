@@ -35,7 +35,7 @@ import java.util.Locale;
  * 因此"未经 CONFIRMED 不得 RELEASED"与"未 RELEASED 不得 LIEN_DISCHARGED"
  * 由状态机白名单保证，服务层无法绕过。</p>
  *
- * <p><b>接收方按释放项分线（Q9 建议口径）</b>：日本新车渠道下，车物理在经销商库、
+ * <p><b>接收方按释放项分线（Q9，ADR 已定稿）</b>：日本新车渠道下，车物理在经销商库、
  * 权属凭证由保管点控制，两者不是同一个机构。创建时按
  * {@link CustodianResolver} 为每项解析实际接收方：显式按项覆盖 &gt; 继承主表主接收方。
  * 主表仍保留 {@code custodianId} 作为默认放车线，兼容既有调用方。</p>

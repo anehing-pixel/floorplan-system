@@ -14,9 +14,11 @@ import com.company.floorplan.recon.model.Comparison;
  * 强行摊到某个 VIN 只会制造假差异。它们由 PAYMENT_MATCH 流程消化，
  * 消化后自然进入本规则的对拍范围。</p>
  *
- * <p><b>已知局限（TODO）</b>：银行入账与核销之间存在时差（T+1、节假日、人工补录），
- * 当日对拍可能报出"在途差异"。当前实现不做时间窗匹配，
- * 规则细节（账期切分与容差）需业务确认后再细化，详见 recon-service/HANDOFF.md。</p>
+ * <p><b>口径裁决（《业务口径总定源》ADR）</b>：银行入账与核销之间存在时差
+ * （T+1、节假日、人工补录），但<b>不引入时间窗匹配与容差猜测</b>——
+ * 两口径数值精确相等才无差异，不等即产出 CASH_MISMATCH 差异，由人工复核判定
+ * 是否属于在途。这套口径与 R1–R8 全部一致；把"可能的在途"伪装成通过，
+ * 等于让真正的漏核销也一起通过。</p>
  */
 public class R4BankVsRepaymentRule extends AbstractReconRule {
 
