@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 14:03（GMT+8） · **W0 事件地基 + 并行环境隔离已交付主干，基线 tag `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+最后更新：2026-11-22 14:16（GMT+8） · **W0 事件地基 + 并行环境隔离 + AGENTS.md 校正已交付主干，基线 tag `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
 
 > ✅ **2026-11-22 14:03 W0-FOUNDATION（事件地基）已交付并验证**——在 master 直干、无 agent 分支，9 笔 `[W0]` 提交（`8457b78`…`1a730bb`）：
 > - **事件模型**：`common/event/DomainEvent` + `EventConsumer`（payload 取数单一口径）；
@@ -17,6 +17,11 @@
 > - **并行环境隔离**：`scripts/agent_env.sh`——一个 agent 一套 DB schema + 端口偏移，合并后回 `public` 跑全量回归。
 > 落盘文档：`docs/接口契约-事件与Feign.md`（W1/W2 的编码依据，含 `aggregate_key` 禁用 vin 的硬规则与真实响应样本）、
 > `docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md`。
+> **手册校正（用户「解共享禁区」+「顺手改 AGENTS.md」授权，只改与本轮事实冲突的表述，未重写全文）**：
+> 禁改范围 `V1–V25`→`V1–V26`（§6.1 / §7.1）、§6.2 标 V26 已落库并写明下一可用号 V27、
+> §9 P0 第 2 条由「事件机制 0 实现」重写为「框架能用、业务未接线」（**第 1/3/4/5 条逐条保留，仍然成立**）、
+> 新增坑 5（并行共库共端口的三种踩法）、§5 隔离跑法与「隔离绿 ≠ 合并绿」、§7.2 从最新 `base-*` 开分支、
+> §6.3 + §12 钉死 `aggregate_key` 禁用 vin、§13 检查单补三条。详见 §8.5 三行 `AGENTS.md` 记录。
 > **验证**：`mvn -B clean package` 15/15 SUCCESS；`bash run-microservices.sh smoke` **EXIT 0 / 211 PASS · 0 FAIL**（基线 204 项未退化）；
 > `smoke_w0.py` 主干 33 条、隔离 35 条各全绿且 EXIT 0；隔离跑完核对 `public` 未被改动。
 > **仍未闭合（不在本轮范围，明细见第 7 节 W0-1…W0-8 八行）**：`JdbcOutboxPublisher` 至今零业务调用方、
@@ -218,15 +223,16 @@
 | PAYMENT（Wave2） | `agent/payment` | `../wt-payment` | ✅ 完整交付 + reasoning verifier 通过 | 8 | ✅ | `agent/payment-done` = `d50b806` | ✅ 已合并 `d31ae9a` |
 | CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ✅ 已合并 `dba931d`（⚠️ 合并时 verifier 未回结论，见第 0 节流程更正；补验中） |
 
-| W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线未做**（见第 7 节）| 13（10 笔 `[W0]` + 3 笔 docs）| 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md` | `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
+| W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线未做**（见第 7 节）| 15（12 笔 `[W0]` + 3 笔 docs）——**逐笔以 `git log --oneline a047568..HEAD` 为准，本格数字随下一笔提交就过期，不要当判据** | 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md`、`AGENTS.md`（手册校正）| `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
 
 > 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox) · **V22=收口(B-2 处置冻结增量) · V23=收口(B-5 授信发起人)** · V24=custodian scope（Q9/Q10 口径）· V25=ADR-Q27 `owner_name` 专用列 · **V26=W0 事件消费幂等 + 游标（`event_consumptions` / `consumer_offsets`）**。
 > **下一可用号 = V27**（2026-11-22 14:03 实查：`db/migration/` 最大 V26，八个 agent 分支里无人在建 V27+，Flyway 已实证 `public` 到 V26）。
 > 号段无冲突：V26=W0 这一格在 `AGENTS.md §6.2`、`docs/并行开发-剩余需求拆分方案.md §4`、W0 任务卡三处写法一致。
 > 本轮补的是**登记本身**——此前本表只到 V23，而 V24（custodian scope）、V25（`owner_name`）早已落库、V26 是本轮新建，
 > 后续 agent 若照本表找号会以为 V24–V26 可拿，那正是「两个同号迁移 → Flyway 拒启动」的老事故路径。
-> ⚠️ 连带一处待同步：`AGENTS.md §6.2` 与共享禁区清单里的禁改范围还写着「任何 `V1–V25` 迁移」，
-> 实际**已落库的 V26 同样禁改**（checksum）。手册属收口方维护，本轮不改，先在此挂账。
+> ⚠️~~连带一处待同步~~ **已同步（2026-11-22 用户「解共享禁区」+「顺手改 AGENTS.md」）**：`AGENTS.md §6.1` 禁改范围已改为
+> `V1–V26`、`§7.1` 共享禁区同步、`§6.2` 号段表标 V26 已落库并写明**下一可用号 V27**。
+> 用户明确授权后本轮破了「PROGRESS.md / AGENTS.md 归收口方」这条禁区，只改与本轮事实直接冲突的表述，未重写全文。
 > **硬规矩**：共享层已有 java 文件只有 CORE agent 能改；其余 agent 只写自己的服务目录 + 自己号段的迁移。开新分支前先在这里登记号段。
 
 ---
@@ -423,8 +429,9 @@ ADR §0.1 用 ✅/⚙️/📌/🌐 四种标记严格区分「已落地 / 默认
 | `00-文档索引.md:103,184` | 「db/migration 只到 V11」「V12/V13/V14 尚未落地」 | 迁移目录实有 V1–V25，`web.log` 实证 `25 migrations validated` |
 | `web/HANDOFF.md:70` | 「/api/disposals 未暴露 cancel 端点」 | `DisposalController:70` 已有 `@PostMapping("/{caseNo}/cancel")` |
 | `CORE_VERIFIER_REPORT.md:92` / 部分 HANDOFF | 残留 `TODO(Q27)`、`ownerName 暂记 co_signed_by` | 全仓 `*.java` 已无 `TODO(Q27)`；V25 加 `owner_name` 专用列，`SalesApplicationService:168-175` 写专用列。报告是历史时点快照 |
-| `AGENTS.md §9`「最要命的五处断裂」第 2 条 | 「**事件机制 0 实现** — `outbox_events` 表 + `OutboxPublisher` 接口都在，**无实现类、无 `@Scheduled`、无消费者幂等、无死信**」 | 2026-11-22 14:03 起该条已过半：`JdbcOutboxPublisher` / `EventDispatcher` 均已落地（`@Scheduled(fixedDelay=1000)` 游标轮询、`(event_id, consumer)` 框架层幂等、三次重试后置 `DEAD` 并放行游标），并有 `smoke_w0.py` 33/35 条断言。**真缺口只剩「没有生产者调用发布端」**（第 7 节 W0-1/W0-2）。⚠️ 同节第 1/3/4/5 条（借据无生产者、回款匹配后不解押不回补、工单 0 Java、前端 8 模块 0 页面）**仍然成立**，别顺手整节销掉 |
-| `AGENTS.md §6.2` + `§7.1` 共享禁区 | 「任何 `V1–V25` 迁移」全员禁改 | 已落库到 **V26**，V26 同样禁改（checksum）。实际禁改范围 = `V1–V26`；手册正文归 W3/文档 owner 同步，本轮只在第 2 节号段表登记 |
+| ~~`AGENTS.md §9`「最要命的五处断裂」第 2 条~~ | 「**事件机制 0 实现** — `outbox_events` 表 + `OutboxPublisher` 接口都在，**无实现类、无 `@Scheduled`、无消费者幂等、无死信**」 | **✅ 已改正文（2026-11-22）**：第 2 条重写为「只到『框架能用』，没到『业务会发』」——`JdbcOutboxPublisher` / `EventDispatcher`（`@Scheduled(fixedDelay=1000)` 游标轮询、`(event_id, consumer)` 框架层幂等、三次失败置 `DEAD`）已落地并有 `smoke_w0.py` 33/35 条断言，**真缺口只剩「发布端零业务调用方」**（第 7 节 W0-1/W0-2）。⚠️ 同节第 **1/3/4/5** 条（借据无生产者、回款匹配后不解押不回补、工单 0 Java、前端 8 模块 0 页面）**仍然成立**，重写时逐条保留，没有整节销掉；第 3 条复核证据见 `ReleaseOrchestrator:109`「存根阶段 availableAfter = before」 |
+| ~~`AGENTS.md §6.2` + `§7.1` 共享禁区~~ | 「任何 `V1–V25` 迁移」全员禁改 | **✅ 已改正文**：禁改范围 = `V1–V26`（§6.1 / §7.1 两处同步），号段表标 V26 已落库 + 下一可用号 V27 |
+| `AGENTS.md`（新增，本轮一并补齐） | 手册完全没有并行隔离、基线标签、契约文档的入口 | 已补：坑 5（共库共端口的三种互相踩法）、§5 隔离跑法与「隔离绿 ≠ 合并绿」、§7.2 从最新 `base-*` 开分支的命名规矩、§2 阅读顺序加契约与隔离两份文档、§6.3 与 §12 钉死 `aggregate_key` 禁用 vin、§13 检查单加三条 |
 | `docs/并行开发-剩余需求拆分方案.md` | W0 交付物写「`wave0b-baseline` tag」 | 标签已打，但之后又追加了隔离套件与命名规矩两批提交。**新分支一律从 `base-w0-20261122` 起**（见第 1 节「基线标签」行），不要按旧名 checkout |
 
 > **状态准绳（2026-11-22 起）**：业务口径以 `docs/ADR-业务口径总定源.md` 为唯一事实来源，
