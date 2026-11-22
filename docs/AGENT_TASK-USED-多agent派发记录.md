@@ -26,11 +26,11 @@
 | 包 | 角色 / 本轮模型 | 分支 · worktree | schema | 端口偏移 | 表数门槛（主干累计 / **并行同基线分支**） | 冒烟预算 | 上游 |
 |---|---|---|---|---|---|---|---|
 | W-U0 地基 | **PM 本人** / 审计=调研员 · Qwen4-Max | `master` 直干 | `public` | 0 | 67（本包不建 `public` 表） | 0（无业务断言） | — |
-| W-U1 车辆+资质 | 全栈 · DeepSeek-V4-Pro | `used/wu1` · `../wt-used-wu1` | `used_u1`（**实建 `used_wu1`**，见 §6） | +700 | 74 / **74**（R12 修正：V41 条件项 +1、幽灵表 −1，净 +7） | 28（dealer 12 + vehicle 16） | W-U0 |
-| W-U2 估值+拍卖+放款基准 | 全栈 · GLM-5.3 | `used/wu2` · `../wt-used-wu2` | `used_u2` | +800 | 85 / **78**（① 不随隔壁包变，见 D04 §2.1） | 42（valuation 24 + auction 18） | W-U0，部分等 W-U3 |
-| W-U3 DMZ 集成层 | 全栈 · Kimi-K3.1-Pro（**独占**） | `used/wu3` · `../wt-used-wu3` | `used_u3` | +900 | 85 / **67**（本包 public **0** 张，六张全在 `integration`、不进门槛） | 20（含 INV-1..5 证伪） | W-U0 |
-| W-U4 凭证+WMS+放车放证 | 全栈 ×2 · Step-5-Preview | `used/wu4` · `../wt-used-wu4` | `used_u4` | +1000（**首轮误派 +800 已纠正**，见 R15⑤） | 90 / **72**（① 不随隔壁包变，见 D04 §2.1） | 56（cert 20 + wms 10 + release 26 含 E2E-0） | W-U1、W-U3、在途 W2-WORKORDER |
-| W-U5 处置+通知+报表 | 全栈 + 审查员 · Qwen3.8-Max | `used/wu5` · `../wt-used-wu5` | `used_u5` | +1100 | 92 / **69**（R12 连锁；本包不算 W-U1 的表） | 18（disposal 10 + reporting 8） | W-U4、W-U3 |
+| W-U1 车辆+资质 | 全栈 · DeepSeek-V4-Pro | `used/wu1` · `../wt-used-wu1` | `used_u1`（**实建 `used_wu1`**，见 §6） | +700 | 75 / **75**（R12 复核后：V41 条件项 +1、`dealer_score_reviews` 保留 +1 → 本包 8 张） | 28（dealer 12 + vehicle 16） | W-U0 |
+| W-U2 估值+拍卖+放款基准 | 全栈 · GLM-5.3 | `used/wu2` · `../wt-used-wu2` | `used_u2` | +800 | 86 / **78**（① 不随隔壁包变，见 D04 §2.1） | 42（valuation 24 + auction 18） | W-U0，部分等 W-U3 |
+| W-U3 DMZ 集成层 | 全栈 · Kimi-K3.1-Pro（**独占**） | `used/wu3` · `../wt-used-wu3` | `used_u3` | +900 | 86 / **67**（本包 public **0** 张，六张全在 `integration`、不进门槛） | 20（含 INV-1..5 证伪） | W-U0 |
+| W-U4 凭证+WMS+放车放证 | 全栈 ×2 · Step-5-Preview | `used/wu4` · `../wt-used-wu4` | `used_u4` | +1000（**首轮误派 +800 已纠正**，见 R15⑤） | 91 / **72**（① 不随隔壁包变，见 D04 §2.1） | 56（cert 20 + wms 10 + release 26 含 E2E-0） | W-U1、W-U3、在途 W2-WORKORDER |
+| W-U5 处置+通知+报表 | 全栈 + 审查员 · Qwen3.8-Max | `used/wu5` · `../wt-used-wu5` | `used_u5` | +1100 | 93 / **69**（② 连锁到 93；① 仍按本包 2 张算 69） | 18（disposal 10 + reporting 8） | W-U4、W-U3 |
 
 > **门槛两套值的算法与权威源 = D04 §2.1**，本表只照抄。**分支填的是 `67 + 本分支实际已应用的 public 迁移`**：
 > 五路从同一 `base-*` 标签并行切出，前序包的表不在你分支里，填主干累计值（85/90/92，R12 连锁后的新值）会让 `check` 必挂
