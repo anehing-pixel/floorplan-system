@@ -64,6 +64,19 @@ class DpdCalculatorTest {
         assertEquals(91, DpdCalculator.daysPastDue(due.plusDays(91), due, 0));
     }
 
+    /**
+     * Q14 业务定源回归用例：逾期天数按自然日计，周末/节假日不跳过。
+     * 2026-11-01 实证为 Sunday，从它到 11-08 恰为 7 个自然日；
+     * 若有人把 DPD 改成营业日口径（跳过周末）只会得到 5，本用例立即变红。
+     */
+    @Test
+    void daysPastDue_calendarBasis_doesNotSkipWeekends() {
+        LocalDate sunday = LocalDate.of(2026, 11, 1);
+        assertEquals(7, DpdCalculator.daysPastDue(sunday.plusDays(7), sunday, 0));
+        // 宽限期同样按自然日累加，不因跨周末而缩短
+        assertEquals(7, DpdCalculator.daysPastDue(sunday.plusDays(10), sunday, 3));
+    }
+
     @Test
     void daysPastDue_gracePeriodIsExcluded() {
         LocalDate due = LocalDate.of(2026, 11, 1);

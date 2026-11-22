@@ -80,7 +80,9 @@ DPD ≤ 0   → NONE
 2. **DRAFT→ACTIVE 时机**：建据后为 DRAFT；当前 `refreshDpd` 在无逾期时会迁到 ACTIVE。更严谨应由放款确认回调驱动状态机，待主 agent 合并时对齐。
 3. **DPD 规则中心未建**：设计稿 §4 的 dpd_stage_rules / dpd_stage_actions / default_trigger_rules 及种子数据属配置表，不在本任务五表范围；当前分档固化在 `DpdCalculator` 常量（RULE_VERSION/THRESHOLD_SNAPSHOT），要动态调参需后续接配置表。
 4. **画像近似指标**：设计稿的 `default_events` / `deduction_failures` 在五表之外，`defaults_last_12m` 用 `loans.default_flag + defaulted_at` 近似、`deduction_fail_rate_30d` 暂无分母（置 NULL），已标 TODO。
-5. **营业日口径**：`day_basis=BUSINESS` 依赖 holidays 表（当前 0 行），一期仅 CALENDAR。
+5. ~~**营业日口径**：`day_basis=BUSINESS` 依赖 holidays 表（当前 0 行），一期仅 CALENDAR。~~
+   ✅ **Q14 已业务定源（2026-11-22）：一律按自然日 CALENDAR，不切换营业日**；
+   `day_basis` / `day_basis_snapshot` 字段保留仅作历史快照，不是可切换开关。该 TODO 关闭。
 6. **risk_tier 不参与流程**：按设计稿 §6.2 建议，一期仅展示与人工参考，不参与定价/准入（与 `dealers.risk_grade` 授信评级是两套指标）。
 7. **payment agent 调用 by-vin**：所有 `/api/**` 需合法 JWT；按项目口径读接口不设权限点，只读账号即可调用，无需额外授权。
 

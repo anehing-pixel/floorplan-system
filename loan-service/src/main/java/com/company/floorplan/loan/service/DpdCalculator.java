@@ -12,7 +12,7 @@ import java.time.temporal.ChronoUnit;
  * 一旦它隐式读时钟或读数据库，同一笔借据在不同时刻、不同节点会算出不同结果，
  * 而"五个下游口径统一"正是 ADR-008 的核心目标。因此"今天是哪天"由调用方显式传入 asOf。</p>
  *
- * <p><b>分档口径（设计稿 §4.3 种子数据，1-based 自然日）</b>：
+ * <p><b>分档口径（设计稿 §4.3 种子数据，1-based 自然日；Q14 已业务定源）</b>：
  * <pre>
  *   DPD ≤ 0     → NONE（未逾期）
  *   1  – 30     → M1 早期逾期
@@ -33,7 +33,18 @@ public final class DpdCalculator {
 
     /** 与设计稿 dpd_stage_rules 种子数据一致的版本号，写入 overdue_records 快照。 */
     public static final String RULE_VERSION = "v1";
-    /** 一期按自然日（holidays 表当前 0 行，营业日口径暂不可用）。 */
+    /**
+     * 逾期天数口径：自然日（CALENDAR）。
+     *
+     * <p><b>业务定源 Q14（2026-11-22）：M1/M2/M3 与 DPD 一律按自然日</b>，
+     * 周末、节假日同样计入，不按营业日跳过。这是最终口径，不是「一期临时 / 待 holidays
+     * 灌数据后切换营业日」的过渡态——系统不提供 BUSINESS 切换能力，
+     * {@code overdue_records.day_basis_snapshot} 仅作为事后复现的历史快照字段保留。</p>
+     *
+     * <p>判定依据见 {@link #daysPastDue} 的 {@code ChronoUnit.DAYS.between}：纯日历差，
+     * 天然不查营业日历；{@link DpdCalculatorTest#daysPastDue_calendarBasis_doesNotSkipWeekends()}
+     * 用跨周末用例把该口径钉死，防止后来人误改为营业日。</p>
+     */
     public static final String DAY_BASIS = "CALENDAR";
     /** 判定阈值快照，供事后复现当时口径。 */
     public static final String THRESHOLD_SNAPSHOT = "{\"M1\":30,\"M2\":60,\"M3\":90}";

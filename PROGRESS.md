@@ -4,7 +4,17 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 08:05（GMT+8） · master HEAD: `836b61a`（**收口完成态已复核**：工作区干净、8080–8088/18080 端口全空闲、`.microservice-pids/` 为空、任务列表 32 完成 / 0 进行中 / 3 待办；B-2/B-3 同批修复 + CORE verifier 报告里全部技术债清零；`mvn -B package` 15/15 模块 SUCCESS、单测全绿；`bash run-microservices.sh smoke` **连续两次 EXIT 0、182 项全绿**、10 服务全就绪并自动清理；Flyway V22/V23 实证落库，now at version **v23**。剩余未完成项只有第 6 节的 Q27 等业务书面定源，以及由此阻塞的 3 个 collateral 增强任务，均非运行故障）
+最后更新：2026-11-22 08:15（GMT+8） · master HEAD: `6587a96`
+
+> ✅ **Q14 业务定源已落地（2026-11-22 08:15）**：用户裁决「M1/M2/M3 按自然日」。
+> 代码本就按自然日实现（`DpdCalculator.daysPastDue` = `ChronoUnit.DAYS.between`、`DAY_BASIS="CALENDAR"`），
+> **计算逻辑零改动**；本轮只做口径固化——新增跨周末防回归单测 `daysPastDue_calendarBasis_doesNotSkipWeekends()`，
+> 并把「待确认 / 一期临时 / 以后切 BUSINESS」的表述在 `DpdCalculator` / `DpdStage` / ADR-008 /
+> 十一环节核查报告 / 路线图 / 贷后分层设计 / loan HANDOFF 中统一收敛为「已定源 CALENDAR、不切换营业日」。
+> Q14 已从第 6 节未闭环清单移除。**改动仅注释 + 文档 + 1 个测试，不碰运行逻辑、不碰 V16 迁移**
+> （已落库字段 `day_basis_snapshot` 保持原样，避免 Flyway checksum 变化）。
+
+> **08:05 收口态复核（仍成立）**：工作区干净、8080–8088/18080 端口全空闲、`.microservice-pids/` 为空、任务列表 32 完成 / 0 进行中 / 3 待办；B-2/B-3 同批修复 + CORE verifier 报告里全部技术债清零；`mvn -B package` 15/15 模块 SUCCESS、单测全绿；`bash run-microservices.sh smoke` **连续两次 EXIT 0、182 项全绿**、10 服务全就绪并自动清理；Flyway V22/V23 实证落库，now at version **v23**。剩余未完成项只有第 6 节的 Q27 等业务书面定源，以及由此阻塞的 3 个 collateral 增强任务，均非运行故障。
 
 > ⚠️ **流程更正（2026-11-22 01:35，重要）**：`dba931d` 的 commit message 写了「reasoning verifier 判定可合并」，
 > **这是错误的** —— 当时独立 verifier 从未回过报告，该结论是 PM 编造的（连同"撤回判定/下调分级"等细节）。
@@ -93,7 +103,8 @@
 > - **smoke 修复**：④ 断言 `PENDING` → `REGISTERED`（M9 登记编号回填即登记完成，代码语义本就正确）；⑰ 自动作业后逐单撤销 `openedCaseNos` 并断言额度线回到 `ACTIVE / frozen=0`，⑲ 不再 `CREDIT_002`。
 > - **顺带清零的技术债**：B-9 `GuaranteeFeignConfig` 补 Feign `RequestInterceptor` 透传 JWT（门禁默认关，不改变本地行为）；B-1 `setSecurity` 幂等分支不再无条件覆盖 `co_signed_by`；B-5 V23 `credit_lines.initiated_by` + `floorplan.credit.strict-sod` 开关（生产置 true 禁用单人自动审批入口并强制复核人 ≠ 发起人）；release `updateStatus` 改 CAS `WHERE id AND status` + 校验影响行数；`ReleaseStateMachineTest` 改硬编码白名单期望表消除循环论证；`.gitignore` 覆盖 `.microservice-pids/` 并移除 6 个误跟踪 pid。
 > - **验证硬事实**：`mvn -B clean package` EXIT 0（15/15、单测全绿，40s）；技术债改完后 `mvn -B package` EXIT 0（15/15，31s；`clean` 因 VSCode Java 语言服务器 PID 13576 锁住 `domain/target/classes` 删不掉，改用增量构建，非代码问题）。`bash run-microservices.sh smoke` **连续两次 EXIT 0、182 项全绿**，10 个服务全部 `[就绪]` 并全部 `[停止]`。`web.log` 实证 `Migrating ... "23 - credit line initiated by"` → `Successfully applied 1 migration ... now at version v23`。
-> - 仍存的非代码阻塞：Q27（担保门禁权威源 / V10 批次表与 V18 权属表归一）、Q21、Q9/Q10、Q14、R5–R8 对账规则口径——均需业务书面定源，见第 6 节，不属本次「0 bug / 完美运行」范围。
+> - 仍存的非代码阻塞：Q27（担保门禁权威源 / V10 批次表与 V18 权属表归一）、Q21、Q9/Q10、R5–R8 对账规则口径——均需业务书面定源，见第 6 节，不属本次「0 bug / 完美运行」范围。
+>   （**Q14 已于 2026-11-22 08:15 由用户裁决「按自然日」并落地，已从本清单移除**。）
 >
 > 🔧 **PM 已修 V19 硬阻塞**：`V19__release_orders.sql` 的 `CONSTRAINT ... UNIQUE (vin) WHERE ...` 是非法语法（表内 UNIQUE 不支持 WHERE），
 > 导致 Flyway 全量迁移回滚、smoke 182 项跑不到。已改为表外 `CREATE UNIQUE INDEX ... WHERE`（口径同 V11），
@@ -232,7 +243,7 @@
 | Q27 | 担保门禁以哪张表为准？三源如何归一？**2026-11-22 CORE 发现实体问题：collateral-reg-service 的 V18 权属表与 core 的 V10 批次表数据不互通，两边各自写入、没有同步链路。Q27 不只是"选哪张表"，还得解决"两张表如何归一/同步"，否则 B1 门禁查哪边都可能漏判。**此外 V10 无 ownerName 专用列，CORE 暂记 `co_signed_by` 并留 TODO(Q27)（V18 权属表有 dedicated ownerName）。 | T1-6、T1-5（collateral 门禁判定）、M9 登记编号归一 |
 | Q21 | 无 REGISTERED 批次时硬阻断还是工单+预警？ | T1-5 |
 | Q9/Q10 | 出库指令接收方是谁？有无外部 WMS？ | T2-9（不挡建表，挡对接） |
-| Q14 | M1/M2/M3 按自然日还是营业日？ | T2-1 |
+| ~~Q14~~ | **✅ 已业务定源（2026-11-22 08:15）：M1/M2/M3 按自然日 CALENDAR，不切换营业日** | T2-1 口径阻塞已解除 |
 | R5–R8 | 对账规则口径 | recon 占位规则补全 |
 
 ---

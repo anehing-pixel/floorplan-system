@@ -6,6 +6,9 @@ package com.company.floorplan.loan.model;
  * <p>阈值来自设计稿 §4.3 种子数据（1-based，自然日 CALENDAR 口径）：
  * M1=1-30 / M2=31-60 / M3=61-90 / M4≥91。DPD≤0 归 {@link #NONE}（未逾期）。</p>
  *
+ * <p><b>业务定源 Q14（2026-11-22）</b>：M1/M2/M3 一律按自然日，不切换营业日；
+ * 该结论已同步到 {@code DpdCalculator.DAY_BASIS} 与防回归单测，此处阈值区间不因此改变。</p>
+ *
  * <p>本枚举只描述分档区间，不含计算逻辑；计算见
  * {@code com.company.floorplan.loan.service.DpdCalculator}（纯函数）。</p>
  */
