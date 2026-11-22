@@ -6,7 +6,7 @@
 | 工作位 | `C:/Users/Administrator/Documents/GitHub/wt-used-wu1`，分支 `used/wu1`，基线 `ea21473`（标签 `base-used-dev-20261122`） |
 | 覆盖 | R1.1–R1.5、R2.1–R2.4、R3.1（字段定义与建账侧）；UC-R1-1…7、UC-R2-1…5（D06 `:102-109`） |
 | 提交 | 全部 pathspec 形式，未 push、未 merge、未打标签；笔数与清单见 §9（以 `git log base-used-dev-20261122..HEAD` 为权威） |
-| **验证状态** | **本轮按用户指令未编译、未冒烟、未连库**（§0 第一铁律）。下文所有"已实现"均指代码已落档并经静态交叉核对，不等于跑通 |
+| **验证状态** | **第二轮（2026-11-22 收口轮）已真跑：编译＋单测、隔离 schema `used_wu1` 建库、Flyway V40–V54 实落、web/gateway 起进程、冒烟两阶段——结果与失败原文见 §11。当前判定：`mvn -B clean package` BUILD SUCCESS（189 测试 0 失败）；迁移 10 行全部 `success=true`；冒烟 80 条断言里 1 条红（网关路由冲突，属外部条件，非本包代码）。注意"隔离 schema 跑绿 ≠ 已交付"，`public` 全量回归归收口方** |
 | 交接对象 | 测试工程师（§8 给了运行条件与验收建议）／收口方（§5–§7 是需要裁决或需要补规格的条目） |
 
 ---
@@ -16,6 +16,8 @@
 迁移 10 个、新建表 8 张、domain 41 个新文件、application 3 个用例服务、infrastructure 6 个 JdbcTemplate 仓储、web 8 个端点（＝D07 §7.1 给 W-U1 的八行，一字不多不少）已落档；
 **R2 车辆侧（建账／车况票／换证／里程勾稽）只有服务方法，没有任何 HTTP 入口**，因为 D07 §7 里没有 R2 端点小节（D12 `:150-153` 把它列为开放项 R8，本包不自派路径）；
 所有未签字的数值一律不写进 Java，改由 `used_config_params` 读，读不到按登记的缺省方向处理（§6 逐条列出）。
+**第二轮真跑的结论**：上面这套东西**能编译、能建库、能起、能跑**，且第一轮踩到的四个真问题（3 类编译错 + 43 处 `COMMENT ON … IS 'a' || 'b'` 语法错）已全部落在本包自己的文件里修掉（§11.1／§11.2）；
+仍然红的只有一条——本包八个端点经网关 18780 不可达，根因是 `credit` 路由整段接管 `/api/dealers/**`（禁区文件，等裁决，§11.4）。
 
 ---
 
@@ -53,7 +55,9 @@
 | `used_config_params` | 条件项 +1（D04 `:100` 下方"两个条件项"） | ✅ | 采「DB 参数表」这一支，因 V41 文件名已在冻结号段内 |
 | `dealer_score_reviews` | **未列**（全设计集 grep 零命中） | ✅ | G-A4 需要 `scored_by`/`confirmed_by` 两列证据，`dealers` 的两个分数列承载不了 → 见 §4-② |
 
-**表数门槛的实际影响**（不改脚本，只登记）：D04 §2.1 `:104` 给 W-U1 的行是 `V45(3)、V51(1)、V52(2) = 6`，并行同基线分支门槛 **73**（`67 + 6`）。本分支实际是 8 张 ⟹ **`FLOORPLAN_PUBLIC_TABLES` 应为 75**（73 + V41 条件项 + `dealer_score_reviews`）。任何人按 73 跑 `agent_env.sh check` 都会得到"表数不符"，那是**数字源落后**，不是漏建/重复建表。此结论只能靠合入后回 `public` 全量实数互校，本轮未连库。
+**表数门槛的实际影响**（不改脚本，只登记）：D04 §2.1 `:104` 给 W-U1 的行是 `V45(3)、V51(1)、V52(2) = 6`，并行同基线分支门槛 **73**（`67 + 6`）。本分支实际是 8 张 ⟹ **`FLOORPLAN_PUBLIC_TABLES` 应为 75**（73 + V41 条件项 + `dealer_score_reviews`）。任何人按 73 跑 `agent_env.sh check` 都会得到"表数不符"，那是**数字源落后**，不是漏建/重复建表。
+**第二轮已连库实测**：`used_wu1` 里本包净增 8 张、总数 **75**（`agent_env.sh check` 的 `FLOORPLAN_PUBLIC_TABLES=75` 判 `[通过]`），与本节推导一致；
+仍待收口方在合入后回 `public` 全量实数互校（那里要叠上其他并行包的表），本包的 75 只是隔离 schema 内的数。
 
 ### 2.3 端点（8 : 8，路径与 D07 §7.1 `:555-562` 逐字相同）
 
@@ -164,7 +168,7 @@
 
 ---
 
-## 8. 给测试工程师：运行条件与验收建议（本轮一条命令都没跑）
+## 8. 给测试工程师：运行条件与验收建议（第二轮已在 `used_wu1` 实跑，命令与实测输出见 §11；本节保留给在 `public` 重跑的人）
 
 **前置条件**
 - Flyway 需按序跑到 V54；V40 之前必须先有 V1–V26 基线（`vehicle_units`/`dealers`/`suppliers` 三处 ALTER 依赖它们）。
@@ -182,7 +186,16 @@
 6. 幂等重放：同 `Idempotency-Key` 同体 → 首次结果且不新增审计；同键换分数 → 409 `CONFLICT_001`。
 7. 里程取严：低优先来源与主数据不一致**只建差异不覆盖**；`WMS_INBOUND` 观测才覆盖并改 `mileage_source`（§4-⑤ 的合并口径要业务确认）。
 
-**未做且需要独立跑的**：`smoke_used_dealer.py`(12) + `smoke_used_vehicle.py`(16)（卡面 D12 `:143` 的冒烟数）——按 §0 本轮禁止创建，脚本文件一个都没写。
+**冒烟脚本的真实现状（第二轮更新）**：卡面 D12 `:143` 要的是 `smoke_used_dealer.py`(12) + `smoke_used_vehicle.py`(16) 两份、共 28 条场景；
+本轮实际交付的是**一份** `scripts/smoke_used_wu1.py`（断言 80 条，其中 `gateoff` 阶段 5 条、`full` 阶段 75 条），拆成两份没有功能价值，故按"一条命令跑完两阶段"的形态出，**验收时以断言覆盖为准、不按 12/16 的文件数点数**。
+`smoke-test.py`（禁区）一字节未改；R2 车辆侧因无 HTTP 入口（§1）只能测到服务方法与库状态层，端点类场景待路径签字后补。
+
+**第二轮实跑对本节 7 条的覆盖情况（照 §11.4 的断言清单，不含糊）**
+- 第 1、2 条（`uk_cert_active_vin` / `UNKNOWN` 里程表达）**本轮未覆盖**：R2 车辆侧无 HTTP 入口（§1），冒烟本轮只从 `psql` 直插 `vehicle_units` 验了 V40 分流键 CHECK 的两侧（`vehicle_type` NULL 放行、非法值 `'TRUCK'` 被拒、`'USED'` 可写）；`ck_vu_mileage_unknown` 与证书侧三条唯一约束**均未测**，需 W-T1 在领域/仓储层单测或等 R2 端点定源。
+- 第 5 条（`certificateConflict` 按异常文本判别索引名）**同样未覆盖**（走不到那条代码路径），判定不变，仍是最没底的一处。
+- 第 6 条幂等**已验绿**：同 `Idempotency-Key` 同体 → 返回首次行 id、不新增行、不新增审计（`R1-1`/`R1-3`/`R1-5` 三组各断言到）；同键改分 → 409，评分侧 `details.reason=SAME_KEY_DIFFERENT_REQUEST`，核查侧因走报文号自然键而是 409 `CONFLICT_001`（两条分开看，别当成不一致行为）。
+- 第 3 条 L4 回归**部分已验**：`vehicle_units` 新列对 `vehicle_type IS NULL` 的历史写法放行、`ck_vu_vehicle_type` 拒非法值，本轮由 `psql` 直插两条断言；既有 `/api/vehicles` 批量导入全流程仍属 `smoke-test.py` 的 `public` 回归，归收口方。
+- 第 4 条（G-A4 双维签认）与第 7 条（里程取严覆盖口径）**本轮无 HTTP 入口可测**：签认端点未定源（D07 只给单维 `POST /scores`），里程勾稽在 R2 服务层——两条都登记为未覆盖项，不是已验绿。
 
 ---
 
@@ -211,6 +224,9 @@
 | `7270f8e` | [W-U1 web] 落 R1 八端点（D07 §7.1 原样）：P-3 闸门读写全拦，GET 不标权限点 |
 | `d5b5ceb` | [W-U1 infrastructure] 启动期 SQL 自检登记 USED 8 表：把手写 SQL 的列名错到运行期才炸的那一类前移 |
 | `b95dbc8` | [W-U1 docs] 出实现说明：8 表 vs 门槛 73 的差、R2 无端点的原因、11 条未做与 8 处文档矛盾逐条带证据位置 |
+| `292c41f` | [W-U1 编译修复] 真跑第一轮 mvn 炸出的 4 组编译错，全部只改本包自己的 3 个文件（§11.1） |
+| `5803d53` | [W-U1 迁移修复] COMMENT ON … IS 的 43 处 `'a' \|\| 'b'` 拼接改回单一字面量，Flyway 才第一次跑通（§11.2） |
+| 本笔 | [W-U1 冒烟+docs] 出 `scripts/smoke_used_wu1.py`（80 条断言两阶段）并把 §10 的"未跑"改成本轮实测记录 §11 |
 
 > 说明：`fe5bb88`／`a751e6b`／`3a4ec6e`／`84e8d20` 四笔首行用了 conventional-commit 前缀（当时按另一份提示写），其余按卡面"[W-U1 层] 决策句"格式。收口方若要统一格式，`rebase` 由收口方做，本包不再动历史。
 >
@@ -227,9 +243,76 @@
 
 ## 10. 验证声明（§7 要求逐字写明）
 
-**本轮按用户指令未编译、未冒烟、未连库，验证延后。**
+**第一轮按用户指令未编译、未冒烟、未连库；第二轮（2026-11-22 收口轮）已把交付物真跑一遍，实测结果见 §11。**
 
-- 未执行：任何 `mvn` 目标、`run-microservices.sh`/`run-local.sh`、启动 JVM、`agent_env.sh init/check`、`psql`／docker 连库、Flyway 实跑、冒烟脚本。
-- 已执行的静态核对：①新代码引用的每个仓储方法签名、实体 getter/setter、枚举常量、`ErrorCode` 常量逐一经 `grep` 对到定义处；②控制器调用的服务方法形参表与顺序逐个比对；③`SqlStructureSelfCheck` 新增 8 条列名与 V41/V45/V46/V51/V52 DDL 逐列比对（确保不自造假 ERROR）；④15 处 `DROP CONSTRAINT` 目标名对基线 `git grep`（全部零命中）；⑤6 处被 ALTER 的表在基线的 `CREATE TABLE` 出处核对；⑥本文引用的每个文档行号经 `sed/grep` 回读原文确认。
-- 已知**静态无法排除**的风险（需编译/连库才能证伪）：泛型与重载解析、`@Value` 注入名、Spring 路由与既有 `DealerController` 的映射冲突（已 grep 过路径无重复，但 `@RequestMapping` 组合仍须容器启动确认）、Flyway 迁移在真实库上的执行顺序与 `CHECK` 对存量行的实际影响。
-- 开发自测**不代替**独立验收与代码审查。
+- 第一轮只做过静态核对：①新代码引用的每个仓储方法签名、实体 getter/setter、枚举常量、`ErrorCode` 常量逐一经 `grep` 对到定义处；②控制器调用的服务方法形参表与顺序逐个比对；③`SqlStructureSelfCheck` 新增 8 条列名与 V41/V45/V46/V51/V52 DDL 逐列比对（确保不自造假 ERROR）；④15 处 `DROP CONSTRAINT` 目标名对基线 `git grep`（全部零命中）；⑤6 处被 ALTER 的表在基线的 `CREATE TABLE` 出处核对；⑥本文引用的每个文档行号经 `sed/grep` 回读原文确认。
+- 上一条里"静态无法排除的风险"这一项**已被实测兑现**：静态比对全过，但 `mvn -B clean package` 仍有 3 处编译失败、Flyway 在 V40 首条语句即中断（§11.1／§11.2）。把结论留在这里，供后续包别再把静态核对当验证。
+- 开发自测**不代替**独立验收与代码审查；隔离 schema 里跑绿只算"语义验证通过"，交付判定归收口方在 `public` 的合并后全量跑。
+
+---
+
+## 11. 本轮真跑记录（全部为实测输出，不是计划）
+
+### 11.1 编译：第一轮 4 组失败，全在本包代码里
+
+`mvn -B clean package`（16 模块 reactor）先在 `floorplan-domain` 中断，修好后又在 `floorplan-infrastructure` 中断，共 4 组真实缺陷：
+
+| # | 位置 | 编译器原文（GBK 解码后） | 根因与处置 |
+|---|---|---|---|
+| 1 | `domain/.../UsedConfigParam.java:175` | `multi-catch 语句中的替代无法通过子类化关联 / java.lang.NumberFormatException 是 java.lang.IllegalArgumentException 的子类` | `catch (NumberFormatException \| IllegalArgumentException)` 是 javac 非法写法。改成只捕 `IllegalArgumentException`（前者是其子类，覆盖面不变），原位补注释说明为什么不能写两个 |
+| 2 | `infrastructure/.../JdbcDealerQualificationRepository.java:177, 245` | `无法将类 ...JdbcDealerQualificationRepository 中的方法 conflict 应用到给定类型；需要: java.lang.String 找到: java.lang.String,org.springframework.dao.DuplicateKeyException` | 类内私有 `conflict(String)` 只有一个形参，两处多传了异常对象（`BusinessException` 没有带 cause 的构造器，不动那个共享类）。删多余实参，与本文件 `:292` 及同包其余 `catch (DuplicateKeyException)` 的既有写法对齐 |
+| 3 | `infrastructure/.../JdbcUsedVehicleAttributesRepository.java:124` | `不兼容的类型: java.lang.String 无法转换为 java.lang.Enum<?>` | `vehicle_type` 在本实体里本就是 String（对齐 `vehicle_units.vehicle_type VARCHAR`），却被喂给枚举专用的 `name(Enum<?>)`。改走 `trim(String)`，取值合法性仍由 V40 CHECK ＋入口校验兜 |
+| 4 | 同文件 `intOrNull` / `longOrNull` / `booleanOrNull`（6 条报错） | `未报告的异常错误 java.sql.SQLException；必须对其进行捕获或声明以便抛出` | 三个取值器调 `ResultSet.getXxx` + `wasNull` 却没声明 `throws`。补 `throws java.sql.SQLException`——调用点在 `RowMapper.mapRow(…, throws SQLException)` 内，语义不变 |
+
+修复后终局：`BUILD SUCCESS`，16/16 模块，测试合计 **189 条，Failures 0 / Errors 0 / Skipped 0**
+（domain 49、bank 18、loan 23、collateral-reg 10、release 55、recon 34；其余模块无测试类）。
+**未新增任何测试**（按分工单测归 W-T1），也未删改任何既有测试。
+
+### 11.2 迁移与库结构
+
+- `bash scripts/agent_env.sh init used_wu1` → `CREATE SCHEMA`。起 web 后 Flyway 第一次的原文：
+  `Migration of schema "used_wu1" to version "40 - used domain dictionary" failed! Changes successfully rolled back.`
+  `Message : ERROR: syntax error at or near "||"`
+- 根因不是 Flyway，是 PostgreSQL 语法：`COMMENT ON … IS` 只接受**字符串常量**，不接受表达式，而本包 10 个迁移里有 **43 处**写成 `'a' || 'b' || 'c'` 的多行拼接。首轮只报 V40 是因为 Flyway 按序执行、第一处即中断（不是"只有 V40 有问题"）。
+- 处置：43 处机器合并成单一字面量 ＋ 5 处形态不同的手工改（`IS '原文' -- 出处注` 这类带行内注释的、以及首段自身跨行的）。**注释文字逐字保留**，只把 `||` 变成字面量内的换行；原来挂在字面量后面的 `-- V7:47 原文逐字保留`／`-- V25:54 原文保留` 一类出处标注移到语句上方，出处信息不丢。改动只落在 10 个迁移文件自身（`git diff --stat`：+136 / −137）。
+- 复验（不等重启）：10 个文件按版本序 `cat` 成一条流，在 `search_path=used_wu1,public` 下 `psql -v ON_ERROR_STOP=1 --single-transaction` 执行、结尾故意 `SELECT 1/0` 强制回滚 → 全序无报错，且该事务内 `used_wu1` 表数就是 **75**，回滚后不留半成品对象。
+- 真落库（只有 web 跑 Flyway）：`Successfully applied 10 migrations to schema "used_wu1", now at version v54`；`flyway_schema_history` 里 V40/41/45/46/47/50/51/52/53/54 **十行全部 `success=true`**，`installed_on` 2026-11-22 22:37:39–40。
+- `FLOORPLAN_PUBLIC_TABLES=75 bash scripts/agent_env.sh check used_wu1` →
+  `表数=75/75   本schema V25+V26=2/2   本schema V5(users)=1   gen_salt(public可解析)=2` → `[通过]`（exit 0）。
+  迁移前同一命令在 67 基准下也通过 ⟹ 本包净增 8 张表，卡面的 73 是基准过期（收口方处理，见 §2.2）。**没有删表、没有改脚本默认值。**
+- `SqlStructureSelfCheck` 随 web 启动实跑：`[SQL 自检] 通过：21 张表的 INSERT 列名与数据库结构一致`，本包 8 张表全部在册，零 WARN/ERROR 级不一致行。
+- `\d` 级实证（`pg_constraint` / `pg_indexes` / `information_schema.columns`，均在 `used_wu1`）：
+  - CHECK 共 21 条落地（按表计：`dealer_licenses` 2、`dealer_auction_memberships` 1、`dealer_compliance_checks` 3、`dealer_score_reviews` 2、`used_config_params` 2、`inspection_certificates` 5、`certificate_custody_events` 4、`vehicle_condition_reports` 2）：`ck_dlic_license_type`（单值 `FURIGUSHO`）、`ck_dlic_status`、`ck_dmem_status`、`ck_dchk_type/result/source`、`ck_dsr_status/score_present`、`ck_ucp_status/value_type`、`ck_cert_status/encumbrance/security_type/predecessor_not_self/status_timestamps`、`ck_cce_event_type/actor_type/encumbrance/check_source`、`ck_vcr_report_type/repair_history`。
+  - `vehicle_units` 上 V40 两条为**允许 NULL** 形：`ck_vu_vehicle_type CHECK (vehicle_type IS NULL OR vehicle_type IN ('NEW_STOCK','USED'))`、`ck_vu_purchase_channel … IN ('OEM','AUCTION','WHOLESALE','TRADE_IN','OTHER')`；V50 的 `ck_vu_mileage_source/mileage_unknown/repair_history/sale_channel` 同批落地。
+  - UNIQUE：表内约束 `uk_dmem_dealer_house_no`；部分唯一索引 `uk_dlic_dealer_type_no`、`uk_dealer_license_active … WHERE status='ACTIVE'`、`uk_dchk_request_no … WHERE request_no IS NOT NULL`、`uk_dsr_idem`、`uk_dsr_pending … WHERE status='PENDING'`、`uk_cert_key`、`uk_cert_active_vin … WHERE status <> ALL('{REISSUED,LOST}')`、`uk_vcr_report_no`、`uk_ucp_active_key` 全部可查到定义。
+  - `version` INTEGER 只出现在 `dealer_score_reviews` / `inspection_certificates` / `used_config_params`（另 5 张按 D04 不建乐观锁列）；8 表的 18 个时间戳列**全部** `timestamp with time zone`（`timestamp without time zone` 实查 0 行），另有 14 个 `date` 列是日历日期（发日/到期日/核查日），不参与时间戳口径；这 8 张表里的 BIGINT **只用于 id 与外键**（实查 15 个 BIGINT 列全是 `id`/`dealer_id`/`certificate_id`/`predecessor_id`/`source_message_id`）。
+  - **本包 8 张表没有金额列**：`dealer_score_reviews.operating_score/stock_quality_score` 是 INTEGER（区间 U-11 未签 ⟹ 不建范围 CHECK），`vehicle_condition_reports.odometer_km` 是 INTEGER（与它要勾稽的 `vehicle_units.mileage` 同型）。"BIGINT 金额"这条判据在 W-U1 不适用，落在 W-U2/W-U3 的表上——按用户指令没有顺手改门槛。
+
+### 11.3 进程与端口（偏移 700，一律 `env -u SERVER__PORT`，起前 `netstat` 证明 878x/18780 零 LISTEN）
+
+| 进程 | 端口 | 结果 |
+|---|---|---|
+| web 单体（闸门关，phase A） | 8780 | `Started FloorplanApplication` 17s |
+| auth-service（两个 phase 各起一次） | 8781 | 就绪 1–2s |
+| credit-service | 8783 | 就绪 1s |
+| gateway（`ROUTE_CORE/AUTH/CREDIT` → 8780/8781/8783） | 18780 | `Started GatewayApplication` 9s |
+| web 单体（`FLOORPLAN_USED_ENABLED=true`，phase B） | 8780 | 就绪 19s |
+
+bank/risk/loan/collateral-reg/release/recon 未起：本包八个端点不经过它们。
+启停＋冒烟写在同一条命令里；跑完按 PID kill，`netstat` 复查 `:(8780|8781|8783|18780) .*LISTENING` 行数 = 0。
+
+### 11.4 冒烟 `scripts/smoke_used_wu1.py`（新建；`smoke-test.py` 一字节未动）
+
+- phase `gateoff`（web 不带 `FLOORPLAN_USED_ENABLED`）：**断言 5 条，失败 0**，`GATEOFF_RC=0`。
+  覆盖"写接口 400 `VALID_001 reason=USED_FEATURE_DISABLED`""读接口同样被拦（P-3 是读写双闸）""被拒的写入没有落库"。
+- phase `full`（闸门开）：**断言 75 条，失败 1**，`FULL_RC=1`。八端点、重放／订正／换证、四类核查、双维候选、准入四态分支、`audit_events` 动作名、`alerts` 工单、V40 CHECK 的 LEGACY 放行与 USED 写入，全部按库状态判定（HTTP 200 只当送达信号）。
+- 唯一红项——**不是本包代码问题，等收口方/裁决**：
+  `[FAIL] gateway: 本包 USED R1 端点经 18780 可达  实得 st=500 code=SYS_001 body={'code':'SYS_001','message':'系统内部错误：No static resource api/dealers/4/admission.'}`
+  网关 `gateway/src/main/resources/application.yml:49-52` 把 `/api/dealers/**` **整段**划给 credit-service，而本包八个端点在 web(core) ⟹ 走网关必达不到（`credit-service` 的 `DealerController` 没有 `{id}/admission` 映射，兜到静态资源处理器再被它的 handler 翻成 500）。
+  D07 `:523` 已登记该冲突并给了两个选项（① 由 credit 实现这些端点，文档标"默认取 ①"；② 换成未占用前缀 `/api/dealer-qualifications/**` 由 core 实现）。改谁属跨包决定，且该 yml 在禁区清单里——本包不动路由、不搬端点、不自造第二条网关规则。功能验证遂按本仓既有做法直连 web 8780（`scripts/smoke_w0.py:119` 记的正是同类事实：`/api/auth/login` 只在 auth-service）。
+- 顺带钉出来的两条口径事实（本轮不改代码，登记给裁决与下游包）：
+  1. `ComplianceCheck.isValidPass()` 要求 `valid_until` 非空 ⟹ D-02（结论有效天数）不签字时，只要调用方不显式传 `validUntil`，四类核查**永远**判 `BLOCKED_COMPLIANCE`，`ADMITTED` 走不到。冒烟的 `R1-4 valid_until 未被硬编码天数填满` ＋ `R1-6 …＝ADMITTED`（显式传 `validUntil`）两条把这件事变成可复现证据。
+  2. `POST /admission/recalculate` 内部 `evaluate(qualification, null, …)` ⟹ 规则 3（`BLOCKED_MEMBERSHIP` / `QUAL_002`）在本包的 HTTP 入口上**永不触发**，它要申请上下文里的 `auctionHouseCode`。这条要测得等 R2/放款闸门接线（属 W-U2/W-U3 联调）。
+- 脚本自身修过 2 处（冒烟脚本，不属交付代码）：`agent_smoke_lib.post()` 没有 `headers` 形参 ⟹ 幂等键改走 `call("POST", …)`；准入投影键是 `admissionState` 而非 `state`。
+- 造数自清：`cleanup()` 后复查 `licenses=0 members=0 checks=0 score_reviews=0 alerts=0 vehicle_units=0 dealers_left(SMOKE-WU1)=0`；`git status --short` 只有本包文件（13 改 + 1 新脚本），`logs/`、`target/` 均在 `.gitignore` 内未入库。
+
