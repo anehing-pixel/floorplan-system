@@ -204,15 +204,31 @@ ltv_policy_bands(policy_id, priority, age_band_min/max, mileage_band_min/max,
    因此示例中 90 带比率须调为 0.42 或兜底调为 0.35 才合法。本行保留为「反面示例」，
    提醒评审：L3 校验会在保存时就拒绝这张表，**必须先改再上线**。 `[待定源 D-06]`
 4. 所有带 `max_ratio ≤ 0.80 < 1.0`，满足 L4；无「落札价全额融资」档位。
+5. **⚠️ 本表与 §4.4 的「唯一命中否则报错」互斥（2026-11-22 D13 §3 G5 / §5.1-A4 登记）**。
+   本表各带是**嵌套包含**关系（20 带 ⊂ 30 带 ⊂ 50 带，80/90 带又与各年龄带交叠），
+   于是绝大多数真实车辆会同时命中多带。反例（可直接验）：车龄 24 月 / 45,000km / `NONE` / 評価点 4.2 / 車検残 12 月
+   → 同时满足 20 带与 30 带 → 按 §4.4 现写法抛 `LTV_002`。
+   这不是「表填错了」，是**两种语义混在一份文档里**：§4.3 读法 1 按「`priority` 小者先命中」（首命中制），
+   §4.4 算法按「命中数必须为 1」（唯一命中制）。二者必须选一个，否则实现方各挑一边，
+   放款比率就会出现「同一辆车两套结论」——这是资损向的口径分裂，不是代码风格问题。
+   `[待定源 D-06]`：分档数值本就要业务签字，**命中语义一并签字**，不要只签数字。
 
 ### 4.4 命中判定算法（`LtvTierResolver`，纯函数）
 
+**两条可选修法（都合法，必须择一，默认取 ② 并显式标记待签）**：
+
+| 方案 | 算法改法 | 优点 | 代价 |
+|---|---|---|---|
+| ① **区间互斥切分** | §4.3 每带下界 = 上一带上界 + 1，各带两两不相交；§4.4 保持 `size > 1 → LTV_002` | 审计最强：一车一档唯一确定，`LTV_002` 是真实的数据异常告警 | 要重写整张表的 9 个带的五个维度，且高维组合下**很难写出既互斥又好读**的带（車検残/評価点交叉） |
+| ② **`priority` 首命中制**（本文默认） | §4.4 改为取 `priority` 最小的命中带；`LTV_002` 只在**同 `priority` 且同时命中**时抛（那才是真歧义） | 现表示例值立刻合法，符合评分矩阵行业惯例，带可写宽 | 「靠顺序从严」的隐含知识必须写进表头，否则后人插带时顺序错一个就静默变率 |
+
 ```
-resolve(input, policy):
-    matched = bands(policy).filter(b -> b.matches(input)).sortBy(priority asc)
-    if matched.size > 1  -> throw LTV_002(命中多带, 明细入 details)     // 不取第一条
-    if matched.size == 1 -> return matched[0]
-    return policy.fallbackBand()                                        // 兜底 + 缺口计数
+resolve(input, policy):                       // 方案 ②（默认待签）
+    matched = bands(policy).filter(b -> b.matches(input))
+    if matched.isEmpty()      -> return policy.fallbackBand()          // 兜底 + 缺口计数
+    top = matched.minBy(priority)
+    if top.countSamePriority > 1 -> throw LTV_002(同序多带, 明细入 details)   // 只有这种才算歧义
+    return top[0]                             // 不同序多带是设计内结果，不报错
 ```
 
 `b.matches(input)` 的维度判定全部为「区间包含 / 集合包含」，**不含任何默认值推断**；
@@ -240,6 +256,48 @@ max_advance = FLOOR( prudent_value × max_ratio )              -- 整数日元�
 （默认各 150,000,000，`[待定源 D-06]`）在放款闸门里拦，而不是改分档表。
 **绝对上限与比率上限的分工要固定**：比率管单台风险，绝对额管集中度风险，混用会让「改一个数」同时影响两件事。
 
+#### 5.1.1 现状链路与切换调用链（2026-11-22 D13 §3 G6 / §5.1-A5 具名，原稿只写公式不写落点）
+
+**现状（实测代码，非推测）**：
+
+| 坐标 | 现状行为 |
+|---|---|
+| `application/.../AdvanceApplicationService.java:115` `ingestVehicles(...)` | 建账时**就地算出放款额**并写进 `vehicle_units`，不是后续再算 |
+| 同文件 `:172` | `ratio = draft.getAdvanceRatio() == null ? defaultAdvanceRatio : draft.getAdvanceRatio()` —— 比率**优先取请求体** |
+| 同文件 `:176-177` | `advanceAmount = invoiceAmount × ratio`，`RoundingMode.HALF_UP`（**向上**，与本文 `FLOOR` 相反） |
+| 同文件 `:97-102` | `floorplan.advance.max-ratio` 默认 **`1.0`**、`default-ratio` 默认 `0.90` |
+| `web/.../VehicleController.java:87` | 请求未给比率时兜 `new BigDecimal("0.90")` |
+| `web/.../dto/ApiRequests.java:79` | `advanceRatio` 是**对外请求字段**，任何人可传 |
+
+> **由此得出一条必须先修的现状缺陷（与 USED 无关，主干就有）**：
+> 现配置下调用方传 `advanceRatio = 1.0` 即可按**发票全额**放款，只被 `max-ratio:1.0` 这道形同虚设的闸拦住。
+> 这与本文 §5.4「无落札价全额融资档位」、L4「`max_ratio < 1.0`」直接冲突，
+> 也正是 AGENTS.md §12「用可配置参数放宽安全策略」的同一形状（Q21 的 `relaxedDealers` 是它的姊妹）。
+> **建议处置（属技术修复，不需业务签字，但改动落在主干 `application`/`web`，需与在做的开发会话协调）**：
+> USED 产品线的比率**一律不接受请求体传入**，由 `LtvTierResolver` 单点产出；
+> 主干 LEGACY 线是否收紧 `max-ratio` 默认值 → `[待定源]`，**本文不擅自改主干行为**，只登记。
+
+**USED 域必须打通的具名调用链（缺任一环即为「契约写了、没人调」的死代码，AGENTS §12 反模式第 2 条）**：
+
+```
+1  VehicleValuationQueryContract.getActiveByVin(vin)            ← 由建账用例调用，不是由报表调用
+     └─ 无 ACTIVE 未过期 ADVANCE_BASE 估值 → G3 抛 VALU_001/VALU_002，不产生任何写入
+2  LtvTierResolver.resolve(inputs, policy)                      ← 纯函数，输入取自估值快照的 inputs
+     └─ 命中（含兜底）得到 max_ratio / policy_code / policy_version
+3  UsedAdvanceCeilingCalculator.calcUsedAdvanceCeiling(prudent_value, max_ratio)
+     └─ FLOOR 向下取整；本文原稿只写了这个公式，没写谁调它 → 现补明：**唯一调用方 = 第 4 步**
+4  AdvanceApplicationService.ingestVehicles(...) 内 USED 分支
+     └─ 用 3 的结果替代 :172-177 的 invoiceAmount × 请求体比率，并写
+        prudent_value / ltv_ratio_snapshot / ltv_policy_code / ltv_policy_version / valuation_id
+        （§5.2 五列同源一次写入，禁止两处各算）
+5  申请额 ≤ max_advance 的校验放在 G5，与 3 同一次判定内完成，不在前端做
+```
+
+**验收口径**（D11 必须逐条有断言，否则本链路视为未交付）：
+① 传 `advanceRatio=1.0` + USED 产品线 → 该字段被忽略且记入 `details.ignored_fields[]`，放款额仍 = `FLOOR(prudent_value×max_ratio)`；
+② 无有效估值 → 建账失败且 `vehicle_units` 无新行（不是「建成 0 额」）；
+③ `calcUsedAdvanceCeiling` 有 ≥1 个生产调用方（编译期可查引用数），单测绿不算交付。
+
 ### 5.2 落库与快照
 
 | 字段 | 写入时机 | 是否可变 |
@@ -261,7 +319,8 @@ G1 admission_state = ADMITTED                     → QUAL_001
 G2 auction 场次在该车商 memberships 内且 ACTIVE      → QUAL_002
 G3 存在 ACTIVE 且未过期的 ADVANCE_BASE 估值          → VALU_001 / VALU_002
 G4 primary_source ≠ INTERNAL_DEGRADED              → VALU_003
-G5 LTV 唯一命中 + 申请额 ≤ max_advance             → LTV_002 / LTV_001
+G5 LTV 命中（分档语义按 §4.3-⑤/§4.4 择一方案，两者判定结果都必须唯一可复现）
+   + 申请额 ≤ max_advance             → LTV_002 / LTV_001
 G6 車検残存 ≥ 3 月                                  → CERT_005
 G7 权属核查 conclusion ≠ CONFLICTED                 → GUARANTEE_001 / VEHICLE_005
 G8 集中度与额度 (dealer 比率/绝对额/冻结/可用额)      → CREDIT_001 / CREDIT_002 / CREDIT_003

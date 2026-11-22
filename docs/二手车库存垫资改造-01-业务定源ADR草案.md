@@ -118,7 +118,7 @@
 | 原裁决 | `外部集成接口文档:90-100,249`、`ADR:77`、`ADR-Q27:96`：「起步 MANUAL 无外部 WMS，人工路径是长期一等公民」 |
 | **USED 域新裁决** | 目标业务要求「还款后**通知**拍卖场/监管仓放车」，**API 通道为 P0**；人工路径保留但**降级为外部不可用时的兜底**，且审计上必须与 partner 回执严格区分、不得冒充 |
 | 反转理由 | 认知反转 C：放车是跨机构物理动作，不是内部状态标记。需求书 R7.3 要求 `delivery_channel` 真正参与路由（现状 `ReleaseApplicationService:83,101` 无条件调 Manual，`dispatch()` 只打 2 条 `log.info`） |
-| 影响面 | 新增 `external-api` 进程（18090）+ `integration` schema 五表 + ADR009 从 Proposed 转 Accepted；`ApiReleaseChannel` 实现（P0）、`Portal`/`Mq`（P1）；R11 全部条款；D02 集成架构整章 |
+| 影响面 | 新增 `external-api` 进程（18090）+ `integration` schema 六表（D04 §4.6 `partner_credentials` 为第六张）+ 角色授权 + ADR009 从 Proposed 转 Accepted；`ApiReleaseChannel` 实现（P0）、`Portal`/`Mq`（P1）；R11 全部条款；D02 集成架构整章 |
 | 采纳默认值 | `floorplan.used.release.channel=API` `[待定源 D-04]`；`manual-fallback.enabled=true` |
 | **前置硬条件** | D-04 接口现实调研未回收前，本条**只能实现到「通道抽象 + 挡板 partner」**，不得宣称已接通真实拍卖场/WMS |
 | 签字 | 业务 ☐＿＿　架构 ☐＿＿　运维 ☐＿＿ |

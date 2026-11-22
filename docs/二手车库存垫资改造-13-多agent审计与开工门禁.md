@@ -1,0 +1,623 @@
+# 二手车库存垫资改造 · D13 多 agent 纸面审计汇总与开工门禁
+
+> 上游：D12（包定义与写入集）、D11（断言与门禁）、D00/D02/D04/D06/D07/D08/D09/D10（被审对象）、
+> `docs/AGENT_TASK-USED-多agent派发记录.md`（派发表、共同纪律、隔离实测）。
+> **本文是审计结论，不是新设计**：不改口径、不加需求、不写代码。所有条目都带坐标，
+> 能在 D00–D12 里逐条落回去；落不回去的已经写进 §5 的修正分配表。
+
+---
+
+## 0. 文档控制
+
+| 项 | 内容 |
+|---|---|
+| 编号 | DESIGN-USED-FLOORPLAN-D13 |
+| 版本 | v1.0（审计轮结论） |
+| 审计轮性质 | **只读纸面审计**：零代码、零 `.sql`、零 schema 写入；「开发暂缓」在本轮**未解除** |
+| 输入 | 7 路独立会话（6 个开发包 + 1 个跨包测试审计），共 **126 条**原始条目 |
+| 基线 | 审代码坐标基于 `master`；起分支时点仍按查询取最新 `base-*`，**本文不写死标签名**（D12 §4.2） |
+| 产出 | ① S0 共因归并（§3）② 按包清单（§4）③ 修正分配（§5）④ PM 复测证据（§6）⑤ 开工门禁（§7） |
+| 原文可回溯 | 每路会话 ID 见 §1.2 表尾；本文对 S0/S1 逐条收录，S2/S3 按包压缩成段 |
+| 分级口径 | 沿用 D11 §10 的 S0–S4，定义见 §2；审计方自报级别与 PM 复核级别**并列写出**，不覆盖 |
+
+---
+
+## 1. 结论摘要
+
+### 1.1 五句话
+
+1. **按 D12 现状开工，第一天就炸的不是业务逻辑，是「端点落在哪个服务」**：7 路里有 4 路独立指认同一件事——
+   USED 的 61 个内部端点没有一条定向路由，而网关已有 `/api/dealers/**`→credit、`/api/disposals/**`→risk，
+   D12 却把这些端点分给 `web`(core)。`/api/payments` 那起事故（AGENTS §12 反模式第 3 条）会在 W-U1/W-U4 重演。
+2. **唯一一条资损级缺陷是发布端去重键**：D00 §10.2 有 6 个事件的 `aggregate_key` 是裸 `vin`，
+   而 `JdbcOutboxPublisher` 的 `NOT EXISTS` 判据含 `SENT` 行——同一台车的第二次质押、第二次重估、
+   第二次结清会被**永久静默吞掉**。这条同时违反 AGENTS §6.3 的明文禁令，不是口径问题，是写漏了。
+3. **验收体系目前是空头账**：D11 的红线断言按自身分组逐条加总是 41 条（文中写「合计 35」），
+   其中今天真能挨到网关、期望值可从现有数据算出、且不依赖未签字口径的**只有 5 条**；
+   补齐路由归属与车龄/里程基线后最多 10 条。§9「禁止的绿色」里 A10.2 自己就是空绿。
+4. **两份文档在造不存在的部署单元**：`certificate-reg-service` 与 `used-vehicle-service` **只在 D12 出现**，
+   D00/D02 已明文裁决复用 `collateral-reg-service` 与留在 core（ADR-U-02/03）；
+   前者的基端口 8086 与现役 `collateral-reg-service` 直接撞，后者会催生第二个幽灵服务。
+5. **表数阶梯算错了**：5 张 `integration` 表不在 `public`，`agent_env.sh check` 也数不到它们。
+   按 D04 §2.1 的新建表分布重算，主干终态是 **public 91 + integration 5**，不是 96；
+   W-U3 的门槛 89 在任何分支 schema 下都不可达。
+
+### 1.2 七路派发的回收情况
+
+| 路 | 模型 | 条目 | S0 | 收口结论（原文压缩） | 会话 ID |
+|---|---|---|---|---|---|
+| TST 跨包审 D11 | MiniMax-M3.1-Flash | 20 | 7 | 41 条断言现在能执行的 **5 条 ≈ 12%**；补齐路由与车龄/里程后 10 条 ≈ 24% | `200c6b0e-2658-5727-a896-c6d77e3ca129` |
+| W-U0 地基/号段 | GPT-5.3 | 20 | 0（自报全 S1 起） | 最先炸交付①：8086 撞端口，启动当天失败；更险是交付④：vin 锚点吞事件。**响的是端口，哑的是资损** | `3f577b63-3797-5ba9-ade8-358b300a0663` |
+| W-U1 车辆+资质 | DeepSeek-V4-Pro | 20 | 3 | 开工第一件事卡在 R1/R2 端点物理落点：D07 无 R2 分节 + 网关已把 `/api/dealers/**` 固定给 credit → 第一天写出的 Controller 就是 404 或死代码 | `6edb0757-35fc-5804-ad69-04521de7a2c0` |
+| W-U2 估值+拍卖 | GLM-5.3 | 10 | 4 | A6 全组 11 条里现在可实现的 3 条 + 1 条待补输入；分档表与唯一命中互斥是根因 | `d1096575-bce5-5e40-a49c-9a964b4b0438` |
+| W-U3 DMZ 集成 | Kimi-K3.1-Pro | 18 | 7 | INV-1..5 映射 5/5 不缺条，但 **INV-3 缺真实网络分区、INV-5 缺 W-U4 落点，2 条现在做不了**；最坏的洞是入站重放无防线 | `7637f33c-6b55-50db-a473-306503b62b5d` |
+| W-U4 凭证+WMS+闭环 | Qwen3.8-Max | 20 | 5 | **E2E-0 跑不绿**：步 12/16 无路由、步 11/15 无 `settle_seq` 且回补额取 `matchedAmount`、隔离 schema 只有 72 表不够 94 | `96afbb05-50f3-5a62-a0c0-ce9048c0883e` |
+| W-U5 处置+通知+报表 | Qwen3.7-Plus | 待回收 | — | 报告仍在生成，本文 §4.6 留位；其主题（冲抵顺序、报表取数、SOD、通知落库）已被 TST/W-U4 交叉覆盖 | `685d4cfb-139b-51ba-a920-6ca772e022ea` |
+
+> 条目数是各会话自报的清单长度，不是本文收录数。S0 计数按审计方自报级别；
+> W-U0 把「资损级」自评为 S1，PM 按后果在 §3 G2 提到 S0 并标明理由。
+
+---
+
+## 2. 分级口径（沿用 D11 §10，此处只补判定动作）
+
+| 级别 | 判定 | 本文要求的动作 |
+|---|---|---|
+| **S0** | 按现状开工**必然**产出错误结果：资损、死锁式吞事件、端点 404、验收判据不可达、安全边界破口 | 关闭前不许起对应包（§7 门禁）；能改文档就本轮改（§5.1） |
+| **S1** | 写得出但验不了 / 契约缺一条腿 / 两处文档互相矛盾但不至于炸 | 本轮登记 + 指派归属包，进 D12 或 D11 修订 |
+| **S2** | 编号漂移、串包、命名不一、坐标写歪 | 登记，收口时批量清 |
+| **S3** | 卫生类（重复行、缺注释、引用风格） | 登记即可 |
+| **S4** | 建议增强 | 本文不收录 |
+
+**PM 复核原则**：审计方级别一律保留；只有当后果是「静默丢数据」或「已裁决硬策略失去载体」时，
+PM 才提级，并在条目里写 `PM↑`。本轮共提级 2 条（G2、G13）。
+
+---
+
+## 3. S0 共因归并（15 组）
+
+> 每组给：现象 → 交叉指认 → 证据坐标 → 修正动作 → 归属 → 是否需口径签字。
+> 「交叉指认」是这轮审计最有价值的部分：同一件事被两路以上独立发现，说明它不是误读。
+
+### 3.0 回灌状态一览（2026-11-22 收尾时补）
+
+**本文 §4 各包清单里的坐标是「审计时点」的行号**，本轮 A1–A10 回灌之后**行号已经整体位移**
+（D00 §10.2、D02 §5.4/§6.1、D04 §2.1/§4/§5/§6/§10、D05 §5、D07 §2.3/§5/§7、D08 §4/§5、
+D11 §8/§9/§13、D12 §2/§3/§4/§9 都增了行）。
+**引用一律用节号 + 原文句子定位，不要用本表的行号**；需要行号时现查 `grep -n`。
+这是 AGENTS.md「文档里不许写死会过期的数字」在同源文档互引上的版本。
+
+| 组 | 回灌动作 | 状态 | 未了结部分 |
+|---|---|---|---|
+| G1 端点落点×路由 | A1 = 新增 D07 **§7.0** 对照表 | ✅ 已回灌 | 表内 5 行标 ⚠️ 的归属（dealers / releases vs release-orders / release-orders 前缀 / partners 属主 / liquidation-statements 属主）= **各包开工门禁**；网关 yml 本体未动（禁区 R1） |
+| G2 裸 `vin` 去重键 | A2 = D00 §10.2 键列全改 per-occurrence + D02 §12 R-3 + D12 F3 | ✅ 已回灌 | `aggregate_key` 逐事件键名要与 W0 框架 owner 复核一次（不改框架代码，只复核语义） |
+| G3 payload 必含 `vin` | — | ⛔ **未回灌** | 框架禁区，须 W0 裁决豁免清单或占位规则（R2）；本轮只在 D00/D07 留了引用，没改 `JsonPayloadReader` 口径 |
+| G4 幽灵部署单元 | A3 = D12 W-U0/§2 F5/§3 W-U1·W-U2/§9 M-U0 | ✅ 已回灌 | 若用户仍想要独立 used 服务 = **D-03** 待签 |
+| G5 LTV 分档×唯一命中 | A4 = D08 §4.3-⑤ 警示 + §4.4 两方案（默认 ② 首命中） | ✅ 已回灌 | 带边界数值与「命中语义」一并属 **D-06/U-02** 待签；本文只把「二选一」写清，未替业务选数值 |
+| G6 放款基准切换无调用方 | A5 = D08 新增 §5.1.1（现状链路表 + 五步具名调用链 + 三条验收口径） | ✅ 已回灌 | `floorplan.advance.max-ratio` 默认 `1.0` 是否收紧 = **主干行为，未擅自改**，已登记为待裁决 |
+| G7 E2E-0 契约缺口 | A8′ = D07 §7.6 补 settle 行 + `settle_seq` 定源；D04 §5.2 补 `vehicle_units.settle_seq`（V67） | ✅ 已回灌 | 冲抵顺序 **X-1** 仍未签（§8） |
+| G8 Q11 无承载列 | D04 §5.2 V67 补 `lien_extinguished_at`；D07 §7.6 补 dispatch 重校验清单 | ✅ 已回灌 | 选项 ②（改指 `lien_releases.released_at`）作为备选保留在文中，未删 |
+| G9 DMZ 地基 | A8 = D07 §2.3 唯一规范串签定义（+分隔符/+`X-Key-Version`/+`QUERY` 段/统一 hex）；D02 §5.4 与 §5.6 同步；D02 §6.1 撤销 `external-api` 装配 W0 bean；D07 §5 撤销 `ReleaseOrderCommandContract`；D04 §4.1 补 GRANT/sequence；D04 新增 §4.6 `partner_credentials`；D04 §4.3 补「验签失败不可领取」CHECK；D04 §6 步骤 4+ 补 FK+唯一索引+对账 | ✅ 已回灌（本轮最重的一处） | 生产角色/网络分区仍要 DBA 与网络团队；`SIGNATURE_FAILED` 新终态是否并入 `MessageStatus` 枚举值域属技术裁决，本文以 CHECK 方式实现（未加枚举值），**待 W-U3 确认取哪种** |
+| G10 表数阶梯 | A6 = D04 §2.1 分列 public/integration（73/84/84/89/91 + integration 6）；D12 §4.1 门槛与代码注释同步；D04 V66 计数与 §3.17 对齐 | ✅ 已回灌 | `agent_env.sh` 本体未动（禁区 R3）；其内置提示文案仍写着旧阶梯，见 §5.2 R3 的请求 |
+| G11 10 态×36 组 | D03 §3.3 补「落地形态」表（改哪个枚举、新建 `ReleaseStateMachineUsed`、实测 `status VARCHAR(24)` 无 CHECK 故不需迁移） | ✅ 已回灌 | 两枚同名 `ReleaseStatus`（bank 3 值 / release 6 值）的域名单列尚未进 D00 §8，属 W-U0 登记项 |
+| G12 验收账本 | A7 = D11 §0 断言预算去死数（实测 201/11 个 `ok(` 调用点并说明调用点≠条数）；§13 删「合计 35」（逐组实加 = 41）；§8 P1–P20 补归属表；§9.1 release 脚本 26 → ≥45；A10 组归收口方 | ✅ 已回灌 | E2E-0 十六步的**主责包**仍需收口方指定（拆给四包 or 全归 W-U4） |
+| G13 权属多源缺回填 | D04 §5.1 撤销 `vehicle_units.authoritative_source_type`；D05 那一步改「读批次表投影」；D04 §10 补 V54 回填规则（含「不得凭空造 `REGISTERED`」） | ✅ 已回灌 | 回填 SQL 的实际取值分布需 DBA 在真库跑一次统计（本轮零代码，未查数） |
+| G14 事件词表两套 | D12 §3 头部新增词表纪律 + 三类处置；D12 各包事件行改用冻结名并加 † | ✅ 已回灌 | 12 个新事件名的四元组登记 = W-U0 收口事项；`VEHICLE_RELEASED` 与 `RELEASE_ORDER_RECEIPTED`/`VEHICLE_SETTLED` 的关系需先证明不是第三个体 |
+| G15 号段/表数串包 | A3 附带：D12 §9 迁移列按 D04 §2 整表重排（V48 缓冲号移出、V57/V58 归 W-U2、V67 归 W-U4、V75–V78 归 W-U5）；`registration_applications` 从 W-U1 移出（V69→W-U4）；里程列缺失项见下 | ✅ 已回灌 | 「D04 §2 是唯一分配源」这条规矩要不要写进 AGENTS.md，由收口方定 |
+| G15 附带 · 里程列 + R1.1 档案 | D04 §5.1 新增「里程的唯一落点」段（值列 = V1 既有 `vehicle_units.mileage`，**不新增列**；`UNKNOWN ⟺ mileage IS NULL` 的 CHECK；`auction_lots.mileage_km` / `*.odometer_km` / `vehicle_units.mileage` 三名归属与「以主数据为准、不静默覆盖」）；D00 §8.1 `MileageSource` 补 `UNKNOWN`（**原稿缺这个值，D08 §4.1 一直在引用不存在的枚举**）；D07 §3.1 校验加第 9 条「里程缺省不猜」；D04 §5.2 `dealers`(V46) 补 R1.1 档案标量列 | ✅ 已回灌 | 两处**刻意不落**已写明：「经营年限」V1 已有 `dealers.business_years`，不重复加列；「既往违约记录」是 1:N 明细且无验收要点 → 不建表、不塞摘要列，转为 §8 **U-10** 待业务定源 |
+
+**一句话**：15 组里 **14 组已回灌**、**1 组属框架禁区未动**（G3 payload 必含 `vin`，须 W0 裁决）。
+G9 是改动量最大的一组，因为它的每一条都落在「DMZ 能不能安全跑起来」的前置上。
+
+
+### G1 · 端点落点 × 网关路由：61 个 USED 端点没有一条定向路由
+
+- **交叉指认**：TST-02 / TST-03（S0）、WU0-07 / WU0-08（S1）、WU1-02（S0）、WU4-03（S1）
+- **证据**：`gateway/src/main/resources/application.yml:25-98`（PM 复测：8 条定向前缀 + `Path=/api/**` → core 兜底）；
+  `:52` `/api/dealers/**`→credit-service(8083)、`:60` `/api/disposals/**`→risk-service(8084)、
+  `:86` `/api/releases/**`→release-service；D07 §7 除 §7.1 外不标服务归属，D12 §3 却把端点分给 6 个服务
+- **后果**：`/api/release-orders/**`、`/api/valuations/**`、`/api/certificates/**`、`/api/wms/**`、
+  `/api/partners*`、`/api/ltv-policies*`、`/api/auction-lots*` 经网关全落 core 兜底 → 404；
+  资质类端点按 D12 写进 `web` 会被 credit-service 接走 → 也是 404
+- **修正**：① D07 每节端点表增「服务归属」列（本轮已做，见 §5.1-A1）；② 出一张
+  **路径前缀 ↔ 服务 ↔ 网关谓词** 对照表作为 W-U0 交付物；③ 网关 yml 是共享禁区，**只能由收口方改**（§5.2-R1）
+- **需签字**：技术裁决，不需；但依赖 **D-03**（是否建 used 专属服务）
+
+### G2 · 发布端去重键用裸 `vin`：同车第二次事件被永久吞（**PM↑ 资损级**）
+
+- **交叉指认**：WU0-04、WU2-07、WU3-11、WU4-02（部分）
+- **证据**：D00 §10.2（`D00:434-442`，PM 复测：`CERTIFICATE_PLEDGED`/`VALUATION_REFRESHED`/`LTV_BREACH_DETECTED`/
+  `WMS_INBOUND_CONFIRMED`/`VEHICLE_SETTLED`/`REGISTRATION_DISCHARGED` 六行键 = `vin`，`CREDIT_LINE_RESTORED` = `credit_line_id`）；
+  `JdbcOutboxPublisher.java:41-48`（`WHERE NOT EXISTS` 判据含 `PENDING/SENT`）；AGENTS §6.3 明文「禁止用 `vin`」
+- **后果**：同一 VIN 的第二次质押 / 第二次重估 / 第二次结清 / 抹消回执，**插入被静默丢弃且不可补发**；
+  同一条额度线的第二次回补同理。这不是「去重太松」，是**吃掉合法业务事件**
+- **修正**：D00 §10.2 键改 per-occurrence 业务主键（本轮已回灌，§5.1-A2）；D02 §6.2/D07 §6 同步
+- **需签字**：无。这是把文档改回与已生效硬规矩一致
+
+### G3 · 发布端硬性要求 payload 含 `vin`，非车辆级事件根本发不出去
+
+- **交叉指认**：WU0-05
+- **证据**：`common/src/main/java/com/company/floorplan/common/event/JsonPayloadReader.java:82-87`
+  （PM 复测：`requireVinAndTraceId` 缺 `vin` 直接抛 `IllegalArgumentException`）；D12 F2 冻结框架类
+- **后果**：`DEALER_ADMISSION_STATE_CHANGED`（车商级）、`CREDIT_LINE_RESTORED`（额度线级）按现设计发不出去；
+  而 USED 侧无权改 `common`/`infrastructure`
+- **修正**：必须由框架 owner（W0）裁决「豁免清单」或「非车辆级事件 vin 占位规则」——**两条路后果不同**：
+  豁免要改框架，占位会让 `vin` 字段失去定位能力。本文不选，列为开工前必裁（§5.2-R2、§7 G3）
+- **需签字**：技术裁决，但**必须 W0 窗口 + 用户点头**（框架类是禁区）
+
+### G4 · 两个幽灵部署单元 + 端口撞现役
+
+- **交叉指认**：WU0-01、WU0-02、WU1-03、WU0-19
+- **证据**（PM 复测）：`certificate-reg-service` 仅出现在 D12（`:76`/`:90`/`:91`/`:212`/`:393`），
+  D00:135 与 D02:129 明文归 `collateral-reg-service`(8086)；`collateral-reg-service/src/main/resources/application.yml:2` = `8086`，
+  且该服务已有 13 个 Java 文件（含 `CollateralRegController`、`JdbcCollateralRegistrationRepository`）；
+  `used-vehicle-service` 仅出现在 D12（`:103`/`:118`），D00:633 与 D02:653 = ADR-U-03「估值/落札留在 core」
+- **后果**：W-U0 若照 D12 建 `certificate-reg-service`，基端口 8086 与现役进程**启动即冲突**（任何偏移下同名服务仍撞路由）；
+  D12 W-U4「collateral-reg 转正：首个 Controller」不成立 → 会重复建一套控制器
+- **修正**：D12 本轮回灌删两个幽灵服务、把「首个 Controller」改「扩展」（§5.1-A3）
+- **需签字**：无（对齐既有 ADR）；但若用户想真建独立 used 服务，那是 **D-03**
+
+### G5 · D08 §4.3 示例分档与 §4.4 唯一命中互斥，A6 组数值不可复现
+
+- **交叉指认**：WU2-01、WU2-02、TST-04、TST-08
+- **证据**：`D08 §4.3`（PM 复算：带 20〔0–36 月 / 0–50,000km / NONE,MINOR / ≥4.0 / ≥6〕是带 30
+  〔0–60 / 0–80,000 / NONE,MINOR / ≥3.5 / ≥6〕的**严格子集**；反例车「24 月 / 45,000km / NONE / 4.2 / 車検 12」
+  同时命中 20 与 30）↔ `D08 §4.4`（`matched.size > 1 → throw LTV_002`，不取第一条）；
+  D11 §2 E2E-0 数据基线缺「車龄(月)」与「里程(km)」两个命中必需输入
+- **后果**：按示例表，`resolve()` 对几乎所有正常车**恒抛 `LTV_002`**；A6.1/A6.2 的 1,120,000 / 800,000
+  等期望值算不出来（按 priority 10 先命中会是 1,280,000）
+- **修正**：① 分档表改为**互斥带**（高优先级带排除低带条件，或维度逐带收窄并声明「首个命中即返回」）；
+  ② E2E-0 基线补 `first_registered_on` + `mileage` + 里程来源；③ TST-08 指出的引用错位（D11 §2 步 10 误引 D08 §7）改指 §5.1/§6.2
+- **需签字**：**结构性修法不需**（唯一命中是 L1 既定红线）；**具体带边界数值需 D-06/U-02**
+
+### G6 · 放款基准切换没有指名调用方
+
+- **交叉指认**：WU2-03（S0）
+- **证据**：`AdvanceApplicationService.java:172-177`（PM 抽查 L3 坐标确认存在）、`:243-259`、`:447-502`；
+  LEGACY 金额在**建账时** `ingestVehicles` 用**可配置 ratio + HALF_UP** 写入 `advance_amount`（不是 D08 写的「×0.90 硬编码」），
+  `applyAdvance` 请求体不含金额，`stageAdvance` 只回读旧列 → `calcUsedAdvanceCeiling` 可能只被只读 `ceilingFor` 调用
+- **后果**：这正是 AGENTS §12「写了 Feign 契约就算通了」的同型坑：**新公式实现了但没人调**，
+  USED 放款仍按 LEGACY 基准出账
+- **修正**：D08 §5.1 的「四步」必须写成**具名调用链**（谁在哪个事务里调用、旧路径何时下线），
+  D12 W-U2 门禁增一条断言「`calcUsedAdvanceCeiling` 有生产调用方 + 网关侧期望值变化」
+- **需签字**：切换本身不需；切换后的**数值参数**需 D-06
+
+### G7 · E2E-0 的契约缺口：结清端点不存在、`settle_seq` 零定义、两条回补路径都点火
+
+- **交叉指认**：WU4-01、WU4-05、WU4-12、WU4-13、WU4-14、TST-05、WU2-04
+- **证据**：D07 §7.6 六个放车端点里**没有台账结清端点**（A2.1–A2.4 无对象可打）；
+  D09 §8.2 / D06 §8.1、§8.4 的 `settle_seq` 无定义且现有唯一键是 `match_id`（`V17:121-149`）；
+  D06 §8.1 与 D09 §8.1 两条结清路径都会触发回补；
+  `bank-service/.../ReleaseOrchestrator.java:96,109-110`（PM 复测：回补额取 `match.matchedAmount()`，
+  且注释明写「存根阶段 `availableAfter = before`，不能冒充已到账」）
+- **后果**：E2E-0 步 11/15 无法判定「谁回补、回补多少、回补几次」；AGENTS §9 缺口 3（回款匹配后不回补）在新设计上仍未闭合
+- **修正**：D07 §7.6 补 `POST /api/release-orders/{no}/settle` 或写明 LEGACY 等价构造；
+  D09 定 `settle_seq` 语义 + 部分唯一索引；一车一结清只允许一条回补路径；回补额改为 `advance_amount` 口径
+- **需签字**：`settle_seq` 构造不需；**冲抵顺序需**（见 §8 X-1）
+
+### G8 · Q11 两段式解押没有承载列，dispatch 入口对第一段零防护
+
+- **交叉指认**：WU4-04、WU4-05、TST-17
+- **证据**：D09 §11 链 2 要读 `release_orders.lien_extinguished_at`，而 D04 §5.2 的 V67 加列清单
+  （`inspection_certificate_no`/`wms_warehouse_code`/`auction_lot_id`/`acked_at`/`expired_at`/`partial_at`/`last_inbound_message_id`）
+  **没有这一列**；D06 §7 UC-R7-2 明言 dispatch 不重校验 → 对 `lien_extinguished_at IS NULL` 的 `PENDING_RELEASE`
+  执行 `POST /api/release-orders/{no}/dispatch` 现设计**会放行到 `SENT`**
+- **后果**：已裁决的 Q11「先解押后放车」在设计与可证伪层面双双失去载体——**PM↑ 这是硬策略失去载体**
+- **修正**：二选一并写进 D04 §5.2 + D09 §6：① V67 补 `lien_extinguished_at TIMESTAMPTZ`；
+  ② 链 2 改指已存在的 `lien_releases.released_at`（`V17:87-113` 注释已明写「RELEASED 指实体权利消灭，不等于登记簿已抹消」）；
+  同时 dispatch 守卫加「第一段已完成」+ 新增断言「未解押 dispatch → 422 `RELS_002` 且状态不变」
+- **需签字**：选 ①/② 属技术裁决；但承载列语义要 ADR-Q27/ADR-010 复核
+
+### G9 · DMZ 集成地基六处破口（协议、凭证、授权、领取、伪证、密码）
+
+- **交叉指认**：WU3-01、WU3-04、WU3-07、WU3-08、WU3-12、WU3-14；WU0-06
+- **证据**：
+  ① canonical 串签原文 `PATH` 后缺换行、整串遗漏 `X-Key-Version`、GET 另立第三套规则（D07 §2.3:75-90 ↔ D02 §5.4:313-326）；
+  ② `partners` 只有一个 `secret_ref` + 一个 `key_version` + 一个宽限时间，无法表达新旧两版与 `RETIRED`；
+  派发记录所称 `partner_credentials` 表**全设计集无规格**（WU3-04）；
+  ③ 入站轮询条件只有 `status/attempts`，**没有 `signature_ok=true`**，索引覆盖 `RECEIVED/FAILED` →
+  验签失败行会被核心领取，直接违反 A5.7（WU3-07）；
+  ④ `PARTNER_RECEIPT` 的 DB 约束只有「非空 ⇒ `inbound_message_id` 非空」，任意伪造 ID/失败消息/他端点消息都能满足，
+  且无 FK → D11 要求的「删除证据行被 RESTRICT」也实现不了（WU3-08）；
+  ⑤ V70 只授 `USAGE ON SCHEMA integration`，V71–V74 无表 DML/sequence 授权 → `floorplan_dmz` **连自己的集成表都读写不了**（WU3-12）；
+  ⑥ 迁移规格把 `floorplan_dmz` 密码明文写成 `floorplan`（WU3-14，违反 INV-4 与「密钥不落代码」）；
+  ⑦ D02 §6.1 末行要求 `external-api` `@Import` W0 两个 Bean（在 infrastructure，传递依赖 domain）→ INV-2 证伪必失败，
+  且 dmz 凭证会去轮询 `public.outbox_events` 被拒（WU0-06）
+- **后果**：A5 全组 + INV-1/2/4 现在**一条也做不成**；「回执是唯一合法证据来源」这条裁决可以在请求体层面被伪造
+- **修正**：D04 §4 补 GRANT 清单与 sequence；新增 `SIGNATURE_FAILED` 不可领取终态；领取 SQL 与部分索引强制
+  `signature_ok=true`；补证据 FK + 消费事务校验（签名/类型/partner/business_ref 一致）；
+  凭证版本化字段进 D04；密码改部署注入；删除 `external-api` 对 W0 Bean 与内网 Feign 的依赖（WU3-06，撞 INV-3）
+- **需签字**：全部为技术裁决；生产角色/网络分区需 DBA 与网络团队（D12 W-U3 外部协作行）
+
+### G10 · 表数阶梯算错 + `check` 语义与它不匹配 + 并行期过不了网关
+
+- **交叉指认**：TST-11、TST-12、WU0-09、WU3-13、WU4-20
+- **证据**（PM 复测 `scripts/agent_env.sh:112-128`）：`check` 数的是**目标 schema 内** `BASE TABLE`，
+  且 `integration` schema 永远不计入；`env`（`:88-103`）只导出 `SMOKE_WEB/AUTH/LOAN/CREDIT` + 3 个 `CLIENT_*`，
+  **没有网关地址、没有 external-api/release/risk/bank/recon/collateral-reg 偏移**；`run-microservices.sh` 端口写死、smoke 只跑 `smoke-test.py`；
+  `dc64865` 已给 `check` 加「实际 > 基准多半是主干涨了」的判因提示，但语义仍不匹配
+- **算术修正**（WU3-13，PM 复算认同）：USED 新建 29 张表里 5 张在 `integration`，故主干终态 =
+  **public 67 + 24 = 91，另 integration 5**；阶梯应为 W-U1 73 / W-U2 84 / **W-U3 84 + integration 5** /
+  W-U4 89 / W-U5 91。**89 与 96 两个数按现口径永不可达**
+- **后果**：门槛挂了会被误诊成「隔离坏了」，进而有人 `drop` 掉正常 schema 或改脚本默认值 67；
+  并行期「从网关 18080 打通」物理上只有一份网关能跑 → D11 §9.4 ⑥ 与 §9.2 ① 的写法在并行期不可执行
+- **修正**：D04 §2.1 与 D12 §4.1 分「主干累计」与「分支增量」两列 + `integration` 单列计数；
+  分支门槛写 `67 + 本分支实际 public 迁移`；`agent_env.sh`（owner=W0）与 `run-microservices.sh`（禁区）只能提需求（§5.2）
+- **需签字**：无
+
+### G11 · 10 态状态机与 6×6 白名单测试结构性互斥
+
+- **交叉指认**：WU4-08（S0）、WU4-09、WU4-10
+- **证据**：`ReleaseStateMachineTest.java:47-53`（`EXPECTED_ALLOWED` 是 6 键 `Map.of`）、`:101-115`
+  （逐格断言 `canTransit == 期望` 且 `assertEquals(7, legalCount)`）；`ReleaseStateMachine.java:43-57`；
+  D12 §4 把该白名单列为**不许改**禁区 → USED 加任何一条新边，这条 LEGACY 测试必红
+- **后果**：W-U4 无论改状态机还是改测试，都违反自己的写入集；D09 §5.1/§5.2 ↔ D03 §3.3 ↔ D05 §5.4 三份十态变体还互相冲突
+  （`EXPIRED` 终态与 `PARTIAL` 出边在 D09 内部自相矛盾；D09 丢了 `CONFIRMED→CANCELLED`）
+- **修正**：新建 `ReleaseStateMachineUsed` + 独立测试类（LEGACY 36 组原样保留），
+  由 D03 §7 出 **10×10 真值表**作为唯一状态机定源，D09/D05 降为视图
+- **需签字**：无
+
+### G12 · 验收账本的算术与空绿
+
+- **交叉指认**：TST-01、TST-13、TST-14、TST-15、TST-16、TST-20、WU0-10、WU0-12、WU1-11、WU1-12
+- **证据**：D11:403 分组数 `5+5+2+2+7+5+5+3+2+5 = 41`，同句写「合计 35」（PM 复测算术）；
+  D11:19 把「现状基线 204」写进文档（AGENTS §5 明令不许写死总数；PM 实测 `smoke-test.py` 里 `ok(` 调用点 201 处，
+  循环内与字面数不等价）；P1–P20 在 §9.1 十个脚本里**无一处认领**；`smoke_used_release.py` 预算 26 但
+  A1–A4+A9（16）+ RL-1a..RL-7（14）= 30 起步；A10 五条不在任何脚本预算内；
+  D12 §9「迁移」列串包（M-U1 含 V57/58/67/75/77/78，M-U2 含 D04 明写的缓冲号 V48，M-U4 含 V76）；
+  D00 §7 基线写 65（实 67）、新增写 19（实规划 29）
+- **后果**：交付判据本身自相矛盾——「35 条红线」与「164 条预算」并列作总验收，但两者都不能逐条落到脚本；
+  A10.2 今天就是**空绿**（`smoke-test.py` 对 USED 端点 0 命中）
+- **修正**：断言以**编号清单**为契约、不写总数；§9.1 改「断言编号 → 脚本 → 条数」逐条分配；
+  A10 明确执行主体；D12 §9 按 D04 §2 重排三列；D00 §7 收口
+- **需签字**：无
+
+### G13 · 权属多源化缺回填，LEGACY 行可能从 `REGISTERED` 翻成 `NONE`（**PM↑ 已裁决策略失去载体**）
+
+- **交叉指认**：WU4-15、WU4-16
+- **证据**：D04 §5.1/§5.2 把 `authoritative_source_type` 同时落到 `vehicle_units` 与批次表（V54），
+  可空列**无回填脚本** → 存量 `REGISTERED` 行在新谓词下可能读成 `NONE`；
+  ADR-Q27:60-61 定源「唯一权威源 = `collateral_registration_batches`」，若门禁读 `vehicle_units` 就多出第二权威源
+- **后果**：Q21 硬阻断的判定输入被改写——**这正是 Q21 当年被 `relaxedDealers` 绕开的形状**（软放行化），
+  只不过这次的绕过形式是「新列没回填」而不是「白名单」
+- **修正**：V54 规格补「回填 LEGACY 批次 → 置 `NOT NULL` → 才允许进判定谓词」三步；
+  门禁读取源固定为 V10 批次表，展示列加一条证伪断言（不得参与判定）
+- **需签字**：无；但改动 ADR-Q27 落点需按 D12 §4 禁区流程复核
+
+### G14 · 事件词表两套、消费方三处不一致
+
+- **交叉指认**：WU0-03、WU4-02、WU1-09、WU2-08
+- **证据**：D12 §3 出现约 25 个事件名（`LOT_WON`/`VEHICLE_INBOUND_CONFIRMED`/`CERTIFICATE_RELEASED`/`TOPUP_REQUESTED`…），
+  D00 §10.2 表格只有 10 行、D00 §10 全节实测 **13 个冻结名**（= §10.2 的 10 个 USED 提案 + §10.2:428 点明的
+  3 个主干既有常量 `LOAN_CREATED`/`PAYMENT_MATCHED`/`COLLATERAL_CHANGED`），
+  D02 §6.2 又是第三套子集；`WMS_INBOUND_CONFIRMED` 与 D12 的 `VEHICLE_INBOUND_CONFIRMED` 是同义异名；
+  `VEHICLE_SETTLED`/`RELEASE_ORDER_RECEIPTED`/`CREDIT_LINE_RESTORED` 三处消费方集合互不一致；
+  `VEHICLE_RELEASED` 只在 D12 出现（证据链第 6 条的事件落点因此悬空）；
+  `DEALER_ADMISSION_STATE_CHANGED` 在 D00/D02 均未定义；`BANK_TX_MATCHED` 与既有 `PAYMENT_MATCHED` 关系未定
+- **后果**：W-U0「常量一批登记」不可执行；`name()` 改名 = 历史幂等失效（D07 §6 纪律 3）；
+  E2E-0 步 15「`event_consumptions` 有 3 条」在 3 与 5+ 之间摇摆
+- **修正**：以 **D00 §10（13 个冻结名）+ D07 §6** 为唯一词表定源，D12 §3 事件行改为引用；
+  新增名要么对齐要么标注后续波次；消费方以 D07 §6 为样式回填 D00
+- **需签字**：~~`BANK_TX_MATCHED` vs `PAYMENT_MATCHED`~~ **已裁决并回灌**（2026-11-22）：
+  冻结名 = 主干既有的 `PAYMENT_MATCHED`，`BANK_TX_MATCHED` 作废；D12 §3 头部新增「事件名词表纪律」
+  把 15 个 D12 自造名分成「同义改名 / 需登记后才可用 / D00 已有但 D12 漏写」三类处置，
+  并禁止 `EXTERNAL_*` 通配与 `A/B/C` 斜杠压缩写法（一次声明多个不存在的事件名）。
+  余下 `LOT_WON` 等 12 个新事件**仍待逐条登记四元组**，属 W-U0 收口事项，不需业务签字。
+
+### G15 · 同一张表被两个包认领 + R1/R2 需要的列不存在
+
+- **交叉指认**：WU1-01、WU0-11、WU1-06、WU1-07
+- **证据**：`registration_applications` 在 D12 §3 W-U1 新表列（第 7 张）与 W-U4（V69）各出现一次，
+  D04:88 归 **V69 / W-U4**；W-U1 写「新表 7 张」但阶梯只 +6；
+  里程口径三处打架且 `mileage UNKNOWN` 无列可落（V50 只有 `mileage_source`/`unit`/`captured_on`，V1 已有 `mileage INT`，
+  勾稽规则引用的 `mileage_km` 在 `vehicle_units` 不存在）；R1.1 必填档案项全仓无列
+- **修正**：D12 W-U1 新表删该行、表数改 6；里程口径改指**现有列** `vehicle_units.mileage`（V50 不新增值列，`UNKNOWN` 由 `mileage_source` 表达并与 `mileage IS NULL` 用 CHECK 绑死）；R1.1 档案标量列进 **V46 `dealers` 加列**（不是 V45——V45 是三张 1:N 明细表，档案项是 `dealers` 自身属性，放 V45 会凭空多一张表并推翻 §2.1 阶梯）
+- **需签字**：`mileage UNKNOWN` 的放款影响属 R1.3，已裁决「UNKNOWN 不优于已知坏值」→ 不需新签字；
+  「既往违约记录」的字段集**没有**裁决也没验收要点 → 转 §8 **U-10**，不许按猜的建列
+
+---
+
+## 4. 按包清单（S0/S1 全录，S2/S3 压缩）
+
+### 4.1 TST · 跨包审 D11（20 条，S0 7）
+
+| 编号 | 级别 | 坐标 | 问题 | 建议 |
+|---|---|---|---|---|
+| TST-01 | S0 | D11 §3(79-119)/§13 + D12 §9 | 断言实际 41 条，文中「合计 35」，与「总数不写死」自相矛盾 | 总数改编号清单，编号才是契约 |
+| TST-02 | S0 | D11 §9.2①/§1 T4 + D07 §7 ↔ gateway yml | 61 个 USED 端点无定向路由，D12 却分给 6 个服务 → 经网关 404 | W-U0 交付路由表，作 DoD⑥ 前置 |
+| TST-03 | S0 | yml:52/60 ↔ D12 §3 | 前缀冲突：`/api/dealers/**`→credit、`/api/disposals/**`→risk，D12 把端点放 core | 冲突表交 W-U0 定归属 |
+| TST-04 | S0 | D11 §3 A6.1 + §2 步 4/5 ↔ D08 §4.3 | 1,120,000 算不出：基线缺車龄/里程；按 priority 10 先命中是 1,280,000 | 基线补 `first_registered_on`+`mileage` |
+| TST-05 | S0 | D11 A2.1–A2.5 + D09 RL-2 ↔ D07 §7.6 | 无台账结清端点 → 4 条断言无对象；A2.5 只能借 LEGACY | D07 补 `/settle` 或写明等价构造 |
+| TST-11 | S0 | D11 §9.4⑥ ↔ `agent_env.sh:114` + D04 §2.1 | check 数 schema 内表数，阶梯是主干累计；integration 5 表不计入 | 增量口径 + integration 单独计数 |
+| TST-12 | S0 | D11 §9.4⑥/§9.2① ↔ `env`(96-103) + `run-microservices.sh`(89,164) | env 无网关地址与服务偏移；脚本端口写死 → 并行期过不了网关 | W-U0 补 `SMOKE_BASE/GATEWAY/EXTERNAL` 与偏移参数 |
+| TST-06 | S1 | D11 A2.5 ↔ `smoke-test.py` | 「既有保护」不存在：全文 0 命中 `INTERNAL_WITNESS`/`confirmation_authority` | 改为必须新写 + 补行级 LEGACY 坐标 |
+| TST-07 | S1 | A1.3(401/409) ↔ §4 INV-5(403) + `ErrorCode.java:50` | 同请求两种期望；`SECURITY_001` 实为 422「担保登记不完整」，语义不符 | 统一码 + 确定 HTTP；D07 §8 补码 |
+| TST-08 | S1 | D11 §2 步 10 ↔ D08 §7 | 引用错位：§7 是库龄递减双因子（参数 `[待定源 D-05]`），期望数字算不出 | 改引 §5.1/§6.2；未签则进留白 |
+| TST-09 | S1 | A7.2 ↔ `ErrorCode:110` | `GUARANTEE_001` 是「担保未登记」，与権利瑕疵 `CONFLICTED` 不是一回事 | 用 D00 §9 的 USED 码或补一行语义 |
+| TST-10 | S1 | §7 夹具 ↔ D07 §8 + D08 §5.3 G6 | 「車検临催」车无断言覆盖；`CERT_004`/`CERT_005` 两码指同一场景 | 二选一同步；增 A7.6 |
+| TST-13 | S1 | §9.4⑦ ↔ §9.1 | P1–P20 无任何脚本归属 → ⑦ 不可执行 | 加 P→脚本映射表 |
+| TST-14 | S1 | §9.1 ↔ §3 + D09 §12 | release 脚本预算 26 < 需覆盖 30 + E2E-0 16 步；A10 五条无归属 | 逐条分配并重算 |
+| TST-15 | S1 | §9.1(INV-1..4) ↔ D12 §3/§9(INV-1..5) | 预算少算 INV-5；§9.4③ 要求逐条有断言 | 改 INV-1..5 并点明 INV-1 计几条 |
+| TST-16 | S1 | D12 §9 ↔ D04 §2 | 迁移列串包/错配（V48 是缓冲号）；脚本名与条数两边一致无误 | 按 D04 重排三列 |
+| TST-17 | S1 | 派发记录 §1 ↔ D09 §11 / D04 §5.2 | **D11 没有 §2.4**；链 2 要读 `lien_extinguished_at` 而 V67 清单无此列 | 补 §2.4 或改指 D09；V67 补列 |
+| TST-18 | S1 | D11 §5 L1–L10 实测 | L1/L3/L4/L5 ✓；L2 常量 `ADVANCE_RATIO=0.90`(`smoke-test.py:43-44`) 驱动 5 处只标 1 处；**L9 `ResidualValueEstimator` 全仓 Java 零命中**；L8 `DpdCalculator` 在 loan-service 不在 domain | L9 改保护 V11 列 + 实现类；L8 补限定名；L2 补 5 处 |
+| TST-19 | S1 | L10 `ADR007:385` | 该行实为「备选 B：共管/监管账户」；真正「仅告警」在 `PurchaseOrderApplicationService.java:395` | 坐标改后者；D12 W-U2 禁区补该行 |
+| TST-20 | S2 | D11 §9.3/§10 自查 | A10.2 今天是空绿；A1.3/A2.4/A2.5/A6.2 期望不写死（A6.2 应 1,600,000×0.50=800,000）；工单类期望依赖 0 Java 的工单体系未登记留白 | A10.2 改断言脚本执行且 0 FAIL；四处写字面值；工单类进 §12 |
+
+### 4.2 W-U0 · 地基与号段（20 条，自报最高 S1；G2/G4 由 PM 提级 S0）
+
+| 编号 | 级别 | 坐标 | 问题 | 建议 |
+|---|---|---|---|---|
+| WU0-01 | S1→**S0**(G4) | D12 §3/§4.1 ↔ D00 §4.3、D02 ADR-U-02、D11 A10.5；`run-microservices.sh:89` | `certificate-reg-service` 幽灵；基端口 8086 撞现役 collateral-reg；构建单元 15→17 与 10→11 三文档分裂 | 砍该服务，只建 external-api |
+| WU0-02 | S1→**S0**(G4) | D12 §3 W-U1/W-U2 ↔ D02 ADR-U-03、`pom.xml` | `used-vehicle-service` 仅 D12 有，pom 无模块 | D12 改回 web(core) |
+| WU0-03 | S1(G14) | D12 §3(~25 事件) ↔ D00 §10.2/D02 §6.2(10) | 两套词表互不兼容，「常量一批登记」不可执行 | 以 D00 10 个为冻结基线 |
+| WU0-04 | S1→**S0**(G2) | D00 §10.2 ↔ `JdbcOutboxPublisher` `INSERT_IF_ABSENT` + AGENTS §6.3 | 6 事件裸 vin + credit_line_id → 第二次被永久吞（资损级） | 改 per-occurrence 键 |
+| WU0-05 | S1→**S0**(G3) | `JsonPayloadReader.requireVinAndTraceId` ↔ D00 §10.2、D12 F2 | 非车辆级事件发不出去，USED 无权改框架 | PM 裁决 payload 约定并指派框架 owner |
+| WU0-06 | S1(G9) | D02 §6.1 末行 ↔ INV-2、`infrastructure/pom.xml:19` | 要求 external-api `@Import` W0 两 Bean → 传递依赖破 INV-2，且 dmz 轮询 public.outbox_events 被拒 | 删该行：只依赖 common |
+| WU0-07 | S1(G1) | D12 W-U1「web(core) 资质端点」↔ D02 §3.1、`yml:52` | 按 D12 建 → 28 断言经网关全 404，`/api/payments` 事故重演 | 资质端点归 credit-service |
+| WU0-08 | S1(G1) | D07 §7.4–7.9 × `yml:98` × D02 §3.1 | 新前缀落 core 兜底，实现却在别的服务 | 先裁决 路径↔服务↔路由 对照表 |
+| WU0-09 | S1(G10) | 派发 §1/§2 ↔ `agent_env.sh:42,114` | 阶梯是合并后累计，分支只有 67+本包；integration 不计入 | 分支门槛 67+本包，分 schema 计数 |
+| WU0-10 | S2(G12) | D12 §9/§5 ↔ D04 §2 | M-U1 含 V57/67/75 等、M-U2 含不存在的 V48；D12 离群 | 以 D04 §2 重写 D12 |
+| WU0-11 | S2(G15) | D12 §3 W-U1 ↔ W-U4 V69 | registration_applications 双列；U1 表数 7 与 +6 矛盾 | 归 U4，U1 清单删该行 |
+| WU0-12 | S2(G12) | D00 §7、D04 §0/§13、D11 §0 | 基线 65 实 67；新增 19 实 24；§7.1 缺 3 表且行 19 重复；V64 无名 | W-U0 收口 D00 §7 与基线数 |
+| WU0-13 | S2 | D11 §4 ↔ 派发 INV 归 U3 | INV-5 依赖 V67/V68=W-U4 产物，U3 无法证伪；§9.1 只预算 1..4；A5b 无定义 | INV-5 移 U4，补 A5b |
+| WU0-14 | S2 | D11 §3 A5 ↔ D02 §5.3 | 重放 401 vs 409、PTNR_002/003 归属互斥，两套断言必一套全红 | 以 D02 §5.3 修 D11 |
+| WU0-15 | S2 | D07 §11 ↔ D11 §7 | 桩 4 个 `FAKE-*` vs 6 个 `TEST-*`；I-12 无桩；注入矩阵缺 A5.1/A5.2/429/scope | 统命名，补桩与 4 类注入 |
+| WU0-16 | S2 | D04 §9/D12 F7 ↔ `SqlStructureSelfCheck.java:147` | 查询无 schema 过滤→跨 schema 同名误报；改逻辑非追加且属 CORE 共享文件 | 归 W-U0/CORE，加 schema 过滤 |
+| WU0-17 | S2 | D07 §7.1/7.2/7.4 ↔ D12 W-U2/§6.1 | 端点漂移（`{id}/override` vs `{vin}`、confirm 不存在）；I-06/I-10/I-12 编号误引 | 以 D07 为事实源修 D12 |
+| WU0-18 | S3 | D02 §6.2 ↔ `EventConsumer.java:26-31` | core 多消费者共用服务名会互覆 `consumer_offsets` 游标 | 冻结 consumer 命名规约 |
+| WU0-19 | S3(G4) | D12 W-U4 ↔ 现状 | 「collateral-reg 首个 Controller」不实，已有控制器与表 | 改「扩展」 |
+| WU0-20 | S3 | `git rev-list`/`merge-base` 实测 | 仅 `agent/ai-app` 未合并且改 PROGRESS，与 W-U0 写集冲突；V27–V39 全空，V40 安全 | 先协调 ai-app 合并顺序 |
+
+**结论**（原文压缩）：最先炸在交付①（8086 撞端口，启动当天失败，进程/单元口径三文档分裂无法验收）；
+更险是交付④（vin 锚点撞冻结去重，同车第二笔事件被无声吞掉）——**响的是端口，哑的是资损**。
+先裁决 01/03/04/05/08 再开工。
+
+### 4.3 W-U1 · 车辆与资质（20 条，S0 3）
+
+| 编号 | 级别 | 坐标 | 问题 | 建议 |
+|---|---|---|---|---|
+| WU1-01 | S0(G15) | D12 §3 W-U1 ↔ W-U4(V69)、D04:88 | `registration_applications` 被两包同时认领，表数 7 与阶梯 +6 矛盾 | 归 W-U4，U1 删行改 6 表 |
+| WU1-02 | S0(G1) | D07 §7.1 / D12 §3 ↔ D02 §3.1 ↔ `yml:52` | R1 八端点落点三方矛盾；`/api/dealers/**` 已冻结给 credit（现役 `DealerController` 在 credit） | 统一归 credit-service，三文档对齐 |
+| WU1-03 | S0(G4) | D12 §3 ↔ D02 ADR-U-03、`pom.xml` | `used-vehicle-service` 无模块/端口/路由/构建单元；D12 F9 与 ADR-U-03 相反 | 建账扩展落 web(core) |
+| WU1-04 | S1 | D07 §7 | R2 四类合规端点全缺分节与路径 | D07 补 §7.1.x |
+| WU1-05 | S1 | D10 §2 ↔ D07 | R2 权限码全缺，端点无法标 `@RequirePermission` | 补码并同步前端文案 |
+| WU1-06 | S1(G15) | D04 V50 ↔ V1 ↔ 勾稽规则 | 里程三处打架；`UNKNOWN` 无列可落；引用的 `mileage_km` 在 `vehicle_units` 不存在 | 定唯一列名 + UNKNOWN 表达 → **已回灌 D00 §8.1 + D04 §5.1 + D07 §3.1**，W-U1 只需按文建 CHECK |
+| WU1-07 | S1(G15) | R1.1 ↔ D04 V45 | 必填档案项全仓无列 | V45 清单补齐 → **已回灌 D04 §5.2 `dealers`(V46) 补 5 个标量列**；`business_years` V1 已有不加列；违约记录转 §8 **U-10** |
+| WU1-08 | S1 | D03 ↔ D04 V46 | `admission_state` 五态/三态矛盾且 V46 无 CHECK | 定态集 + CHECK |
+| WU1-09 | S1(G14) | D12 §3 ↔ D02 §6.2、D00 §10.2 | `DEALER_ADMISSION_STATE_CHANGED` 两处均未定义 | 进 D00 词表或改名 |
+| WU1-10 | S1 | D11 L5 / D12 §4 ↔ D00 §8.1 | 同一行代码两指令相反：保留 vs 删除 `VehicleController.java:92` OEM 默认 | 以 L5 为准保留，改 D00 §8.1；CHECK 前实测存量值 |
+| WU1-11 | S1(G12) | D02 §1.3 ↔ 实测 67 ↔ D04 §2.1 | 表数三处不一：65/+19 与实测 67、规划 29 矛盾；D04 §9 沿用错数 | 以 67 与 29 为准回修 D02/D04 |
+| WU1-12 | S2(G12) | D12 §9 M-U1 ↔ D04 §2 | 迁移清单串包（V57-58/V67/V75/V77-78 属别包） | 改本包实号段 V40-41、V45-47、V50-54 |
+| WU1-13 | S2 | D10 §2 ↔ D07 §7.1 ↔ D00 §11 | `RATING_CONFIRM` 无端点；合规码双名；D00 缺 4 码 | 补端点、统一命名、回补 D00 §11 |
+| WU1-14 | S2 | D12 §3 端点行 ↔ D07 §3.7/§7.1 | 「I-10 内部端点子集」误指银行入金流水；`/admission-state` 拼写不符 | 改引 D07 §7.1 并对齐 |
+| WU1-15 | S2 | D03:139 ↔ D07 §8 | `QUAL_004` 被规则引用但码表无此码，前端文案无着落 | 补码或规则改引 `QUAL_002` |
+| WU1-16 | S2 | D06 §17 ↔ D12 §3 ↔ AGENTS 缺口 4 | 门禁断言「QUAL_001+工单」但工单 0 Java、`alert_type` CHECK 在 V78(W-U5) | 补工单降级落点声明，工单断言拆后置 |
+| WU1-17 | S2 | D04 §5.1 V50 ↔ §2 | `inspection_certificate_id`/`valuation_id` 先于被引用表（V52/V55/V57）建，FK 后置未声明 | 注明 FK 后置 V53 |
+| WU1-18 | S2 | D04 §7 ↔ §2 ↔ D12 §5 | `COMMENT ON` 八条无迁移承载，被挂到 V75-79（实为 W-U5） | 落 V42-44 缓冲或随各包迁移 |
+| WU1-19 | S2 | D11 §9.1 ↔ D06 §1.1 ↔ D12 §3 | 年审指标依赖 W-U2 估值/W-U4 WMS，塞进 W-U1 冒烟必空转 | 断言后移 W-U5/主干；U1 只断接口存在 |
+| WU1-20 | S3 | D04 §3.1 ↔ D06 G-A1 | `expires_on` NULL 一律放行 = 对未签字事实的永久默认放行；UC-R1-7 引用不存在 | D-02 签字前 NULL 加「待核」告警 |
+
+**卡点**（原文）：R1/R2 端点的**物理落点**——D07 没有 R2 分节（`POST /api/vehicles/used` 无路径、无权限码可标），
+而网关 `/api/dealers/**` 已固定路由到 credit、D07/D12 却让把资质端点写进 web；
+不动手裁决这两点，第一天写出的 Controller 就是「网关 404 / 无码死代码」。
+
+### 4.4 W-U2 · 估值与拍卖接入（10 条，S0 4）
+
+| 编号 | 级别 | 坐标 | 问题 | 建议 |
+|---|---|---|---|---|
+| WU2-01 | S0(G5) | D08 §4.3 ↔ §4.4 | 示例分档带 50 是带 10–40 的严格超集 → `resolve()` 恒抛 `LTV_002`；A6.2 的 MAJOR 车同时命中带 50+60 | 重写为互斥带，或改「首个命中即返回」 |
+| WU2-02 | S0(G5) | D08 §4.3 × D11 §2 | 「×0.70」无输入支撑（基线未给車齢/走行距離）→ 1,120,000 与 `LTV_001` 均不可复现 | 基线补两输入并把推导写成式子 |
+| WU2-03 | S0(G6) | `AdvanceApplicationService.java:172-177,243-259,447-502` | 切换点未指名调用链：LEGACY 金额在**建账时**用可配置 ratio+HALF_UP 写入 `advance_amount`；`stageAdvance:487` 只回读旧列 → 新公式可能只被只读 `ceilingFor` 调用 | D08 §5.1 写成具名调用链，门禁加「有生产调用方」断言 |
+| WU2-04 | S0(G7) | D06 `approveUsed(advanceId)` ↔ `POST /api/advances` ↔ `stageAdvance:487` | E2E-0 步 5/6 无契约：现端点只有 `creditLineId+vin`；`stageAdvance` 先 INSERT PENDING 并占额度 ↔ D08 §5.3「门禁失败不产生任何写入」矛盾 | 定契约：门禁前不落库，或改 advanceId 语义 |
+| WU2-05 | S1 | D08 §5.1、D03 §1.3 | 两处悬空引用：§5.1 没有「四步」，D03 没有 §1.3 | 补章节或改引用 |
+| WU2-06 | S1 | D08 §3.1 ↔ §3.2 | 互相打架：≥2 源 vs 允许单源 | 定一条，另一条改注 |
+| WU2-07 | S1(G2) | D00 §10.2 五个事件 `aggregate_key=vin` ↔ 冻结契约禁令 | 第二次重估/突破告警被 NOT EXISTS 永久吞；D02 R-3 裁决未回填 | 改 per-occurrence 键（本轮已回灌） |
+| WU2-08 | S1(G14) | D12 §3 W-U2 五个事件名 ↔ D00 §10.2 | 一个都不在定源词表；`BANK_TX_MATCHED` 与既有 `PAYMENT_MATCHED` 关系未定 | 对齐或标注后续波次 |
+| WU2-09 | S1 | 全文档单次出现 | `AEF:*` 幂等键只出现在一处，无键构成、无周期后缀规定 | 在 D07 §2.4 定键构成 |
+| WU2-10 | S2 | D11 A6 ↔ D08 §6.2 | 突破告警断言缺「取大者 + 棘轮」的期望值口径 | 写字面期望并标参数待定源 |
+
+**结论**（原文压缩）：A6 全组现在可完整实现 **3 条**（A6.3/A6.4/A6.5，与 TST 结论一致），
+另 1 条（A6.1）补输入后可实现；其余依赖分档互斥修好 + D-06/U-02 签字。数值链的**列都在**，
+断的是推导规则与调用链，不是 schema。
+
+### 4.5 W-U3 · DMZ 集成层（18 条，S0 7）
+
+| 编号 | 级别 | 坐标 | 问题 | 建议 |
+|---|---|---|---|---|
+| WU3-01 | S0(G9) | D07 §2.3:75-90；D02 §5.4:313-326 | canonical 本身两处错：`PATH` 后缺换行、整串漏 `X-Key-Version`；GET 又替换成 raw query 成第三套规则 | 冻结唯一串签定义 + 12 个 I-* 共用固定测试向量 |
+| WU3-02 | S1 | D02 §5.4:323-327；D07 §2.2:65-70 | 时间戳秒 vs 毫秒；Base64 vs 小写 hex；`X-Idempotency-Key` vs `Idempotency-Key` → 按不同文档实现必全量验签失败 | 以 D07 为唯一协议源，回改 D02 |
+| WU3-03 | S1 | D00 §12:513；D02 §5.2:244；D06 §16:573；D04 §4.5:533 | nonce TTL 同时存在 86400 秒与 600 秒；D06 声称 600 来自未写该数的 D07 | 全设计集只留一个 TTL 定源与配置键 |
+| WU3-04 | S0(G9) | D02 §5.6:411-413；D04 §4.2:465-468；D07 §7.8:576；派发 §0:19 | `partners` 只有单 `secret_ref`+单 `key_version`+宽限时间，表达不了新旧两版与 `RETIRED`；`partner_credentials` 全设计集无规格；7 天宽限只是「建议」 | 补版本化凭证规格与 keystore 历史查询契约 |
+| WU3-05 | S1 | D02 §5.3:267-285；D07 §2.3/§2.5:113-117；D11 §3:93-96 | 失败映射不一致（`PTNR_001/002`、401/409、`PTNR_002/003` 交叉），nonce 与签名校验顺序相反 | 出唯一「原因→HTTP→码→是否写 nonce/inbox」表；只有验签通过才消费 nonce |
+| WU3-06 | S0(G9/G1) | D07 §5:437；D02 INV-3:407、§6.3:467；D00 §4.2:209 | `external-api` 经 `ReleaseOrderCommandContract` Feign 调 release 取快照 → 违反 INV-3 且违反「消费者内禁止跨服务调用」；D00 还允许 DMZ→gateway 回传 | 删该调用方身份；快照随事件写 `outbound_tasks.payload_ref` |
+| WU3-07 | S0(G9) | D02 §5.3:274-290；D04 §4.3:487,502；D06 §11:478；D11 A5.7:99 | 验签失败要求落库，但轮询条件只有 `status/attempts`，索引覆盖 `RECEIVED/FAILED` → 失败行会被核心领取，违反 A5.7 | 新增不可领取终态 `SIGNATURE_FAILED`；SQL 与部分索引强制 `signature_ok=true` |
+| WU3-08 | S0(G9) | D07 §3.5:291-310；D04 §5.2:593、§6:618-624；D11 §4.1:158 | 12 个请求体未见 `confirmation_authority` 残留（好）；但 DB 只有「非空 ⇒ `inbound_message_id` 非空」，伪造 ID/失败消息/他端点消息都能满足，无 FK ⇒ 删除 RESTRICT 也实现不了 | 补真实证据 FK + 消费事务校验签名/类型/partner/business_ref |
+| WU3-09 | S1 | D07 §2.4:97-104；D04 §4.3:483 | `Idempotency-Key` 原值入单列全局 UNIQUE → 跨 partner 误命中，可能返回对方 `message_id`（跨租户漏吞/信息泄露） | 唯一键至少改 `(partner_code, idempotency_key)` |
+| WU3-10 | S1 | D06 §17:584；`V26__event_consumption.sql:23-31` | inbox 幂等号称 `(message_id, consumer)` 却无表/仓储规格；复用 `event_consumptions` 会与 outbox event ID 数值碰撞 | 单消费者用 inbox 行状态机，或建独立带命名空间的消费表 |
+| WU3-11 | S1(G2) | D07 §6:459-468；D02 §6.2:450-458、§12 R-3 | `vin+"INB"` 吞同 VIN 第二次入库；`dealer_id+"CLR"` 吞同车商后续回补；抹消缺申请号 | 键改 `inbound_no/apply_no/settle_seq/恢复序号`；分清 inbox/outbox/V26 三套分工 |
+| WU3-12 | S0(G9) | D04 §4.1:441-446、§4.2–4.5 | V70 只授 `USAGE ON SCHEMA`，V71–V74 无表 DML/sequence 授权 → `floorplan_dmz` 读写不了自己的表 | 各迁移写明最小 GRANT + sequence；正/负向测试都要有 |
+| WU3-13 | S0(G10) | D04 §2.1:100-108；D12 §3:132、§4.1:211；`agent_env.sh:114-123` | 5 张 integration 表永不进 `check` 计数 ⇒ 89 是假门槛；终态应 public 91 + integration 5，不是 public 96 | 分开计数分开验收；分支门槛按「基线+本分支实际」 |
+| WU3-14 | S1(G9) | D04 §4.1:435-439；D12 §3:139 | 迁移规格把 DMZ 角色密码明文写成 `floorplan`，与「密钥不落代码」冲突 | 角色/密码由部署预置；Flyway 只校验存在与授权 |
+| WU3-15 | S1 | D04 §4.3:491-496；D07 §3.9:365、§7.8:579、§12:704 | `call_logs` 只存摘要/哈希（好）；但失败入站 `payload_ref/preview/last_error` 可被 inbox 查询接近，`last_error` 还向 partner 开放；§12 允许日志留签名前 8 位 | 只留原因枚举 + 摘要；禁 preview/异常回显；日志不记签名材料 |
+| WU3-16 | S2 | D11 §1:32、§9.1:308；D12 §3:137-139、§4.4；派发 §4 | 前列把「分支 schema 冒烟」与 A5/INV 连在一起，易读成分支可独立验收；实际用的是全局 integration/角色/真实 public；PM 三路实测只跑 V1–V26 + 三个 web，未覆盖 V70–V74/external-api/角色 | 全部分支表述改「W-U3 独占共享 integration 的局部实验，非最终验收」 |
+| WU3-17 | S2 | D11 §9.1:308-310；D12 §3:137；D11 §4:141-145 | D11 给脚本分 INV-1..4，D12 要求 INV-1..5；INV-5 又依赖 W-U4 的 `release_receipts`/见证/SETTLED | INV-5 归 W-U4 或主干验收，调预算 |
+| WU3-18 | S2 | D11 §4:137-140、§11:380 | INV-3 用 netstat「未观察到连接」不能证明网络禁止；INV-4 只搜响应 `test-secret-` 与 yml `secret=`，覆盖不了日志/源码/DB/preview | INV-3 真实分区主动断网；INV-4 每 partner canary 全扫描 |
+
+**结论**（原文）：D02 §5.6 → D11 §4 的 INV 映射 5/5 不缺条，**不触发「缺一即 S0」**；
+但按「实现后、仍用当前本地/并行条件」算，**INV-3 与 INV-5 两条现在做不了**
+（缺真实网络分区 / 缺 W-U4 落点）；INV-1 与 A5 能在独占共享 integration 时做局部实证，
+**不能以分支 schema 绿灯作最终验收**。最坏的单点洞是**入站重放无防线**。
+
+### 4.6 W-U4 · 凭证质押、WMS 与放车放证闭环（20 条，S0 5）
+
+| 编号 | 级别 | 坐标 | 问题 | 建议 |
+|---|---|---|---|---|
+| WU4-01 | S0(G7) | D11 §2 无 §2.4；D09 §11(373-384)；D04 全套无 `inventory_releases` DDL | 链 1 只有反向断言（RL-1a/D11:79），不断言 `audit_events(GATE_*)` 与 `release_state_history` 有行；链 6 的 `inventory_releases` 只存在于旧设计稿 `库存融资核心系统-放车放证指令设计.md:531` 草图；链 7 車検証终态只有反向断言 RL-2d | D11 补「八链 ×（端点/事件/断言）」闭合表；`inventory_releases` 进 V67/V68 或链 6 改指 `wms_inventory_items`+`vehicle_units.status`；补 3 条正向断言 |
+| WU4-02 | S1(G14) | D00 §10.2 ↔ D07 §6 ↔ D12 §3(155) | `VEHICLE_SETTLED`/`RELEASE_ORDER_RECEIPTED`/`CREDIT_LINE_RESTORED` 消费方集合不一致；`VEHICLE_RELEASED` 只在 D12；步 15「3 条」在 3 与 5+ 间摇摆；`name()` 改名 = 历史幂等失效 | 以 D07 §6 为样式回填 D00；步 15 逐条枚举 `(event_type, consumer)` 不写总数 |
+| WU4-03 | S1(G1) | `yml:84-98`；D07 §7.6:555-560；`ReleaseController.java:39,62-83` | `/api/release-orders/**` 无路由，兜底打进 core ⇒ 步 12/16 网关 404；yml 是 W-U0 独占写入集；现有路径变量 `{id}`(BIGINT) 与 D07 `{no}`(VARCHAR) 不同构 | 收口方加路由并置于 `/api/**` 前；W-U4 附一条「从 18080 打一次」断言 |
+| WU4-04 | S0(G8) | D09 §6 S4/§11 链 2(229,378)；D04 §5.2 V67(591)；D12 §3(148)；D05:531 | Q11 唯一承载列 `release_orders.lien_extinguished_at` 在 V67 加列清单里不存在 ⇒ 链 2 无落库、无断言、Q11 无可检验载体 | V67 补列，或链 2 改指 `lien_releases.released_at`（`V17:87-113` 注释已明写语义）；写进 D04 §5.2 并补 RL-1e |
+| WU4-05 | S0(G8) | D09 §5.2(165)；D06 §7 UC-R7-2(354)；D11 §3 A1.2(80)；D09 §12 RL-1b(397) | dispatch 入口对 Q11 零防护：`PENDING_RELEASE→SENT` 守卫只查「item 可解析接收方 + 出站任务创建成功」，UC-R7-2 明言不重校验，RL-1b/A1.2 只重校验资金闸门。**可证伪**：未解押的 `PENDING_RELEASE` dispatch 会放行到 `SENT` | 守卫加「第一段已完成」；新增断言「未解押 dispatch → 422 `RELS_002` 且状态不变」入 A1 组 |
+| WU4-06 | S1(G8) | D06 §7 UC-R7-1(353) ↔ D09 §6(226-229) ↔ D07 §7.6(555) | 「实体权利消灭」有两个互斥落点：D06 放回款结清单事务第 6 步（bank，有 `match_id`，写 `lien_releases`），D09 放飞车 S4（release，无 `match_id`）⇒ 同一事实两个写入方两张表；连带 A1.2/RL-1b 构造不可达 | D-07 固定唯一写入点与表；若采 D06 方案则 A1.2/RL-1b 改构造或删除 |
+| WU4-07 | S1(G11) | D12 §4(196) ↔ D09 §5.5(216-218)；AGENTS §7.1 | 禁区自相矛盾：D12 禁改 `ManualReleaseChannel` LEGACY 行为，D09 要求改成「生成人工工单 + 返回未下发」并同步 LEGACY 冒烟；而 `smoke-test.py` 属 W-U0 独占 ⇒ D09 的要求无法执行 | PM 裁决：改造连同 `smoke-test.py` 同步判给 W-U0，或按 `vehicle_type` 分叉并记分叉点 |
+| WU4-08 | S0(G11) | `ReleaseStateMachineTest.java:47-53,101-115`；`ReleaseStateMachine.java:43-57`；D12 §4 | 结构性互斥：`EXPECTED_ALLOWED` 是 6 键 `Map.of`，逐格断言 `canTransit==期望` 且 `assertEquals(7, legalCount)`(:114) ⇒ 加一条新边即红，而测试文件在禁区 | 新建 `ReleaseStateMachineUsed` + 独立测试，LEGACY 36 组原样保留 |
+| WU4-09 | S1(G11) | D09 §5.1/§5.2 ↔ D03 §3.3 ↔ D05 §5.4 | 三份十态变体冲突；`EXPIRED` 终态与 `PARTIAL` 出边在 D09 内自相矛盾 | 以 D03 出 10×10 真值表唯一定源 |
+| WU4-10 | S1(G11) | D03 §6.3；D09 §5.4；`ReleaseStateMachine.java:51-52` | D09 丢 `CONFIRMED→CANCELLED`；「旧 6 态子集一致」声明不成立 | USED 机声明成 7 条 LEGACY 边的超集 |
+| WU4-11 | S2 | `V19:42-82`；D04 §5.2 V67；D09 §5.2:164,178 | `release_orders` 无 `vehicle_type` ⇒ 域分派无落点；`uk_ro_vin` 撞重申 | V67 加该列并重算 `valid_until` |
+| WU4-12 | S0(G7) | D09 §8.2；D06 §8.1/§8.4；`V17:121-149` | `settle_seq` 零定义；现有唯一键是 `match_id`，幂等索引非唯一 | 定 `settle_seq` 并加部分唯一索引 |
+| WU4-13 | S1(G7) | D06 §8.1:375-394 ↔ D09 §8.1；D11 步 11/15 | 两条结清路径都点火；同事务回补违反「回补必须最后」 | 一车一结清只留一条回补路径 |
+| WU4-14 | S1(G7) | `ReleaseOrchestrator.java:94-110`（PM 复测在 bank-service）；D09 §8.3；D11 步 15 | 回补额取 `matchedAmount`(1,180,000) 而非 `advance_amount`；`availableAfter = before` 仍是存根 | 改 `advance_amount` 口径，断言写字面 1,120,000 |
+| WU4-15 | S1(G13) | D04 §5.1:571/§5.2:595；D05:340；ADR-U-04；ADR-Q27:60-61 | `authoritative_source_type` 落两表 ⇒ 门禁读 `vehicle_units` 成第二权威源 | 门禁只读 V10；展示列加证伪断言 |
+| WU4-16 | S1(G13) | D04 V54；D12 §3:151；ADR-Q27:81-85 | 可空列无回填 ⇒ LEGACY 行 `REGISTERED` 翻 `NONE` | 回填 LEGACY → `NOT NULL` → 再进谓词 |
+| WU4-17 | S2(G4) | D12 §3:153；`CollateralRegController.java:48-102` | 「首个 Controller」不实，现已有 6 端点 | 改「增写端点」或明确保持只读 |
+| WU4-18 | S1(§8 X-1) | D06 §8.1:380/§8.4:422 ↔ D12 §7:340；D11 §2:68-71 | 冲抵顺序三处互斥；配置键无 USED 作用域 | 键加 used 作用域；步 11 只断守恒 |
+| WU4-19 | S1 | 派发记录:32 ↔ D12:34；D04 §2；D12:380,383 | 上游两份都缺腿：V67/V76 归属错位，M-U4 依赖未列全 | 上游补 W-U1/U2/U3 + W1-BANK |
+| WU4-20 | S2(G10) | D12 §4.1:205,211 ↔ D04 §2.1:104-108 | 门槛写 94 但隔离 schema 实际只有 72 张（67+本包 5）⇒ `check` 必挂 | 门槛改 72，或基于 U1–U3 合并后再切 |
+
+**结论**（原文压缩）：**E2E-0 跑不绿**——步 12/16 网关无 `/api/release-orders` 路由，请求掉进 `/api/**` 打到 core；
+步 11/15 双回补无 `settle_seq` 与唯一键，回补额取 `matchedAmount` 差 60,000；隔离 schema 仅 72 表不够 94。
+只能等合并后 public 回归，且先补齐上游依赖与 D-07/U-09/D-04/冲抵顺序签字。
+
+### 4.7 W-U5 · 逾期处置、通知与报表（报告回收中）
+
+W-U5 会话（`685d4cfb-139b-51ba-a920-6ca772e022ea`，PM 于 2026-11-22 经会话列表实测确认；本节曾误记为
+`685d4cfb-a278-…`，同前缀不同中段，照错串恢复会话会恢复不到）本轮 52 次只读取证已完成、结论文本仍在生成，
+**本文不代写其条目**。其审计任务对应的 6 个主题已被其它路交叉覆盖，先记交叉证据：
+
+| 主题 | 已被覆盖的条目 | 现有结论 |
+|---|---|---|
+| 冲抵顺序分歧（需求书 §11.1「息→本」↔ D06 §8.1「费→息→本」） | WU4-18、TST-20③、D11 §2 步 11 | 三处互斥且配置键无 used 作用域；未签字前只能断「守恒 + 可解释」→ §8 X-1 |
+| DPD / 逾期阶段能力重叠（V30/V31 预留） | AGENTS §6.2、ADR-008 | USED 若另建 `dpd_stage_rules` 即与 V31 撞能力，须先查现有 `DpdCalculator`（PM 复测：在 `loan-service`，非 domain） |
+| 报表 7 端点取数可达性 | TST-02、WU0-08（G1） | 报表前缀同样落 `/api/**` 兜底，路由未定 ⇒ 端点级 404 同型 |
+| RB-10 计算书双人复核 SOD | WU1-05（权限码缺）、AGENTS §10 | 复用 `RoleSeparationPolicy` 可行（domain 纯单测样例），但**不许留可配置旁路** |
+| 「通知无静默失败」的落库证据 | D12 §3 W-U5（不落新表，复用 `risk_alerts` + 门户待办） | 复用能否支撑可证伪断言 = 待 W-U5 原文结论 |
+| V78 与 W-U1 门禁断言错位 | WU1-16 | `alert_type` CHECK 在 W-U5 的 V78，而 W-U1 门禁已引用「HIGH 工单」 |
+
+> 收到原文后按 §4.1–§4.6 同格式补入本节，并把新增 S0 并进 §3、把新增门禁并进 §7。
+
+---
+
+## 5. 修正分配
+
+### 5.1 本轮（D13 同批提交）回灌设计集的内容
+
+只回灌**不需要业务签字、且不与任何 ADR 冲突**的条目；数值与效力判断一律不动。
+
+| # | 文件 § 节 | 动作 | 来源 |
+|---|---|---|---|
+| A1 | D07 §7 各端点表 | 增「服务归属」列，资质类归 credit-service，`/api/dealers/**` 冲突显式标注 | G1（TST-02/03、WU0-07、WU1-02、WU4-03） |
+| A2 | D00 §10.2 事件表 | 6 个 `vin` 键 + `credit_line_id` 改 per-occurrence 业务主键，并加一句引用 AGENTS §6.3 的理由 | G2（WU0-04、WU2-07、WU3-11） |
+| A3 | D12 §3 / §0 / §4.1 / §10 | 删 `certificate-reg-service` 与 `used-vehicle-service` 两个幽灵单元（改 `collateral-reg-service` 与 `web`(core)）；W-U4「首个 Controller」改「扩展」；W-U1 新表删 `registration_applications`、表数 7→6 | G4、G15（WU0-01/02/11/19、WU1-01/03） |
+| A4 | D08 §4.3 | 加「本表示例与 §4.4 唯一命中互斥，上线前必须改成互斥带」的显式警示与互斥化两种改法（不动数值，仍挂 D-06/U-02） | G5（WU2-01/02、TST-04） |
+| A5 | D08 §5.1 | 「四步」改为具名调用链 + 指名唯一入口（旧 `ingestVehicles` 写金额路径何时停用） | G6（WU2-03） |
+| A6 | D04 §2.1 / D12 §4.1 | 表数阶梯改「主干 public 与 integration 分列」：73 / 84 / 84+integration 5 / 89 / 91；分支门槛写 `67 + 本分支实际 public 迁移` | G10（TST-11、WU0-09、WU3-13、WU4-20） |
+| A7 | D11 §13 / §9.1 | 删「合计 35」这类总数（改为编号即契约），A10 组与 P1–P20 补脚本归属 | G12（TST-01/13/14/15/16、WU0-10/12） |
+| A8 | D04 §4 / D02 §6.1 | `integration` 授权补表 DML 与 sequence；`external-api` 去掉对 W0 Bean 与内网 Feign 的依赖描述 | G9（WU3-12、WU0-06、WU3-06） |
+| A9 | 派发记录 §5 | 回填七路结论 | §1.2 |
+| A10 | `docs/00-文档索引.md` | 登记 D13 | AGENTS §11 |
+
+### 5.2 本轮**不回灌**、必须走别人授权路径的条目（禁区）
+
+> 这些是「W-U0/收口方才有权动」的文件。本审计只出需求，不出补丁——
+> 自己列进禁区的文件，第一个破的不能是我（D12 §4）。
+
+| # | 需要谁改什么 | 依据条目 | 不落地会怎样 |
+|---|---|---|---|
+| R1 | **收口方**：`gateway/.../application.yml` 增 USED 定向路由（`/api/release-orders/**`、`/api/valuations/**`、`/api/certificates/**`、`/api/wms/**`、`/api/partners`、`/api/auction-lots/**`、`/api/ltv-policies/**`、`/api/reports/**`）且必须置于 `/api/**` 兜底之前 | G1、G7、WU3 报表同型 | D11 §9.2①「经 gateway 18080」对多数断言不可执行；W-U1/U4/W-U5 交付即 404 |
+| R2 | **W0（框架 owner）+ 用户点头**：`common`/`infrastructure` 的事件 payload 约定（非车辆级事件如何过 `requireVinAndTraceId`） | G3（WU0-05） | `DEALER_ADMISSION_STATE_CHANGED`/`CREDIT_LINE_RESTORED` 发不出去；W-U1/W-U4 的事件断言只能空转 |
+| R3 | **W0（脚本 owner）+ 用户点头**：`agent_env.sh check` 增 `integration` 计数或提供 `--schema-count`；`env` 补 `SMOKE_BASE/SMOKE_GATEWAY/SMOKE_EXTERNAL` 与 release/risk/bank/recon/collateral-reg 偏移 | G10（TST-11/12、WU0-09） | 并行期门槛挂错、过不了网关；有人会把正常 schema `drop` 重迁 |
+| R4 | **收口方**：`run-microservices.sh` 端口参数化 + 冒烟目标可加 `smoke_used_*` | G10、TST-12 | 并行期只能有一份网关；W-U3/W-U4 的 56+20 条断言无处可跑 |
+| R5 | **收口方**：`smoke-test.py` 若 W-U4 采 D09 §5.5 的 `ManualReleaseChannel` 改造，需同批同步 LEGACY 断言 | G11（WU4-07） | D09 的要求无法执行，W-U4 要么违禁区要么违设计 |
+| R6 | **CORE 侧**：`SqlStructureSelfCheck.java:147` 加 schema 过滤（跨 schema 同名误报），非追加式改动 | WU0-16 | USED 分支每次 `mvn package` 出假阳性 |
+
+### 5.3 等业务签字（本文只登记，不实现）
+
+见 §8。签字前**不许**按建议默认值写代码或改判定谓词；D12 §7 的「可先行骨架」边界仍然成立。
+
+---
+
+## 6. PM 复测证据（本文自证的底）
+
+> 七路审计的坐标由各自会话给出；下表是**我作为 PM 在同一工作树里重新实测**的部分。
+> 复测不等于全测：未复测条目在 §4 表中保留原级别与原坐标，按「审计方声称」对待。
+
+| # | 判据 | 命令/位置 | 实测结果 | 支撑的组 |
+|---|---|---|---|---|
+| 1 | 主干表数 | `grep -rho "CREATE TABLE" infrastructure/.../db/migration/*.sql \| wc -l` | **67** | G10、G12（D00 §7 写 65 为误） |
+| 2 | 最大迁移号 | `ls …/migration \| sort -V` | **V26**；V27–V39 全空 ⇒ V40 起跳安全 | G4/WU0-20、号段登记 |
+| 3 | 网关路由清单 | `gateway/src/main/resources/application.yml:25-98` | 8 条定向前缀 + `Path=/api/**`→core 兜底；`:52` `/api/dealers/**`→credit、`:60` `/api/disposals/**`→risk、`:86` `/api/releases/**`→release | **G1 全组**、G7/WU4-03 |
+| 4 | 幽灵服务 | `grep -rn "certificate-reg" docs/`、`grep -rn "used-vehicle-service" docs/` | 前者只命中 D12（5 处），后者只命中 D12（2 处）；D00:135/D02:129 归 collateral-reg，D00:633/D02:653 = ADR-U-03 留 core | **G4** |
+| 5 | collateral-reg 现状 | `application.yml:2` = `port: 8086`；`find` = 13 个 Java，含 `CollateralRegController`、`JdbcCollateralRegistrationRepository` | 「首个 Controller」不成立；8086 与新服务基端口同名 | G4、WU0-19、WU4-17 |
+| 6 | 事件键 | `D00:434-442` 逐行读 | 6 行 `aggregate_key = vin`，1 行 `credit_line_id`，另 `order_no`/`disposal_case_no` 合规 | **G2** |
+| 7 | 去重语义 | `JdbcOutboxPublisher.java:41-48`、`EventDispatcher.java:246` | `WHERE NOT EXISTS` 判据含 `PENDING/SENT`；注释自述「同 (event_type, aggregate_key) 已存在则一条都不插」 | **G2** |
+| 8 | payload 硬约束 | `JsonPayloadReader.java:82-87` | 缺 `vin` 抛 `IllegalArgumentException("事件 payload 缺少必填字段 vin…")` | **G3** |
+| 9 | LTV 分档互斥 | D08 §4.3 逐带比对 + §4.4 算法 | 带 20 ⊂ 带 30 ⊂ 带 50 ⊂ 带 80/90；反例「24 月 / 45,000km / NONE / 4.2 / 車検 12」命中 20 与 30 ⇒ `LTV_002` | **G5** |
+| 10 | 保护类是否存在 | `grep -rl "ResidualValueEstimator" --include=*.java .` | **零命中**（仅 V11 列）；`DpdCalculator` 在 `loan-service/.../loan/service/` | G12（TST-18） |
+| 11 | 回补语义 | `bank-service/.../ReleaseOrchestrator.java:96,109-110` | 回补额 `match.matchedAmount()`；`markedRestored(Instant.now(), before)`，注释写「存根阶段 `availableAfter = before`」 | G7（WU4-14）、AGENTS §9 缺口 3 |
+| 12 | 断言总数 | `D11:403` 分组数相加 | 5+5+2+2+7+5+5+3+2+5 = **41** ≠ 文中「合计 35」 | G12（TST-01） |
+| 13 | 现状基线数 | `grep -c "ok(" smoke-test.py` = 201 调用点；D11:19 写 204 | 循环内与字面数不等价 ⇒ **总数不该写进文档**（AGENTS §5） | G12 |
+| 14 | `check` 语义 | `scripts/agent_env.sh:112-128`（含 `dc64865` 新增的判因提示） | 只数 `table_schema='${SCHEMA}'` 的 BASE TABLE；**不含 `integration`**；提示语已含 USED 阶梯 73/84/89/94/96，需按 A6 一并更正 | G10 |
+| 15 | 号段认领 | `grep -n "registration_applications" D04` | `D04:88` = `V69__…` / **W-U4** 单点归属 ⇒ D12 的 W-U1 行是重复认领 | G15 |
+| 16 | 并行活跃度 | `git log --oneline -8`（`7360e1b` 为当时 HEAD） | 同一 master 上另有 W0 会话提交；本轮 D13 只 stage 自己的文件 | 提交纪律 |
+
+---
+
+## 7. 开工门禁（把 D12 的包启动条件改写成可核对的 G 条）
+
+> 规则：**门禁未全绿的包，不许从 `base-*` 起分支写第一个 Controller/迁移**。
+> 这比 D12 §3 的「依赖」行更硬——D12 只排了包的先后，没排「文档缺陷的先后」。
+
+| 包 | 起工前必须关闭 | 必须已签字 | 一句话理由 |
+|---|---|---|---|
+| W-U0 | G4、G10、**R1–R4 的裁决**（谁改、改不改） | — | 幽灵服务与端口撞是「启动当天失败」级；号段已登记（`PROGRESS.md`，V40–V79） |
+| W-U1 | G1、G4、G15（A1/A3 回灌完成 + R1 路由已加） | D-02（关系定位）、D-08（换证 SLA，可延） | 端点落点未裁决则第一天就是 404 / 无权限码死代码 |
+| W-U2 | G2、G5、G6、G12（A2/A4/A5/A7 完成 + R2 payload 约定） | **D-06**、U-02（分档矩阵） | 分档互斥不修则 A6 组全不可复现；基准切换无调用方则「实现了但没人调」 |
+| W-U3 | G9 全部 7 处 + G3 | — | A5 全组与 INV-1/2/4 现在一条也做不成；**本包单人独占 `integration`**（D12 §4.1） |
+| W-U4 | G1、G7、G8、G11、G13（A8/R1/R5 完成） | D-05、D-07、U-09、**冲抵顺序 X-1** | E2E-0 是收口判据，步 11/12/15/16 现在全部断在半截契约上 |
+| W-U5 | G1（报表前缀）、G14 + W-U5 原文条目 | D-01、D-06、D-07 | 处置计算书与敞口报表的期望值依赖未签参数 |
+| 收口 | D12 §4.3 主干 public 全量回归（唯一交付判据） | 全部 | 并行期绿不算；`unset FLOORPLAN_DB_SCHEMA SPRING_DATASOURCE_URL` 后跑 |
+
+---
+
+## 8. 未签字口径登记（本轮**未实现任何一条**）
+
+| 编号 | 卡在哪一步 | 本文立场 |
+|---|---|---|
+| **X-1 冲抵顺序**（需求书 §11.1「息→本」↔ D06 §8.1「费→息→本」↔ D11 §2 步 11） | W-U4 结清事务与 E2E-0 步 11 断言 | **不预设**；只断「金额守恒 + 可解释」。配置键需加 used 作用域（WU4-18） |
+| D-02 与 NEW 的关系 | W-U1 资质维度与额度维度 | 按独立客户群实施；改共用则额度与资质两维重做（返工量：大） |
+| D-04 接口现实 | W-U2/W-U3/W-U4 报文映射 | 测试 partner 先跑语义；联调失败要回改 R2/R3/R5/R6/R7 |
+| D-05 解押权威源 | `LIEN_DISCHARGED` 语义（G8 二选一的前提） | 只认 `COMPLETED` |
+| D-06 估值/LTV/起算率/盈余 | A6 全组、G5 的带边界数值 | 结构不变只换数；参数表可先行 |
+| D-07 保险缺保口径 | W-U5 敞口计算、WU4-06 的写入点 | 卡计算书 |
+| U-02 分档矩阵 | G5 的互斥化结果 | 示例带含 L3 反面例，必须替换 |
+| U-09 回执效力分级 | A2 严格程度与 W-U4 门禁 | 按「portal 回执可结清但打 `receipt_degraded`」实施，收紧只关开关 |
+| **G3 payload `vin` 约定** | 非车辆级事件能否发布 | 需 W0 框架 owner 裁决（R2），**属技术裁决而非业务口径，但同样不许我自作** |
+| **U-10 既往违约记录字段集**（R1.1 列了这一项，但无验收要点、无字段定义） | W-U1 的 V46 `dealers` 加列只补齐了 5 个标量档案项，这一项**无处可落** | **不建表、不用 `VARCHAR` 摘要列代替**（那会把 1:N 事实降级成自由文本，事后无法查计）。要业务给三件事：记不记（是否 R1.1 硬要求）、记什么（日期/对手方/金额/处置结果 的最小集）、谁能看（D10 权限码）。裁决前 W-U1 交付里出现「违约记录」字样即视为越界 |
+
+---
+
+## 9. 本轮不做什么（边界声明）
+
+1. **不解除开发暂缓**：D13 不产生任何 `.java`/`.sql`；设计集改动只动文档正文。
+2. **不改已落库迁移 V1–V26**，不新建迁移文件。
+3. **不碰共享禁区**：`gateway` yml、`run-microservices.sh`、`smoke-test.py`、父 `pom.xml`、`app.js`、
+   `agent_env.sh`、`agent_smoke_lib.py`、outbox 框架类、LEGACY 状态机白名单测试——只在 §5.2 提需求。
+4. **不替业务方选数值**：G5/G6/G9 的修法只到「结构互斥怎么消」为止，带边界、比率、TTL 取值全部留 `[待定源]`。
+5. **不把「发现缺口」当成果**：本文的条目按 §2 分级，S2/S3 不进入 §7 门禁，避免用文档量冒充交付。
+
+---
+
+## 10. 自检
+
+- 七路清单**全部回收**（W-U5 结论文本尚在生成，已在 §4.7 明示未收录，未代写）。
+- 每条 S0/S1 都带可点击坐标（文档 § 或 `文件:行`），且 §6 给出 16 项 PM 侧复测，其中 G1–G15 的
+  **承重结论全部有 PM 复测支撑**，不是转述。
+- 共因归并优先于逐包罗列：15 组里 6 组由 ≥2 路独立指认（G1/G2/G4/G9/G10/G12），这类才是真矛盾而非误读。
+- 修正确定归属：**能我自己改的**进 §5.1，**必须别人改的**进 §5.2 并写清「不落地会怎样」，
+  **必须业务签字的**进 §8——三条线不混。
+- 表数阶梯给出可验算的修正（29 张新建 − 5 张 integration = public 24；终态 91 + 5），
+  并把 `agent_env.sh` 提示语里已经写进去的 96 一并列入更正范围。
+- 未写死会过期的数字：D11 的 41/35 只作为「自相矛盾的证据」引用，不作为验收判据；
+  判据仍是 `run-microservices.sh smoke` 的 `FAIL=0`。
+- 引用基线仍用「取最新 `base-*`」的查询式，未写死标签名。
+- 门禁表把「文档缺陷的先后」补进了 D12 的「包依赖先后」，这是本轮审计对排期的唯一实质改动。
