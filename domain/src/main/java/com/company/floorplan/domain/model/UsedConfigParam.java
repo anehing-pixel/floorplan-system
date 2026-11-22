@@ -172,7 +172,10 @@ public class UsedConfigParam {
     private <T> T parse(java.util.function.Supplier<T> reader, String expect) {
         try {
             return reader.get();
-        } catch (NumberFormatException | IllegalArgumentException ex) {
+        } catch (IllegalArgumentException ex) {
+            // 只 catch IllegalArgumentException：NumberFormatException（Integer.decode / new BigDecimal 抛的那个）
+            // 本来就是它的子类，写成 `NumberFormatException | IllegalArgumentException` 的多捕获会被 javac
+            // 以"替代无法通过子类化关联"拒绝（实测 mvn -B clean package 在 floorplan-domain 编译中断掉）。
             throw new BusinessException(ErrorCode.SYS_001,
                     "参数 " + paramKey + " 声明为 " + valueType + " 但值无法解析为" + expect + "：" + paramValue);
         }

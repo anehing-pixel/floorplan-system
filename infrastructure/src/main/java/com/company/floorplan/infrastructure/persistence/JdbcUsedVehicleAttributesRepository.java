@@ -121,7 +121,9 @@ public class JdbcUsedVehicleAttributesRepository implements UsedVehicleAttribute
         // 这条 UPDATE 没有条件列，"列顺序"和"参数顺序"错位只会静默写错值，不会报错。
         List<String> assignments = new ArrayList<>();
         List<Object> args = new ArrayList<>();
-        addSet(assignments, args, "vehicle_type", name(attributes.getVehicleType()));
+        // vehicle_type 在本实体里就是 String（对齐 vehicle_units 的 VARCHAR 列，见 UsedVehicleAttributes javadoc），
+        // 所以走 trim 而不是枚举的 name()；取值合法性由 V40 ck_vu_vehicle_type + 应用层校验兜。
+        addSet(assignments, args, "vehicle_type", trim(attributes.getVehicleType()));
         addSet(assignments, args, "registration_plate", trim(attributes.getRegistrationPlate()));
         addSet(assignments, args, "first_registered_on", toSqlDate(attributes.getFirstRegisteredOn()));
         addSet(assignments, args, "inspection_expiry_date", toSqlDate(attributes.getInspectionExpiryDate()));
@@ -174,12 +176,14 @@ public class JdbcUsedVehicleAttributesRepository implements UsedVehicleAttribute
         return value == null ? null : value.name();
     }
 
-    private static Integer intOrNull(java.sql.ResultSet rs, String column) {
+    // 下面三个取值器都调 ResultSet.getXxx + wasNull，两者都声明 throws SQLException：
+    // 帮助方法必须把受检异常继续往外抛，由 RowMapper.mapRow(…, throws SQLException) 接住。
+    private static Integer intOrNull(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
         int value = rs.getInt(column);
         return rs.wasNull() ? null : value;
     }
 
-    private static Long longOrNull(java.sql.ResultSet rs, String column) {
+    private static Long longOrNull(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
     }
@@ -190,7 +194,7 @@ public class JdbcUsedVehicleAttributesRepository implements UsedVehicleAttribute
         return rs.getBigDecimal(column);
     }
 
-    private static Boolean booleanOrNull(java.sql.ResultSet rs, String column) {
+    private static Boolean booleanOrNull(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
         boolean value = rs.getBoolean(column);
         return rs.wasNull() ? null : value;
     }

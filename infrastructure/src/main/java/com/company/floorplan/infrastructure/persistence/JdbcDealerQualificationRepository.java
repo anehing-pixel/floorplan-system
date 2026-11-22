@@ -175,7 +175,7 @@ public class JdbcDealerQualificationRepository implements DealerQualificationRep
             // 同番号重放（撞 uk_dlic_dealer_type_no）与"已有另一张有效证"（撞 uk_dealer_license_active）
             // 都落在这里；两种成因的文案分开，便于工单直接看出是哪种。
             throw conflict("许可记录已存在或该车商已有同类型有效许可：" + license.getLicenseType()
-                    + "/" + license.getLicenseNo(), ex);
+                    + "/" + license.getLicenseNo());
         }
     }
 
@@ -243,7 +243,7 @@ public class JdbcDealerQualificationRepository implements DealerQualificationRep
         } catch (DuplicateKeyException ex) {
             // uk_dmem_dealer_house_no：同一车商在同一会场的同一会员号只能有一行。
             throw conflict("该会场的会员号已存在：" + membership.getAuctionHouseCode()
-                    + "/" + membership.getMemberNo(), ex);
+                    + "/" + membership.getMemberNo());
         }
     }
 
