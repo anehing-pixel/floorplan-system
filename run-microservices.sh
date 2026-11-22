@@ -31,6 +31,14 @@ PIDDIR="$ROOT/.microservice-pids"
 LOGDIR="$ROOT/logs/microservices"
 mkdir -p "$PIDDIR" "$LOGDIR"
 
+# 冒烟用的 Python 解释器。默认 python3 = 本脚本历史行为，不改变任何现有跑法。
+# 为什么要留这个口子：Windows/Git Bash 上常见只有 `python`（miniconda 与官方安装包都不落
+# python3.exe），此时 `bash run-microservices.sh smoke` 会在调用冒烟那一行直接
+# `127: command not found` —— 服务全起来了、冒烟一行没跑，最容易被误读成「跑过了」。
+# 本机实测 2026-11-22：command -v python3 为空、python 在 miniconda3。
+# 跑不通就显式指定：PYTHON=python bash run-microservices.sh smoke
+PYTHON="${PYTHON:-python3}"
+
 JAR() { echo "$ROOT/$1/target/floorplan-$1-1.0.0-SNAPSHOT.jar"; }
 
 # ----------------------------------------------------------------------------
@@ -133,7 +141,7 @@ do_start() {
     wait_one gateway "Started GatewayApplication" 18080 || { do_stop; exit 1; }
     echo ""
     echo "全部就绪。网关入口: http://127.0.0.1:18080"
-    echo "跑冒烟测试: SMOKE_BASE=http://127.0.0.1:18080 python3 smoke-test.py"
+    echo "跑冒烟测试: SMOKE_BASE=http://127.0.0.1:18080 $PYTHON smoke-test.py"
 }
 
 do_stop() {
@@ -161,7 +169,7 @@ case "${1:-}" in
     # 启动 → 走网关跑冒烟 → 无论结果都清理，全在一条命令生命周期内，避免 JVM 被回收
     do_start || { do_stop; exit 1; }
     echo "=== 通过网关跑冒烟测试 ==="
-    SMOKE_BASE=http://127.0.0.1:18080 python3 smoke-test.py
+    SMOKE_BASE=http://127.0.0.1:18080 "$PYTHON" smoke-test.py
     RC=$?
     echo "=== 冒烟退出码: $RC ==="
     do_stop

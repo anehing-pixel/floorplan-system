@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 18:55（GMT+8） · **W2-CORE + W1-LOAN 事件接线已交付（`LOAN_CREATED` 发布端 + 消费端建据），主干 `loans` 表不再恒空；基线 tag 仍为 `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+最后更新：2026-11-22 19:05（GMT+8） · **W2-CORE + W1-LOAN 事件接线已交付（`LOAN_CREATED` 发布端 + 消费端建据），主干 `loans` 表不再恒空；判据命令的 `python3` 障碍已按用户点头加 `PYTHON` 口子并复跑 EXIT 0；基线 tag 仍为 `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
 
 > ✅ **2026-11-22 18:55 事件链路第一根线接通（用户指令「开发吧」，按 W2-CORE / W1-LOAN 两张卡做，未新增业务口径）**：
 > - **发布端**：`AdvanceApplicationService.confirmAdvance`（`:551`，PAID 之后、同一事务内）调用新端口
@@ -28,6 +28,10 @@
 >   `python`（`command -v python3` 为空）→ `bash run-microservices.sh smoke` 直接 `127 command not found`、
 >   冒烟根本没跑。本轮**未动这个禁区文件**，改为同法手工启停 + `SMOKE_BASE=http://127.0.0.1:18080 python smoke-test.py`
 >   取到同一条判据；建议改成 `PYTHON=${PYTHON:-python3}`，需用户点头。
+>   **→ 19:00 用户点头，19:04 已改并复跑**：`run-microservices.sh:40` 加 `PYTHON="${PYTHON:-python3}"`
+>   （两处引用一并换掉，含 `do_start` 打印的那行提示，别让提示和实跑不一致），
+>   `PYTHON=python bash run-microservices.sh smoke` 实测 **EXIT 0 / 211 PASS · 0 FAIL / 服务自动清理**；
+>   判据命令写法已登记进 §1 环境事实表「验证金标准」行。
 > - **仍未闭合**：`PAYMENT_MATCHED`（W1-BANK）与 `COLLATERAL_CHANGED`（W0-7 键未定源）两个生产者照旧零调用方，
 >   所以「事件闭环已通」这句话仍然不能说 —— 本轮只通了「放款 → 借据」这一根线，回款解押/权属变更两条仍靠人工搬数据。
 >   交付说明：`web/HANDOFF-W2-CORE.md`、`loan-service/HANDOFF-W1.md`。
@@ -230,7 +234,7 @@
 | 启动坑 | 启动时一律 `env -u SERVER__PORT`（否则覆盖各服务端口）；`run-microservices.sh` 已处理 |
 | 注册中心 | 本地不启 Nacos，`fail-fast=false`，注册失败仅告警 |
 | 进程 | 后台 JVM 随 shell 回收 → 启动+测试+清理必须在同一条命令内 |
-| 验证金标准 | `bash run-microservices.sh smoke`，退出码 0 且全量断言全绿（断言数随开发增长，**不要写死数字**，看 FAIL）—— ✅ 2026-11-22 14:03 实测 211 PASS · 0 FAIL |
+| 验证金标准 | `bash run-microservices.sh smoke`，退出码 0 且全量断言全绿（断言数随开发增长，**不要写死数字**，看 FAIL）—— ✅ 2026-11-22 14:03 实测 211 PASS · 0 FAIL。⚠️ **本机 Git Bash 里没有 `python3`**（只有 miniconda 的 `python`，`command -v python3` 为空），2026-11-22 18:47 实测该命令 **EXIT 127**：服务全部起来并自动清理了、冒烟却一行没跑——这种红最危险，因为日志尾看着像「跑完了一轮」。已按用户 19:00 点头给 `run-microservices.sh` 加 `PYTHON="${PYTHON:-python3}"`（默认值=历史行为，其他人零影响），**这台机器上判据命令写成 `PYTHON=python bash run-microservices.sh smoke`**，19:04 实测 EXIT 0 / 211 PASS · 0 FAIL |
 | 并行环境隔离 | `bash scripts/agent_env.sh init <你的名字>` + `eval "$(… env <schema> <偏移>)"`；两条实测硬约束：连接串必须 `currentSchema=<schema>,public`（pgcrypto 的 `gen_salt()` 只装在 public，缺第二段 V5 中断并留下会穿透到 public 的半成品表）、脚本与服务必须同 `search_path`（`FLOORPLAN_DB_SCHEMA`）。详见 `docs/并行开发-W1环境隔离.md` |
 | 基线标签 | 新基线一律 `base-<波次>-<日期>`（用户裁决 2026-11-22）；当前 W0 基线 = `base-w0-20261122`。旧名 `wave0-baseline`(`aab5295`) 只是**骨架地基**（空服务 + outbox 建表 + 契约接口，零实现），`wave0b-baseline`(`cee18f8`) 才是事件机制真实现——三者不是一个层次，别按名字猜 |
 | 模型约束 | 当前 hy4 flash 限时免费，随时可能受限。**不能热切模型**，靠本文件断点续跑 |
