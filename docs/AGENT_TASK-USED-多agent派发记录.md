@@ -194,3 +194,54 @@
 6. **收口方事故一笔（详见 D13 §5.2-R14）**：我在主工作树 `master` 上误执行试合并产生 `40da5d3`，
    已 `revert -m 1` → `bda3170`，树内容回到 `34857d9`、USED 迁移计数 0。
    **合并期必须执行 R14 的 revert-of-revert 判据**，否则 W-U1 的十个迁移会静默缺失。
+
+### 7.1 验证轮下半场：23:5x 交付截面（**收口方本人扫盘，不信包侧自报**）
+
+扫描法（一次做对，前两版都错过）：`git -C ../wt-used-wuN diff --name-only base-used-dev-20261122..HEAD`
+∪ `git status --porcelain`（**含未提交与未跟踪**），再对每个 `*Controller.java` 数 `@*Mapping`。
+worktree 是**仓库同级目录**，相对路径 grep 会全空（AGENTS §12 与 D13 R16 ⑤ 同一坑，本轮我又撞一次）。
+
+| 包 | HEAD | 本包 public 新建表 | 门槛① | 新 Controller / 路由 | Permission | 脏文件 |
+|---|---|---|---|---|---|---|
+| W-U1 | `28f9539` 23:14 | 8（含 `dealer_score_reviews`）| **75** | 1 / 8 | +4 | 8 |
+| W-U2 | `ef2e028` 19:07 | 11 | **78** | **0 / 0** | +0（23:45 后在改）| 24 |
+| W-U3 | `da04763` 22:01 | **0**（V71–V74 六张全是 `integration.` 限定，不进 public 门槛）| **67** | **8 / 18** | +5 | 5 |
+| W-U4 | `6bdfc35` 23:19 | 5（V65 1 / V66 3 / V69 1；V67、V68 只加列）| **72** | **0 / 0** | +19 | 27 |
+| W-U5 | `20d5115` 23:38 | 2 | **69** | 2 / 8（处置 6 + 计算书 2）| +11 | **0** |
+
+本轮新事实：
+
+1. **W-U1 交回了我欠的证据，也交回了两条假信息。** 真：V40–V52 在 `used_wu1` Flyway 全 SUCCESS、
+   `public` 基表恒 67、迁移历史恒 26 行、重启幂等（历史仍 52 行不增）、守卫「public.outbox 未动」PASS、
+   `mvn -o -B package` 19/19 模块含 4 个 `used-*`。假：它报「可登录账号 = admin/ops/dealer/risk」——
+   **`ops`/`dealer`/`risk` 三个账号不存在**，主干实测 14 个 seed 账号（`admin/admin123` + `credit`/`advisory`/
+   `post_lending`/`collection`/`collateral`/`cashier`/`disposal`/`fund_rev`/`import_op`/`multi_role`/`operator`/
+   `review_op`/`settlement`）；另报「`used_vehicle_migration_tasks` 列名分歧」，该表名**在它自己分支里 0 命中**。
+   两条都已退回要它给复现或撤回。
+2. **W-U1 已执行我那条错裁决**：V46 被删成 0 张建表（**未提交**，-63 行），74/74 是删表后的数。
+   已让它 `git checkout -- V46…` 取回 + **drop/init 重建 schema**（不能只重启：库里应用过的是删表版 V46，
+   文件恢复后 checksum 会挡启动；`flyway repair` 是把不一致推迟到运行时，禁用）。R12 撤回在这一点上
+   救回了一张真需要的表，代价是它白跑一轮。
+3. **「在 agent schema 里跑 web/core 会把 V40–V52 落进该 schema 自己的历史表，`public` 一行不动」= 首次拿到实测证据**
+   （此前只在 D13 层面论证过）。副产品：`used_*` 模块的 jar 已打进 `web` fat jar，
+   所以 `agent_env.sh check` 的「表数 + 本 schema V25/V26 + V5 `users`」三条本地判据在 USED 波次同样成立。
+4. **W-U2 虚报交付坐标、W-U4 被我冤枉**——两处都记 D13 R18，此处只留结果：
+   `core-service` 模块 / `ValuationController` / `LotController` / `used_credit_grants` 六棵树 0 命中；
+   我引给 W-U4 的两个 `/api/used/*` 路径同样 0 命中且是我自己拼的。**0 路由对 W-U2、W-U4 都是当前实况**，
+   116 条断言无入口这条结论没变。
+5. **两条我下发的裁决被证据推翻后已改**：(a) 「W-U4 门槛 72→73」= 我把 ② 的算法当成 ① 用（R12 ④）；
+   (b) 「无人新增角色」= 一条匹配不到本仓写法的正则给的真阴性，实况是 `UserRole.java` 在三个分支被改
+   （+15/+83/+30），**岗位级 SOD 已被过渡矩阵塌缩**（R17 ⑥），恢复绑定 D10 §3 签字，本轮不建 V42。
+
+> **计数方法（本轮现学的，别再错一次）**：数「本包 public 新建表」**不能只 `grep -c "CREATE TABLE"`**，两个必错点——
+> ① **`integration.` 这类带 schema 限定的建表不算进 `public` 门槛**（W-U3 平铺数到 6，真值 0；
+> 这正是 D04 §2.1 里那版 `73/84/89/94/96` 旧阶梯的错因）；② 文件头注释里出现的 `CREATE TABLE` 字样会误命中
+> （W-U5 平铺数到 3，真值 2，多的是 V75 的幂等说明行）。正确判据 = **逐条看 `CREATE TABLE` 后面的限定名**。
+> 另外：`git diff --name-only` 给的是路径，**grep 的是工作树文件**，所以包侧有未提交改动时数出来的是脏值
+> （W-U1 这轮就数到 7，因 V46 删表未提交；恢复后 8）。
+>
+> **合并前碰撞自检（本轮已跑，两条都干净）**：
+> ① 五包迁移号**无重号**（`diff --name-only | grep -oE "V[0-9]+__" | uniq -d` 为空）；
+> ② 跨包**无同名 `CREATE TABLE`**（含 `registration_applications`——审计轮报的「W-U1/W-U4 双认领」
+> 实况是**只有 W-U4 的 V69 建它**，W-U1 的 V45 建的是 `dealer_*` 三张）。这两条是当年「两个 V24 → Flyway 拒启动」
+> 那类事故的直接解药，**合并时还要在新基线上再跑一次**（现在的截面是各分支自己的）。
