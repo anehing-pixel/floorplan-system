@@ -120,6 +120,15 @@ case "$ACTION" in
     if [ "$n" != "$PUBLIC_TABLES" ] || [ "$v26" != "2" ]; then
       echo "[不通过] ${SCHEMA} 迁移不完整（表数或 V26 不达标）——这个 schema 不能用，"
       echo "          不带 schema 的表名会穿透到 public，隔离当场失效。重迁：drop 后 init 再起 web。"
+      # 表数「多于」基准时，上面那句结论是错的：不是没迁完，而是主干基准涨了（USED 每包 +N 张）。
+      # 不分开提示的话，执行的人会 drop 掉一个其实正常的 schema，或者去改默认值 67 —— 那是主干侧基准。
+      if [ "${n:-0}" -gt "${PUBLIC_TABLES}" ] 2>/dev/null; then
+        echo "          [提示] 实际 ${n} > 基准 ${PUBLIC_TABLES}，多半是主干涨了而非 schema 残。"
+        echo "          USED 并行期基准按包是 73/84/89/94/96（今天主干仍 67），"
+        echo "          按当期值设 FLOORPLAN_PUBLIC_TABLES 再 check，不要改本脚本默认值。"
+        echo "          判因与阶梯见 docs/并行开发-W1环境隔离.md §2、"
+        echo "          docs/二手车库存垫资改造-04-数据库设计.md §2.1。"
+      fi
       exit 1
     fi
     echo "[通过] ${SCHEMA} 可作为该 agent 的独立工作 schema"
