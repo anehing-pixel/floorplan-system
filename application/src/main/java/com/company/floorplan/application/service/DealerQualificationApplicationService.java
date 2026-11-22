@@ -404,6 +404,84 @@ public class DealerQualificationApplicationService {
         return qualificationRepository.findActiveLicensesExpiringBy(today.plusDays(days));
     }
 
+    /**
+     * 取某车商的许可清单（D07 §7.1 {@code GET /api/dealers/{id}/licenses}）。
+     *
+     * <p>含 {@code SUPERSEDED}／{@code REVOKED} 历史行：GET 是"看这个主体的资质历史"，
+     * 只回 ACTIVE 会让换证链在接口上断开，前端也就无法解释"为什么准入态是 BLOCKED_LICENSE"。</p>
+     *
+     * @param dealerId 车商 ID
+     * @return 许可行列表；无记录返回空列表（不是 404——主体存在而没录资质是常态，
+     *         这正是准入态要判成 {@code BLOCKED_LICENSE} 的情形）
+     */
+    @Transactional(readOnly = true)
+    public List<DealerLicense> listLicenses(Long dealerId) {
+        requireDealer(dealerId);
+        return qualificationRepository.findByDealerId(dealerId)
+                .map(DealerQualification::getLicenses)
+                .orElse(List.of());
+    }
+
+    /**
+     * 取某车商的拍卖场会员关系（D07 §7.1 {@code GET /api/dealers/{id}/auction-memberships?status=}）。
+     *
+     * @param dealerId 车商 ID
+     * @param status   状态过滤（可空＝不过滤）
+     * @return 会员行列表
+     */
+    @Transactional(readOnly = true)
+    public List<AuctionMembership> listAuctionMemberships(Long dealerId, String status) {
+        requireDealer(dealerId);
+        String normalized = blankToNull(status);
+        if (normalized != null) {
+            // 过滤条件写错时宁可在入口给 400：把非法串当"查不到"返回空列表，
+            // 调用方会以为该车商没有会员关系，而这是准入判定 G-A2 的输入。
+            parseEnum(AuctionMembershipStatus.class, normalized, "会员状态");
+        }
+        return qualificationRepository.findMemberships(dealerId, normalized);
+    }
+
+    /**
+     * 看当前准入判定（D07 §7.1 {@code GET /api/dealers/{id}/admission}）。
+     *
+     * <p><b>GET 不写库</b>：与 {@link #recalculateAdmission} 的分工是
+     * "算给你看" vs "把结论落进 {@code admission_state}"。若 GET 也回写，
+     * 一次列表页刷新就会改主数据并留下审计，重算的触发点也变得不可追溯。</p>
+     *
+     * <p><b>同时返回库里存的结论</b>（{@code storedState}）：两个值不同时说明
+     * "事实变了但没人重算"，这正是 UC-R1-4 存在的理由，前端要能看见这层落差。</p>
+     *
+     * @param dealerId 车商 ID
+     * @param bizDate  业务日；null 取今天（测试与补算历史某日用）
+     * @return 判定视图（现算结论＋库中存量＋本次用的预警窗口）
+     */
+    @Transactional(readOnly = true)
+    public AdmissionView currentAdmission(Long dealerId, LocalDate bizDate) {
+        requireDealer(dealerId);
+        LocalDate today = bizDate == null ? LocalDate.now() : bizDate;
+        DealerQualification qualification = qualificationRepository.findByDealerId(dealerId)
+                .orElseGet(() -> new DealerQualification(dealerId));
+        Integer expiringWindowDays = usedConfigRepository
+                .findInt(UsedConfigRepository.LICENSE_EXPIRY_ALERT_DAYS, today)
+                .orElse(null);
+        AdmissionDecision decision = admissionPolicy.evaluate(qualification, null, today, expiringWindowDays);
+        AdmissionState storedState = qualificationRepository.findAdmissionState(dealerId).orElse(null);
+        return new AdmissionView(dealerId, today, storedState, decision, expiringWindowDays);
+    }
+
+    /**
+     * 准入判定视图（只读用例的返回结构）。
+     *
+     * @param dealerId            车商 ID
+     * @param bizDate             本次判定用的业务日
+     * @param storedState         库里已落的准入态（{@code null}＝从未评估）
+     * @param decision            现算结论
+     * @param expiringWindowDays  本次用的临近到期窗口；{@code null}＝参数未签字，EXPIRING 档不会产出
+     */
+    public record AdmissionView(Long dealerId, LocalDate bizDate, AdmissionState storedState,
+                                AdmissionDecision decision, Integer expiringWindowDays) {
+    }
+
     // =====================================================================
     // 内部小工具
     // =====================================================================
