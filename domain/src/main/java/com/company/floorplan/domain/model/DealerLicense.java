@@ -14,8 +14,10 @@ import java.time.LocalDate;
  *
  * <p><b>没有 {@code version} 列</b>：D04 §3.1 未给本表乐观锁列，本表也没有"同一行被两方并发改"的
  * 业务动作（改许可＝写新行 + 把旧行置 {@code SUPERSEDED}）。因此仓储更新走普通 UPDATE，
- * 不伪造 CAS。有 {@code version} 的是 {@code dealers} / {@code dealer_score_reviews}
- * / {@code inspection_certificates}。</p>
+ * 不伪造 CAS。号段内带 {@code version} 的只有 {@code dealer_score_reviews}（V46:88）、
+ * {@code inspection_certificates}（V52:49）、{@code used_config_params}（V41:38）；
+ * {@code dealers} 主表<b>没有</b>该列（V1 建表未带、V46 只 ADD COLUMN），
+ * 准入态的并发取舍见 {@code DealerQualificationRepository#updateAdmissionState} 的注释。</p>
  *
  * <p><b>领域纯度</b>：本类不碰 Spring、不碰 JDBC、不读配置，也不在 setter 里做业务判断
  * （照 {@code Supplier}/{@code Dealer} 的既有风格）。判定集中在
