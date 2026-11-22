@@ -39,6 +39,16 @@ mkdir -p "$PIDDIR" "$LOGDIR"
 # 跑不通就显式指定：PYTHON=python bash run-microservices.sh smoke
 PYTHON="${PYTHON:-python3}"
 
+# 冒烟输出编码。默认 utf-8，调用方显式给了值就原样保留（与上面 PYTHON 同一个口子写法）。
+# 授权：2026-11-22 19:30 用户选「1」，本文件是共享禁区（AGENTS §7.1），第四例授权改动。
+# 为什么必须有：stdout 一旦重定向或接管道（`> logs/x.txt`、`| tee`），Windows 上 python 的
+# 输出编码从控制台回落到本地代码页 cp936/GBK，而 smoke-test.py 实测有 53 行含 GBK 编不出
+# 的字符（⑪–㉕ U+246A–U+2473、⑴–⑸ U+3251–U+3255、结尾 ✅）。后果不是「日志难看」而是
+# **整栈崩掉**：19:17 实测撞在 smoke-test.py:519 打 ⑪ 那一行，只打了 51 条 PASS、
+# 后面 160 条断言一条没跑、EXIT 1，而屏幕上已经刷了半屏绿——比 EXIT 127 更像「跑过了」。
+# 崩点随执行进度变，不是固定行，所以不能靠「看到了后面的 PASS」来判它跑全了。
+export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+
 JAR() { echo "$ROOT/$1/target/floorplan-$1-1.0.0-SNAPSHOT.jar"; }
 
 # ----------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 19:20（GMT+8） · **W2-CORE + W1-LOAN 事件接线已交付（`LOAN_CREATED` 发布端 + 消费端建据），主干 `loans` 表不再恒空；判据命令的 `python3` 障碍与公共冒烟库的 `psql` 列分隔符 bug 均已按用户点头修掉并复跑全绿；新登记第三条陷阱：冒烟输出重定向会被 Windows 回落成 GBK、`smoke-test.py` 打带圈数字时崩栈只剩 51 条断言，带文件的跑法必须加 `PYTHONIOENCODING=utf-8`；基线 tag 仍为 `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+最后更新：2026-11-22 19:35（GMT+8） · **W2-CORE + W1-LOAN 事件接线已交付（`LOAN_CREATED` 发布端 + 消费端建据），主干 `loans` 表不再恒空；判据命令的 `python3` 障碍、公共冒烟库的 `psql` 列分隔符 bug、冒烟输出重定向被回落成 GBK 这三条，均已按用户点头修掉并复跑全绿（后者落进 `run-microservices.sh:50` 的 `PYTHONIOENCODING` 默认值）；基线 tag 仍为 `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
 
 > ✅ **2026-11-22 18:55 事件链路第一根线接通（用户指令「开发吧」，按 W2-CORE / W1-LOAN 两张卡做，未新增业务口径）**：
 > - **发布端**：`AdvanceApplicationService.confirmAdvance`（`:551`，PAID 之后、同一事务内）调用新端口
@@ -55,6 +55,15 @@
 >   `PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke`
 >   → 19:18 实测 **EXIT 0 / 211 PASS · 0 FAIL / 服务自动清理、无残留 JVM**。
 >   待用户点头的收口建议见下方「遗留」与 `web/HANDOFF-W2-CORE.md §7`。
+>   **→ 19:30 用户选「1」，已落地**：`run-microservices.sh:50` 加
+>   `export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"`（本文件第二例授权改动，写法与上面
+>   `PYTHON="${PYTHON:-python3}"` 一致：未设时兜底、显式给了值原样保留，实测
+>   未设 → `utf-8`、显式 `gbk` → `gbk`，即不覆盖调用方意图）。
+>   判据按「会坏的那条路」复跑：命令行**不带** `PYTHONIOENCODING` 且**带重定向**
+>   `PYTHON=python bash run-microservices.sh smoke > logs/master-smoke-enc.txt 2>&1`
+>   → **EXIT 0 / 211 PASS · 0 FAIL**，日志文件本身已是 UTF-8（`⑧⑱㉔㉕✅` 正常显示）；
+>   `bash -n` 语法过、`jps` 无本项目残留 JVM。**不经本脚本直接跑 `python smoke-test.py > x.txt`**
+>   （收口方合并、以后的 CI）仍要自己带编码变量，这条留在 AGENTS §5。
 > - **仍未闭合**：`PAYMENT_MATCHED`（W1-BANK）与 `COLLATERAL_CHANGED`（W0-7 键未定源）两个生产者照旧零调用方，
 >   所以「事件闭环已通」这句话仍然不能说 —— 本轮只通了「放款 → 借据」这一根线，回款解押/权属变更两条仍靠人工搬数据。
 >   交付说明：`web/HANDOFF-W2-CORE.md`、`loan-service/HANDOFF-W1.md`。
@@ -257,7 +266,7 @@
 | 启动坑 | 启动时一律 `env -u SERVER__PORT`（否则覆盖各服务端口）；`run-microservices.sh` 已处理 |
 | 注册中心 | 本地不启 Nacos，`fail-fast=false`，注册失败仅告警 |
 | 进程 | 后台 JVM 随 shell 回收 → 启动+测试+清理必须在同一条命令内 |
-| 验证金标准 | `bash run-microservices.sh smoke`，退出码 0 且全量断言全绿（断言数随开发增长，**不要写死数字**，看 FAIL）—— ✅ 2026-11-22 14:03 实测 211 PASS · 0 FAIL。⚠️ **本机 Git Bash 里没有 `python3`**（只有 miniconda 的 `python`，`command -v python3` 为空），2026-11-22 18:47 实测该命令 **EXIT 127**：服务全部起来并自动清理了、冒烟却一行没跑——这种红最危险，因为日志尾看着像「跑完了一轮」。已按用户 19:00 点头给 `run-microservices.sh` 加 `PYTHON="${PYTHON:-python3}"`（默认值=历史行为，其他人零影响），**这台机器上判据命令写成 `PYTHON=python bash run-microservices.sh smoke`**，19:04 实测 EXIT 0 / 211 PASS · 0 FAIL。⚠️ **第二条同类陷阱（19:17 实测）**：一旦把这条命令的 stdout **重定向或管道**（`> logs/x.txt`、`| tee`），python 的输出编码从控制台回落到 cp936/GBK，`smoke-test.py` 里 53 行含 GBK 编不出的带圈数字（`⑪`–`㉕`、`⑴`–`⑸`、`✅`），第一条撞上的就整栈崩掉——实得 **只打 51 条 PASS、后 160 条没跑、EXIT 1**，而屏幕半屏绿。带文件的跑法必须写成 `PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke`（19:18 实测 EXIT 0 / 211 PASS · 0 FAIL）；不改 `smoke-test.py`/`run-microservices.sh` 两个禁区文件是本条的前提 |
+| 验证金标准 | `bash run-microservices.sh smoke`，退出码 0 且全量断言全绿（断言数随开发增长，**不要写死数字**，看 FAIL）—— ✅ 2026-11-22 14:03 实测 211 PASS · 0 FAIL。⚠️ **本机 Git Bash 里没有 `python3`**（只有 miniconda 的 `python`，`command -v python3` 为空），2026-11-22 18:47 实测该命令 **EXIT 127**：服务全部起来并自动清理了、冒烟却一行没跑——这种红最危险，因为日志尾看着像「跑完了一轮」。已按用户 19:00 点头给 `run-microservices.sh` 加 `PYTHON="${PYTHON:-python3}"`（默认值=历史行为，其他人零影响），**这台机器上判据命令写成 `PYTHON=python bash run-microservices.sh smoke`**，19:04 实测 EXIT 0 / 211 PASS · 0 FAIL。⚠️ **第二条同类陷阱（19:17 实测）**：一旦把这条命令的 stdout **重定向或管道**（`> logs/x.txt`、`| tee`），python 的输出编码从控制台回落到 cp936/GBK，`smoke-test.py` 里 53 行含 GBK 编不出的带圈数字（`⑪`–`㉕`、`⑴`–`⑸`、`✅`），第一条撞上的就整栈崩掉——实得 **只打 51 条 PASS、后 160 条没跑、EXIT 1**，而屏幕半屏绿。带文件的跑法必须写成 `PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke`（19:18 实测 EXIT 0 / 211 PASS · 0 FAIL）。**→ 19:30 用户选「1」已根治**：`run-microservices.sh:50` 注入 `export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"`，此后走本脚本不必再手动带（19:33 按「不带变量 + 带重定向」这条会坏的路复跑：EXIT 0 / 211 PASS · 0 FAIL、日志已是 UTF-8）；`smoke-test.py` 未动，**不经本脚本直接重定向仍会崩**，那条留在 AGENTS §5 |
 | 并行环境隔离 | `bash scripts/agent_env.sh init <你的名字>` + `eval "$(… env <schema> <偏移>)"`；两条实测硬约束：连接串必须 `currentSchema=<schema>,public`（pgcrypto 的 `gen_salt()` 只装在 public，缺第二段 V5 中断并留下会穿透到 public 的半成品表）、脚本与服务必须同 `search_path`（`FLOORPLAN_DB_SCHEMA`）。详见 `docs/并行开发-W1环境隔离.md`。**2026-11-22 19:10 库改动（用户点头）**：`scripts/agent_smoke_lib.py:202/:211` 两条 psql 命令显式加 `-F "\t"`——此前 `psql -tA` 默认列分隔符是竖线、而 `psql()` 按 tab 拆列，**多列 SELECT 全部错位**（`rows[0][1]` 拿不到第二列，实测 `psql("SELECT 1,'a|b',3") -> [['1|a|b|3']]`）。新脚本仍推荐单列 `row_to_json`：不是为绕分隔符，而是 NULL 会显式打成 `null`（`-tA` + `.strip()` 会让末列 NULL 整列消失，这条未扩权修） |
 | 基线标签 | 新基线一律 `base-<波次>-<日期>`（用户裁决 2026-11-22）；当前 W0 基线 = `base-w0-20261122`。旧名 `wave0-baseline`(`aab5295`) 只是**骨架地基**（空服务 + outbox 建表 + 契约接口，零实现），`wave0b-baseline`(`cee18f8`) 才是事件机制真实现——三者不是一个层次，别按名字猜 |
 | 模型约束 | 当前 hy4 flash 限时免费，随时可能受限。**不能热切模型**，靠本文件断点续跑 |
