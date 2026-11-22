@@ -14,7 +14,7 @@
 -- ---------------------------------------------------------------------
 -- 1. dealer_licenses 车商许可证（R1.1，D04 §3.1）
 -- ---------------------------------------------------------------------
--- 业务口径：日本二手車取引的入场券是「古物商許可」（営業許可证），由都道府县公安委員会颁发。
+-- 业务口径：日本二手车交易的入场券是「古物商許可」（营业許可证），由都道府县公安委员会颁发。
 -- 门禁 G-A1（D06 §1.3）读的就是本表：status='ACTIVE' 且（expires_on IS NULL 或 >= 今天）。
 -- expires_on 允许 NULL 是业务事实——古物商许可本身**没有有效期**，是否强制填 [待定源 D-02]，
 -- 故这里不写「必须有到期日」的 CHECK，也不由本包猜测到期判定天数（判定见 domain，无超时猜测）。
@@ -40,8 +40,18 @@ CREATE TABLE IF NOT EXISTS dealer_licenses (
     CONSTRAINT ck_dlic_status CHECK (status IN ('ACTIVE', 'EXPIRED', 'REVOKED', 'SUPERSEDED'))
 );
 
--- 一 dealer 一 type 同时只允许一张 ACTIVE 证：这是 DLIC:{dealerId}:{type}:{no} 幂等键的
--- 数据库兜底（重复提交只会命中同一行做 CAS 更新，不会插出两张有效证）。
+-- 本表唯一约束有两道，兜的是两件不同的事，缺一都留缺口：
+--
+-- ① 自然键唯一（本条）：dealer_id + license_type + license_no 全表唯一。
+--    这是幂等键 DLIC:{dealerId}:{type}:{no} 的数据库兜底——同一番号重放必然命中同一行，
+--    应用层据此做"已存在则 CAS 更新"，不会插出两行同番号事实。
+--    为什么不能只靠②：②只约束 ACTIVE 行，若同一番号先被置为 SUPERSEDED 再重放录入，
+--    ②不拦（新旧两行 status 不同），于是"一车商一type一番号"出现两条历史行，
+--    重放的 upsert 探测（findLicense）无从定位，幂等口径失效。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_dlic_dealer_type_no
+    ON dealer_licenses (dealer_id, license_type, license_no);
+-- ② 有效性唯一：一 dealer 一 type 同时只允许一张 ACTIVE 证。
+--    拦的是"业务事实冲突"——换证漏改旧行、两个番号同时声称有效（G-A1 判定会二义）。
 CREATE UNIQUE INDEX IF NOT EXISTS uk_dealer_license_active
     ON dealer_licenses (dealer_id, license_type)
     WHERE status = 'ACTIVE';
@@ -51,11 +61,11 @@ CREATE INDEX IF NOT EXISTS idx_license_expiry
     WHERE status = 'ACTIVE';
 CREATE INDEX IF NOT EXISTS idx_dlic_dealer ON dealer_licenses (dealer_id);
 
-COMMENT ON TABLE dealer_licenses IS '车商（借款人）许可证档案（R1.1 古物商営業許可）：明细分层，dealers.furigusho_no 只存摘要。'
+COMMENT ON TABLE dealer_licenses IS '车商（借款人）许可证档案（R1.1 古物商营业許可）：明细分层，dealers.furigusho_no 只存摘要。'
     || '写入口=web(core) DealerQualificationController，权限点 DEALER_QUALIFICATION_MAINTAIN（D07 §7.1）。'
     || '「无有效期」[待定源 D-02] 未签：expires_on 允许 NULL，到期天数口径不得在本包猜测。';
 COMMENT ON COLUMN dealer_licenses.license_type IS '许可类型，本期仅 FURIGUSHO=古物商（D04 §3.1 预留扩展位，扩展值需业务定源后加入 CHECK）';
-COMMENT ON COLUMN dealer_licenses.competent_authority IS '管辖公安委員会（都道府县），是核查与函证的对接对象';
+COMMENT ON COLUMN dealer_licenses.competent_authority IS '管辖公安委员会（都道府县），是核查与函证的对接对象';
 COMMENT ON COLUMN dealer_licenses.expires_on IS '许可满了日；NULL=业务上无有效期（古物商许可无期限说，[待定源 D-02] 未签前不得当作到期风险）';
 COMMENT ON COLUMN dealer_licenses.status IS 'ACTIVE/EXPIRED/REVOKED/SUPERSEDED；SUPERSEDED=被换证取代，与换证链同义（D03 §2.1）';
 COMMENT ON COLUMN dealer_licenses.verified_by IS '人工核查人（G-A1 复核留痕，对应审计动作 COMPLIANCE_CHECK_DONE 的主体来源之一）';
@@ -99,7 +109,7 @@ COMMENT ON COLUMN dealer_auction_memberships.status IS 'ACTIVE/SUSPENDED/EXPIRED
 -- ---------------------------------------------------------------------
 -- 3. dealer_compliance_checks 合规核查记录（R1.2，D04 §3.3）
 -- ---------------------------------------------------------------------
--- 四类核查（反社会势力 / AML / 本人確認 / 征信）。G-A3 要求四类**都有未过期 PASS**，
+-- 四类核查（反社会势力 / AML / 本人确认 / 征信）。G-A3 要求四类**都有未过期 PASS**，
 -- 且 UNKNOWN 按不通过处理（D00 原则 P-7）——该取严判定写在 domain 的 DealerAdmissionPolicy，
 -- 不在本表用 CHECK 假装约束（CHECK 只管取值合法，不管业务结论）。
 -- 外部（I-11）入站写本表的通路属 R11/W-U6，本包只开放内部录入端点 + 幂等键 request_no。
@@ -133,7 +143,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_dchk_request_no
 CREATE INDEX IF NOT EXISTS idx_dchk_dealer_type
     ON dealer_compliance_checks (dealer_id, check_type, checked_on DESC);
 
-COMMENT ON TABLE dealer_compliance_checks IS '车商合规核查留痕（R1.2 反社 / AML / 本人確認 / 征信）。'
+COMMENT ON TABLE dealer_compliance_checks IS '车商合规核查留痕（R1.2 反社 / AML / 本人确认 / 征信）。'
     || 'valid_until 的有效期天数=floorplan.used.compliance-valid-days [待定源 D-02]，本包不硬编码，由应用层从配置读取后写入；配置缺省时以入参为准。';
 COMMENT ON COLUMN dealer_compliance_checks.result IS 'PASS/FAIL/UNKNOWN；UNKNOWN 在准入判定中按不通过处理（P-7），不得因"未知"放行';
 COMMENT ON COLUMN dealer_compliance_checks.request_no IS '外部核查请求号（幂等键组成段，D00 §13 CHK:{partner_code}:{request_no}）；人工录入为 NULL';
