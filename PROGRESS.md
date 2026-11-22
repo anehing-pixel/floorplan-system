@@ -218,7 +218,7 @@
 | PAYMENT（Wave2） | `agent/payment` | `../wt-payment` | ✅ 完整交付 + reasoning verifier 通过 | 8 | ✅ | `agent/payment-done` = `d50b806` | ✅ 已合并 `d31ae9a` |
 | CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ✅ 已合并 `dba931d`（⚠️ 合并时 verifier 未回结论，见第 0 节流程更正；补验中） |
 
-| W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线未做**（见第 7 节）| 12（9 笔 `[W0]` + 3 笔 docs）| 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md` | `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
+| W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线未做**（见第 7 节）| 13（10 笔 `[W0]` + 3 笔 docs）| 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md` | `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
 
 > 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox) · **V22=收口(B-2 处置冻结增量) · V23=收口(B-5 授信发起人)** · V24=custodian scope（Q9/Q10 口径）· V25=ADR-Q27 `owner_name` 专用列 · **V26=W0 事件消费幂等 + 游标（`event_consumptions` / `consumer_offsets`）**。
 > **下一可用号 = V27**（2026-11-22 14:03 实查：`db/migration/` 最大 V26，八个 agent 分支里无人在建 V27+，Flyway 已实证 `public` 到 V26）。
@@ -423,7 +423,7 @@ ADR §0.1 用 ✅/⚙️/📌/🌐 四种标记严格区分「已落地 / 默认
 | `00-文档索引.md:103,184` | 「db/migration 只到 V11」「V12/V13/V14 尚未落地」 | 迁移目录实有 V1–V25，`web.log` 实证 `25 migrations validated` |
 | `web/HANDOFF.md:70` | 「/api/disposals 未暴露 cancel 端点」 | `DisposalController:70` 已有 `@PostMapping("/{caseNo}/cancel")` |
 | `CORE_VERIFIER_REPORT.md:92` / 部分 HANDOFF | 残留 `TODO(Q27)`、`ownerName 暂记 co_signed_by` | 全仓 `*.java` 已无 `TODO(Q27)`；V25 加 `owner_name` 专用列，`SalesApplicationService:168-175` 写专用列。报告是历史时点快照 |
-| `AGENTS.md §9`「最要命的五处断裂」第 2 条 | 「**事件机制 0 实现** — `outbox_events` 表 + `OutboxPublisher` 接口都在，**无实现类、无 `@Scheduled`、无消费者幂等、无死信**」 | 2026-11-22 14:03 起该条已过半：`JdbcOutboxPublisher` / `EventDispatcher` 均已落地（`@Scheduled(fixedDelay=1000)` 游标轮询、`(event_id, consumer)` 框架层幂等、三次重试后置 `DEAD` 并放行游标），并有 `smoke_w0.py` 33/35 条断言。**真缺口只剩「没有生产者调用发布端」**（第 7 节 W0-1/W0-2）。⚠️ 同节第 1/4/5 条（借据无生产者、工单 0 Java、前端 8 模块 0 页面）**仍然成立**，别顺手整节销掉 |
+| `AGENTS.md §9`「最要命的五处断裂」第 2 条 | 「**事件机制 0 实现** — `outbox_events` 表 + `OutboxPublisher` 接口都在，**无实现类、无 `@Scheduled`、无消费者幂等、无死信**」 | 2026-11-22 14:03 起该条已过半：`JdbcOutboxPublisher` / `EventDispatcher` 均已落地（`@Scheduled(fixedDelay=1000)` 游标轮询、`(event_id, consumer)` 框架层幂等、三次重试后置 `DEAD` 并放行游标），并有 `smoke_w0.py` 33/35 条断言。**真缺口只剩「没有生产者调用发布端」**（第 7 节 W0-1/W0-2）。⚠️ 同节第 1/3/4/5 条（借据无生产者、回款匹配后不解押不回补、工单 0 Java、前端 8 模块 0 页面）**仍然成立**，别顺手整节销掉 |
 | `AGENTS.md §6.2` + `§7.1` 共享禁区 | 「任何 `V1–V25` 迁移」全员禁改 | 已落库到 **V26**，V26 同样禁改（checksum）。实际禁改范围 = `V1–V26`；手册正文归 W3/文档 owner 同步，本轮只在第 2 节号段表登记 |
 | `docs/并行开发-剩余需求拆分方案.md` | W0 交付物写「`wave0b-baseline` tag」 | 标签已打，但之后又追加了隔离套件与命名规矩两批提交。**新分支一律从 `base-w0-20261122` 起**（见第 1 节「基线标签」行），不要按旧名 checkout |
 
