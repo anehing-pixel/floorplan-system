@@ -327,7 +327,7 @@ HTTP 状态码 **404**（不是 200 + `data=null`）。字段两条实测确认�
 | # | 缺口 | 归属 | 说明 |
 |---|---|---|---|
 | 1 | `OutboxPublisher` **零生产调用方** | W2-CORE（`LOAN_CREATED`）、W1-BANK（`PAYMENT_MATCHED`） | 发布端实现已完成但没有业务代码调它，"发布去重"因此无法端到端冒烟（见下） |
-| 2 | 发布端去重只能靠单测 | W0 交付说明已登记 | 卡面 smoke 第 4 步（"同 (`event_type`,`aggregate_key`) 已存在 PENDING 时断言不重复插入"）用 psql 验不了：psql 直插不走发布端，拦它的是发布端 SQL 里的 `WHERE NOT EXISTS`，不是表约束。补 `infrastructure/src/test` 需要扩写集，等 PM 批准 |
+| 2 | 发布端去重端到端 0 验证 | **W1-BANK 收口**（W2-CORE 复验），W3 合并进 `smoke-test.py` | 卡面 smoke 第 4 步（"同 (`event_type`,`aggregate_key`) 已存在 PENDING 时断言不重复插入"）用 psql 验不了：psql 直插不走发布端，拦它的是发布端 SQL 里的 `WHERE NOT EXISTS`（抑制条件实查为 `status IN ('PENDING','SENT')`），不是表约束。**2026-11-22 用户裁决 = A：不扩权建 `infrastructure/src/test`**——不为一段尚无调用方的 SQL 引入全仓第一个连库测试，`mvn -B clean package` 保持不依赖 5434。改由第一个真实生产者接线时在冒烟里验；⚠️ 注意「同一 transaction_id 再匹配一次」这条断言**归因不唯一**（会先被 `uk_payment_match_txn` 挡住），要把机制单独钉住见 `PROGRESS.md §7` W0-3 行的取法。判据与风险登记同步在案，勿再重复申请扩权 |
 | 3 | `CreditLineQueryClient` 无实现 | W1-CREDIT | §6.4 |
 | 4 | `CreditLineClient`（`GET /api/credit-lines/available?dealerId=`，返回 `BigDecimal`）全仓无实现，只被 bank 的本地存根实现 | W1-CREDIT 处置 | 与 §6.4 是两条不同路径、两种不同金额类型。实现或删，别留死契约 |
 | 5 | `COLLATERAL_CHANGED` 的 `aggregate_key` 与 `status` 取值域未定源 | W2-CORE / 权属 owner | §2.3 |
