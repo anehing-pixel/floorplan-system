@@ -211,6 +211,11 @@ public final class RoleSeparationPolicy {
     /**
      * T1-5（B1）放款前担保门禁判定。
      *
+     * <p><b>Q21 已业务定源（2026-11-22）：采用 A 硬阻断</b>。查不到 REGISTERED 登记
+     * （含查询无结果、服务不可达、未知状态）一律拒付，<b>不保留按经销商/产品线放宽的通道</b>——
+     * 白名单绕过会让"硬阻断"退化成软放行，与定源结论冲突。拒付时上层仍生成 HIGH 级
+     * 「担保待登记」工单催办，但那是追补动作，不是放行。</p>
+     *
      * <p><b>TODO(Q27) 明确阻塞项</b>：门禁以哪张表为准（{@code vehicle_units} /
      * {@code collateral_ledger} / {@code collateral_registration_batches} /
      * collateral-reg-service 权属表）尚未由业务书面确认，三源互不一致。
@@ -219,24 +224,19 @@ public final class RoleSeparationPolicy {
      *
      * @param view        权属查询结果（null 表示服务不可达/无记录）
      * @param gateEnabled 门禁开关（默认 false）
-     * @param dealerRelaxed 该经销商是否配置的放宽名单内
      */
     public static GuaranteeDecision evaluateGuarantee(GuaranteeLookup.GuaranteeView view,
-                                                      boolean gateEnabled,
-                                                      boolean dealerRelaxed) {
+                                                      boolean gateEnabled) {
         if (!gateEnabled) {
             return GuaranteeDecision.allow("担保门禁默认关闭（Q27 判定源未定），不参与放款判定");
         }
-        if (dealerRelaxed) {
-            return GuaranteeDecision.allow("经销商已配置放宽担保门禁（Q21 可按经销商放宽）");
-        }
         if (view == null) {
-            return GuaranteeDecision.block("担保权属查询无结果或服务不可达，fail-closed 阻断放款并强制工单");
+            return GuaranteeDecision.block("担保权属查询无结果或服务不可达，fail-closed 硬阻断放款");
         }
         if ("REGISTERED".equalsIgnoreCase(view.status())) {
             return GuaranteeDecision.allow("该 VIN 已有 REGISTERED 担保登记");
         }
         return GuaranteeDecision.block("该 VIN 担保状态为 " + view.status()
-                + "（非 REGISTERED），阻断放款并强制工单");
+                + "（非 REGISTERED），按 Q21 硬阻断放款");
     }
 }

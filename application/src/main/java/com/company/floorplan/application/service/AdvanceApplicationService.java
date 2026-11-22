@@ -88,9 +88,7 @@ public class AdvanceApplicationService {
     /** T1-5（B1）：担保门禁总开关，默认关闭——Q27 定源前绝不默认开启。 */
     @Value("${floorplan.core.guarantee-gate.enabled:false}")
     private boolean guaranteeGateEnabled;
-    /** T1-5（B1）：按经销商放宽门禁的白名单（逗号分隔 dealerId，Q21 可配）。 */
-    @Value("${floorplan.core.guarantee-gate.relaxed-dealers:}")
-    private String relaxedDealers;
+    /** Q21 已定「硬阻断」：不设按经销商放宽白名单，避免门禁被配置绕过。 */
 
     /** 垫款比例上限（预设 100%，需客户确认）。 */
     @Value("${floorplan.advance.max-ratio:1.0}")
@@ -382,8 +380,9 @@ public class AdvanceApplicationService {
      * 开关 {@code floorplan.core.guarantee-gate.enabled} 默认 false，
      * 默认关闭时<b>连权属服务都不查询</b>，绝不改变现有放款行为。</p>
      *
-     * <p>开关开启后：查不到 REGISTERED 登记（含服务不可达）→ 阻断放款 + 生成 HIGH 级
-     * 「担保待登记」工单；按经销商白名单可放宽（Q21）。</p>
+     * <p><b>Q21 已定源（2026-11-22）：硬阻断</b>。开关开启后，查不到 REGISTERED 登记
+     * （含服务不可达）一律拒付，<b>不存在按经销商放宽的白名单</b>；拒付的同时生成 HIGH 级
+     * 「担保待登记」工单催办，但那是追补动作，不是放行。</p>
      */
     private void enforceGuaranteeGate(Advance pending) {
         if (!guaranteeGateEnabled) {
@@ -392,28 +391,14 @@ public class AdvanceApplicationService {
         Long dealerId = vehicleUnitRepository.findByVin(pending.getVin())
                 .map(VehicleUnit::getDealerId)
                 .orElse(null);
-        boolean relaxed = isRelaxedDealer(dealerId);
         RoleSeparationPolicy.GuaranteeLookup.GuaranteeView view = guaranteeLookup.findByVin(pending.getVin());
         RoleSeparationPolicy.GuaranteeDecision decision =
-                RoleSeparationPolicy.evaluateGuarantee(view, guaranteeGateEnabled, relaxed);
+                RoleSeparationPolicy.evaluateGuarantee(view, guaranteeGateEnabled);
         if (decision.blocked()) {
             supportRepository.createAlert(dealerId, pending.getVin(), "GUARANTEE_PENDING", "HIGH",
-                    "B1 担保门禁阻断放款：" + decision.reason() + "（TODO(Q27)：判定源待业务确认，需强制工单补登）");
+                    "B1 担保门禁硬阻断放款：" + decision.reason() + "（TODO(Q27)：判定源待业务确认，需强制工单补登）");
             throw new BusinessException(ErrorCode.GUARANTEE_001, decision.reason());
         }
-    }
-
-    /** 经销商是否在门禁放宽白名单内（Q21：可按经销商配置）。 */
-    private boolean isRelaxedDealer(Long dealerId) {
-        if (dealerId == null || relaxedDealers == null || relaxedDealers.isBlank()) {
-            return false;
-        }
-        for (String part : relaxedDealers.split(",")) {
-            if (part.trim().equals(String.valueOf(dealerId))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

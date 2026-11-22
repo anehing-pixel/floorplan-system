@@ -218,6 +218,8 @@
 
 **另一处非资损细节【实证】**：`RoleSeparationPolicy.java:230-232` 中 `dealerRelaxed == true` 的分支**先于 `view == null` 判定直接 allow**，即服务不可达时白名单经销商仍放行（Q21 有意的放宽设计，`GuaranteeGatePolicyTest.java:56-59` 有覆盖，`RelaxedDealers` 默认空串见 `AdvanceApplicationService.java:92`）。属"可配置 bypass"，开启门禁前应确认白名单为空。
 
+> **后续决策变更（2026-11-22 08:26，本报告结论按当时代码成立，此处为增量记录）**：业务方就 Q21 裁决**采用 A 硬阻断**，不保留按经销商放宽。上述 `dealerRelaxed` 绕过分支与 `relaxedDealers` 配置项**已从代码删除**，`evaluateGuarantee` 签名改为两参，原 `:56-59` 放宽断言改为钉死「无绕过」的阻断断言。原报告"开启门禁前应确认白名单为空"的前置条件因此**不再需要**——已无白名单可确认。Q27 判定源仍未定源，门禁总开关保持默认关闭。
+
 **判定**：**默认关闭与 fail-closed 均正确，非阻塞**。缺 JWT interceptor 记为「开启门禁前必须补」的技术债（否则门禁开启即全量拒付）；不判资损、不判阻塞。
 
 **时点澄清（见 A-4）**：PM 在审计期间对 `FeignGuaranteeLookup.java` 的 `@Qualifier` 与 `web/pom.xml` 的 loadbalancer 做了启动期修复，但 `git show dba931d:...` 与当前工作区 diff 均显示**未引入 `RequestInterceptor`**，`GuaranteeFeignConfig.java` 也未改动。该修复解决的是启动失败，不改变本条结论。

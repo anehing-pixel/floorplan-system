@@ -4,7 +4,33 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 08:26（GMT+8） · **Q14 定源提交: `083d9a9`**（基线 `6587a96`；当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+最后更新：2026-11-22 08:35（GMT+8） · **Q21 定源：采用 A 硬阻断**（基线 `6c52b8d`；当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+
+> ✅ **Q21 业务定源已落地（2026-11-22 08:26）**：用户裁决「采用 A，硬阻断」。
+> 代码改动：`RoleSeparationPolicy.evaluateGuarantee` 删除 `dealerRelaxed` 参数与「白名单先于 `view == null` 直接 allow」分支（改两参），
+> `AdvanceApplicationService` 删除 `relaxedDealers` 配置项与 `isRelaxedDealer()`；门禁开启后非 REGISTERED /
+> 查询无结果 / 服务不可达 / 未知状态一律拒付，拒付同时生成 HIGH 工单催补登记（追补动作，不是放行）。
+> `GuaranteeGatePolicyTest` 删除 relaxed 放行断言，新增 `noDealerBypass` / `unknownStatus`，共 7 项。
+> 口径同步：十一环节核查报告、路线图、CORE_VERIFIER_REPORT、web/HANDOFF、ADR-Q27（工作区稿）的 Q21 行统一改为「硬阻断、不保留按经销商放宽」。
+> 验证：`mvn -B clean package` 15/15 SUCCESS、全量单测全绿（domain 49 项，`GuaranteeGatePolicyTest` 7 项）；
+> `bash run-microservices.sh smoke` EXIT 0、182 项全绿、10 服务全就绪并自动清理。
+> 门禁总开关 `floorplan.core.guarantee-gate.enabled` **仍默认 false**——Q27 判定路径改造未落地，开启即全量拒付，不擅自打开。
+>
+> ⚠️ 工作区另有**并行 WIP 未纳入本提交**：ADR-Q27 裁决稿、V24 custodian scope / V25 ADR-Q27 迁移、
+> release-service 接收方按项拆分、collateral 权威源改造等。本轮只顺手处理了两处挡住验证的机械问题：
+> `ReleaseController` 漏传 `custodianByItem()`（由并行工作流自行补齐）、两个 V24 号段冲突（后建的顺延为 V25，SQL 内容零改动）。
+> 上述并行文件仍留在工作区，由对应工作流收口。本次 `mvn clean package` / smoke 于 08:31–08:34 执行，
+> 跑前确认无其它 Maven 进程占用、8080–8088/18080 端口全空闲；**后续重跑须按下方测试锁协议申请锁**。
+
+> 🚨 **测试串行锁协议（2026-11-22 08:30 起，总调度设立，所有并行任务必须遵守）**：
+> 4 个任务并行开发，测试共享开发库 5434 / Flyway / 8080–8088 端口 / smoke 进程清理，并发跑测试必互踩。
+> **规则：同一时刻全仓只允许一个任务跑测试。** 流程：给总调度发「申请测试锁：<任务名>：<命令>」
+> → 等总调度批准 → 跑完立刻发「释放测试锁：<结果>」。
+> 锁状态（当前持锁 + 等待队列）唯一事实在仓库根 **`TEST_LOCK.md`**。
+> 需申请：mvn test/package（含单测）、smoke 脚本、连 5434 的服务启动、ai-service pytest。
+> 豁免：`-DskipTests` 纯编译、文档改动。未批准就跑 = 测试结果作废。
+
+（历史更新：2026-11-22 08:26 · **Q14 定源提交: `083d9a9`**（基线 `6587a96`）；当前真实 HEAD 一律以 `git log -1` 为准）
 
 > ✅ **Q14 业务定源已落地（2026-11-22 08:15）**：用户裁决「M1/M2/M3 按自然日」。
 > 代码本就按自然日实现（`DpdCalculator.daysPastDue` = `ChronoUnit.DAYS.between`、`DAY_BASIS="CALENDAR"`），
@@ -241,8 +267,8 @@
 | 编号 | 问题 | 卡住谁 |
 |---|---|---|
 | Q27 | 担保门禁以哪张表为准？三源如何归一？**2026-11-22 CORE 发现实体问题：collateral-reg-service 的 V18 权属表与 core 的 V10 批次表数据不互通，两边各自写入、没有同步链路。Q27 不只是"选哪张表"，还得解决"两张表如何归一/同步"，否则 B1 门禁查哪边都可能漏判。**此外 V10 无 ownerName 专用列，CORE 暂记 `co_signed_by` 并留 TODO(Q27)（V18 权属表有 dedicated ownerName）。 | T1-6、T1-5（collateral 门禁判定）、M9 登记编号归一 |
-| Q21 | 无 REGISTERED 批次时硬阻断还是工单+预警？ | T1-5 |
-| Q9/Q10 | 出库指令接收方是谁？有无外部 WMS？ | T2-9（不挡建表，挡对接） |
+| ~~Q21~~ | **✅ 已业务定源（2026-11-22 08:26）：采用 A 硬阻断**，不保留按经销商/产品线放宽。代码已删除 `relaxedDealers` 白名单配置与 `dealerRelaxed` 绕过分支；拒付仍生成 HIGH 级「担保待登记」工单催补登记（追补动作，不是放行） | T1-5 口径阻塞已解除 |
+| Q9/Q10 | 出库指令接收方是谁？有无外部 WMS？ | **建议口径已落地（V24，2026-11-22）**：放车线 `DEALER_WAREHOUSE` + 放证线 `CERTIFICATE_DEPOSITORY`，按释放项分别指定 `custodian_id`（主表保留主接收方兼容）；起步无外部 WMS，`MANUAL` 人工转交 + 我方见证代录回执，确认权威与执行接收方解耦。另两类接收方标为须业务书面启用（与《业务流程文档》§6 日本新车渠道事实冲突）。**最终仍待业务书面确认**，不阻断编译/启动/冒烟 |
 | ~~Q14~~ | **✅ 已业务定源（2026-11-22 08:15）：M1/M2/M3 按自然日 CALENDAR，不切换营业日** | T2-1 口径阻塞已解除 |
 | R5–R8 | 对账规则口径 | recon 占位规则补全 |
 

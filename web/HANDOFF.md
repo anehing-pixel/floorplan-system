@@ -104,6 +104,16 @@
 - 该文件属 release 侧且迁移文件为我的禁改边界，已通过 SendMessage 上报 team-lead（含精确行号与修复建议）。V19 修复后即可跑全量 smoke。
 - smoke-test.py 仅改了一处标题文案（⑪ 提前部分还款 → 在库主动提前还本金回补额度但不解担保），未增删断言项。
 
+## 六·补 · Q21 决策变更（2026-11-22 08:26）
+
+业务方裁决 **Q21 = A 硬阻断**，不保留按经销商/产品线放宽。对本 HANDOFF 上文描述的实现做如下调整（上文保留作当时交付记录）：
+
+- `RoleSeparationPolicy.evaluateGuarantee` 删除 `dealerRelaxed` 参数与「白名单先于 `view == null` 直接 allow」分支，签名改为 `(view, gateEnabled)`；非 REGISTERED / 查询无结果 / 未知状态一律 `block`。
+- `AdvanceApplicationService` 删除 `@Value("${floorplan.core.guarantee-gate.relaxed-dealers:}")` 字段与 `isRelaxedDealer()`，调用改两参；`dealerId` 查询保留，仅用于拒付时生成 HIGH 工单。
+- 拒付时仍创建 `GUARANTEE_PENDING` HIGH 告警并抛 `GUARANTEE_001`，但这是**拒付后的追补动作**，不是 Q21 的 B 方案「放行」。
+- `GuaranteeGatePolicyTest` 的 `gateEnabled_relaxedDealer_allows` 改为 `gateEnabled_noDealerBypass_blocks`，另补 `unknownStatus_blocks`。
+- 门禁总开关 `floorplan.core.guarantee-gate.enabled` **仍默认 false**——Q27 判定源未定，开启即全量拒付，不擅自打开。
+
 ## 六、TODO 汇总
 
 1. **Q27（阻塞项）**：担保判定源需业务书面确认，B1 门禁保持默认关闭，绝不自己定哪张表为准。
