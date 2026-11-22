@@ -4,7 +4,24 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 11:10（GMT+8） · **③ 业务口径待定源全量收口：8 条对拍规则全实现 / 0 bug**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+最后更新：2026-11-22 14:03（GMT+8） · **W0 事件地基 + 并行环境隔离已交付主干，基线 tag `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+
+> ✅ **2026-11-22 14:03 W0-FOUNDATION（事件地基）已交付并验证**——在 master 直干、无 agent 分支，9 笔 `[W0]` 提交（`8457b78`…`1a730bb`）：
+> - **事件模型**：`common/event/DomainEvent` + `EventConsumer`（payload 取数单一口径）；
+> - **发布端**：`infrastructure/outbox/JdbcOutboxPublisher`（在调用方事务内写入 + `NOT EXISTS` 去重）；
+> - **消费端**：`EventDispatcher`（`@Scheduled(fixedDelay=1000)` 按游标轮询 / 框架层幂等主键 `(event_id, consumer)` /
+>   失败三次置 `DEAD` 并放行游标，避免一条坏事件卡死整个消费者）；10 个启动类补 `@EnableScheduling` + `@Import`；
+> - **V26 迁移**：`event_consumptions`（消费幂等）+ `consumer_offsets`（游标）；
+> - **Feign 本地直连**：`floorplan.clients.<svc>.url` 开关 + 借据/额度两个查询契约（键名不带连字符，避开宽松绑定）；
+> - **冒烟脚手架**：`scripts/agent_smoke_lib.py`（含 schema 感知）+ `scripts/smoke_w0.py`；
+> - **并行环境隔离**：`scripts/agent_env.sh`——一个 agent 一套 DB schema + 端口偏移，合并后回 `public` 跑全量回归。
+> 落盘文档：`docs/接口契约-事件与Feign.md`（W1/W2 的编码依据，含 `aggregate_key` 禁用 vin 的硬规则与真实响应样本）、
+> `docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md`。
+> **验证**：`mvn -B clean package` 15/15 SUCCESS；`bash run-microservices.sh smoke` **EXIT 0 / 211 PASS · 0 FAIL**（基线 204 项未退化）；
+> `smoke_w0.py` 主干 33 条、隔离 35 条各全绿且 EXIT 0；隔离跑完核对 `public` 未被改动。
+> **仍未闭合（不在本轮范围，明细见第 7 节 W0-1…W0-8 八行）**：`JdbcOutboxPublisher` 至今零业务调用方、
+> `LoanApplicationService.createFromLoanCreated` 仍无调用方 → **`loans` 表依旧恒空**。
+> 即「借据没有生产者」这条 P0 只做到了「消费框架就位」，接线归 W1；**不要把本轮说成事件闭环已通**。
 
 > ✅ **2026-11-22 10:40 重新审查「未开发需求」时，实测抓到并修复 1 个回归缺陷**：
 > `bank-service` 的 `PaymentMatchController` 挂在 `/api/payments/**`，但网关只把 `/api/bank/**` 与 `/api/jobs/bank-fetch`
@@ -60,7 +77,9 @@
 
 ## 0. 三句话现状
 
-> **阅读提示**：本节下方带时间戳的 `>` 引用块是**历史沿革快照**（含当时「未跑通 / 待修」等中间结论），保留作审计轨迹，**不代表当前状态**。最终状态以 09:45「全量收口」行、第 6 节与第 7 节为准：系统已 0 bug / 195 项全绿。
+> **阅读提示**：本节下方带时间戳的 `>` 引用块是**历史沿革快照**（含当时「未跑通 / 待修」等中间结论），保留作审计轨迹，**不代表当前状态**。最终状态以文件头 14:03「W0 事件地基」行、第 6 节与第 7 节为准：
+> 业务口径与 7 个 agent 分支已全闭环、`mvn -B clean package` 15/15、主干冒烟 **211 项 PASS / 0 FAIL**；
+> **但「0 bug」不等于「事件链路已通」**——第 7 节 W0-1…W0-8 八项是开放的接线/部署待办，`loans` 表仍恒空。
 
 1. **Wave 0（地基）已完成**：父 pom 预留模块、网关路由、启动脚本端口、契约接口、V21 outbox、4 个空服务骨架全部落地。
 2. **recon agent 已完整交付并合并进 master**：T3-2 对账清算服务，8 条规则（4 实现 + 4 占位），22 个单测通过，HANDOFF 齐全。
@@ -180,7 +199,9 @@
 | 启动坑 | 启动时一律 `env -u SERVER__PORT`（否则覆盖各服务端口）；`run-microservices.sh` 已处理 |
 | 注册中心 | 本地不启 Nacos，`fail-fast=false`，注册失败仅告警 |
 | 进程 | 后台 JVM 随 shell 回收 → 启动+测试+清理必须在同一条命令内 |
-| 验证金标准 | `bash run-microservices.sh smoke`，退出码 0 且 182 项断言全绿 —— ✅ **2026-11-22 02:46 已达成**（连续两次 EXIT 0，全绿） |
+| 验证金标准 | `bash run-microservices.sh smoke`，退出码 0 且全量断言全绿（断言数随开发增长，**不要写死数字**，看 FAIL）—— ✅ 2026-11-22 14:03 实测 211 PASS · 0 FAIL |
+| 并行环境隔离 | `bash scripts/agent_env.sh init <你的名字>` + `eval "$(… env <schema> <偏移>)"`；两条实测硬约束：连接串必须 `currentSchema=<schema>,public`（pgcrypto 的 `gen_salt()` 只装在 public，缺第二段 V5 中断并留下会穿透到 public 的半成品表）、脚本与服务必须同 `search_path`（`FLOORPLAN_DB_SCHEMA`）。详见 `docs/并行开发-W1环境隔离.md` |
+| 基线标签 | 新基线一律 `base-<波次>-<日期>`（用户裁决 2026-11-22）；当前 W0 基线 = `base-w0-20261122`。旧名 `wave0-baseline`(`aab5295`) 只是**骨架地基**（空服务 + outbox 建表 + 契约接口，零实现），`wave0b-baseline`(`cee18f8`) 才是事件机制真实现——三者不是一个层次，别按名字猜 |
 | 模型约束 | 当前 hy4 flash 限时免费，随时可能受限。**不能热切模型**，靠本文件断点续跑 |
 
 ---
@@ -197,8 +218,16 @@
 | PAYMENT（Wave2） | `agent/payment` | `../wt-payment` | ✅ 完整交付 + reasoning verifier 通过 | 8 | ✅ | `agent/payment-done` = `d50b806` | ✅ 已合并 `d31ae9a` |
 | CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ✅ 已合并 `dba931d`（⚠️ 合并时 verifier 未回结论，见第 0 节流程更正；补验中） |
 
-> 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox) · **V22=收口(B-2 处置冻结增量) · V23=收口(B-5 授信发起人)**。
-> **硬规矩**：共享层已有 java 文件只有 CORE agent 能改；其余 agent 只写自己的服务目录 + 自己号段的迁移。
+| W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线未做**（见第 7 节）| 12（9 笔 `[W0]` + 3 笔 docs）| 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md` | `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
+
+> 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox) · **V22=收口(B-2 处置冻结增量) · V23=收口(B-5 授信发起人)** · V24=custodian scope（Q9/Q10 口径）· V25=ADR-Q27 `owner_name` 专用列 · **V26=W0 事件消费幂等 + 游标（`event_consumptions` / `consumer_offsets`）**。
+> **下一可用号 = V27**（2026-11-22 14:03 实查：`db/migration/` 最大 V26，八个 agent 分支里无人在建 V27+，Flyway 已实证 `public` 到 V26）。
+> 号段无冲突：V26=W0 这一格在 `AGENTS.md §6.2`、`docs/并行开发-剩余需求拆分方案.md §4`、W0 任务卡三处写法一致。
+> 本轮补的是**登记本身**——此前本表只到 V23，而 V24（custodian scope）、V25（`owner_name`）早已落库、V26 是本轮新建，
+> 后续 agent 若照本表找号会以为 V24–V26 可拿，那正是「两个同号迁移 → Flyway 拒启动」的老事故路径。
+> ⚠️ 连带一处待同步：`AGENTS.md §6.2` 与共享禁区清单里的禁改范围还写着「任何 `V1–V25` 迁移」，
+> 实际**已落库的 V26 同样禁改**（checksum）。手册属收口方维护，本轮不改，先在此挂账。
+> **硬规矩**：共享层已有 java 文件只有 CORE agent 能改；其余 agent 只写自己的服务目录 + 自己号段的迁移。开新分支前先在这里登记号段。
 
 ---
 
@@ -280,12 +309,20 @@
 | ~~Q9/Q10~~ | 出库指令接收方是谁？有无外部 WMS？ | **✅ 已由《业务口径总定源》ADR §2 定稿（2026-11-22）**：V24 口径即最终口径（放车 `DEALER_WAREHOUSE` / 放证 `CERTIFICATE_DEPOSITORY`、起步 MANUAL 无外部 WMS），删除「最终仍待书面确认」。口径阻塞已解除 |
 | ~~Q14~~ | **✅ 已业务定源（2026-11-22 08:15）：M1/M2/M3 按自然日 CALENDAR，不切换营业日** | T2-1 口径阻塞已解除 |
 | ~~R5–R8~~ | 对账规则口径 / 占位规则补全 | **✅ 已闭环（2026-11-22）**：4 条全部补真实取数 SQL + `ExactValueReconRule` 精确相等判定，8 条全 `implemented=true`、`ruleCount` 恒 8；口径见 ADR §10 |
+| **Q-EVT1 🆕（2026-11-22 W0）** | `COLLATERAL_CHANGED` 的 `aggregate_key` 按什么取值、「担保权属的一次变更」边界是什么、`status` 有哪些取值？——同键 SENT 行永久保留 ⇒ 键选错会**永久抑制后续合法事件**，属业务口径不能由实现方猜 | W1-COLLATERAL 发布端接线 |
+| **Q-EVT2 🆕（2026-11-22 W0）** | 「可用额度」契约二选一：`GET /api/credit-lines/available?dealerId=` + `BigDecimal`，还是 `GET /api/credit-lines/{id}/available` + `Long`（金额按 `AGENTS §6.3` 须 BIGINT 整数）？还是两条都删。**当前两条都无实现**，其中后者实测 500 | W1-CREDIT |
+
+> 上两行是 W0 契约冻结时**留白**产生的，不是代码缺陷：未签字前不许按「合理默认值」先实现（AGENTS 铁律 3）。
+> 口径与选项已写进 `docs/接口契约-事件与Feign.md`，签字后只需替换文档 + 接线，框架不用改。
 
 ---
 
 ## 7. 集成 TODO（代码里留了接缝，合并后必须处理）
 
-> **2026-11-22 09:45 复核**：下表 14 项**全部 ✅ 已闭环**，保留作审计记录，无遗留代码 TODO。Q27 已由 ADR-Q27 裁决落地并纳入冒烟 ㉓ 端到端验证；第 6 节剩余项仅 Q9/Q10 接收方口径与 R5–R8 规则细化，属业务书面确认 / 后续增强，非代码缺陷。
+> **2026-11-22 14:03 复核**：下表前 14 项（Wave1/2 与收口期）**全部 ✅ 已闭环**，保留作审计记录；
+> **W0-1…W0-8 八项 ⬜ 开放**，是事件链路的接线与部署待办，不是运行缺陷——主干冒烟 211 项全绿与这八项开放**同时成立**，
+> 因为冒烟验的是「消费框架本身可用」，而八项要的是「生产者接上、死契约定源、多实例与重放接缝」。别把绿的数字读成闭环。
+> Q27 已由 ADR-Q27 裁决落地并纳入冒烟 ㉓ 端到端验证；第 6 节剩余项属业务书面定源，非代码缺陷。
 
 | 项 | 问题 | 处理方 | 状态 |
 |---|---|---|---|
@@ -303,6 +340,14 @@
 | **B-5 授信单人自动审批绕过 SOD** | 兼容入口 `createCreditLine` 用同一 actor 跑完 initiate→complete，绕过「发起与执行分离」。代码层已有双段审批链，但默认放行 | PM | ✅ **已修复 `6dfc4cc`（代码层能力完整 + 生产配置强制）**：V23 `credit_lines.initiated_by` + `floorplan.credit.strict-sod` 开关。默认 `false` 保持本地原型/冒烟可用；**生产必须置 `true`**，届时兼容入口拒绝（`AUTH_003`）且 `completeCreditLine` 强制复核人 ≠ 发起人。是否强制属部署配置，不是代码 bug |
 | **V22/V23 迁移号段** | 本轮收口新增两个共享层迁移，需登记避免后续 agent 撞号 | PM | ✅ 已登记：V22 = 处置冻结增量（B-2）、V23 = 授信发起人（B-5）；`web.log` 实证 `now at version v23` |
 | **`.microservice-pids/` 运行时文件误跟踪** | 6 个 pid 文件被提交进版本库，且 `.gitignore` 未覆盖 | PM | ✅ **已修复 `6dfc4cc`**：`.gitignore` 加 `.microservice-pids/`，`git rm --cached` 移除 6 个已跟踪 pid；smoke 结束后目录为空 |
+| **🆕 W0-1 事件发布端零业务调用方** | `JdbcOutboxPublisher` 实查只出现在 10 个启动类的 `@Import` 里，没有任何业务方法调用它 → `outbox_events` 现在只能靠脚本造数，**跨服务链路依旧靠人工搬数据**。接线点已在 `docs/接口契约-事件与Feign.md` §5 钉死：core 在垫款 `PAID` 后发 `LOAN_CREATED`（键 `advanceId`）、bank 在回款匹配后发 `PAYMENT_MATCHED`（键 `paymentRef`）、collateral-reg 在权属变更时发 `COLLATERAL_CHANGED`（键未定源，见下） | W1-CORE / W1-BANK / W1-COLLATERAL | ⬜ **开放**（消费框架已就位并冒烟验证，缺生产者）|
+| **🆕 W0-2 `createFromLoanCreated` 仍无调用方 → `loans` 表恒空** | `LoanApplicationService.createFromLoanCreated()` 全仓无调用方；W0 交付的 `LoanCreatedConsumer` 里那行**刻意注释着**（骨架只做校验 + 留痕，不越权建业务）。DPD / 画像 / 逾期 / 对账四条线继续空转 | W1-LOAN | ⬜ **开放** |
+| **🆕 W0-3 发布端 `NOT EXISTS` 去重端到端 0 验证** | 没有 HTTP 入口能触发发布端，冒烟只能绕开它直插 PENDING 行；要真验只能补 `infrastructure/src/test` 单测，而该目录在 W0 卡面写集之外，未擅自新建 | W1 / W3 | ⬜ **开放**（已如实记入契约文档 §7 遗留清单）|
+| **🆕 W0-4 `DEAD` 事件无人工重放接口** | 死信只有 `event_consumptions.status='DEAD'` 可查；游标已越过该 id，重放需要人工把 `consumer_offsets.last_event_id` 回退，而回退会连带重放历史事件（框架层幂等会跳过已 DONE 的，但业务侧副作用不由框架兜）。本期只留接缝 | W3 收口 | ⬜ **开放** |
+| **🆕 W0-5 多实例共用一条游标** | `consumer_offsets` 按 `consumer` 一行；两个进程用同一个 consumer 名会互相覆盖游标 → 漏读或重复读。本地冒烟与当前部署都是单实例，故未加分布式锁。**多实例部署前必须**改 `FOR UPDATE SKIP LOCKED` 或按实例名分片 | W3 / 运维 | ⬜ **开放**（部署前置条件）|
+| **🆕 W0-6 credit 两条死契约互不相符** | `CreditLineClient`（`GET /available?dealerId=`，返回 `BigDecimal`）全仓无实现；`CreditLineQueryClient`（`GET /{id}/available`，返回 `Long`）实测 500 `SYS_001`「No static resource」。两者签名冲突，且金额按 `AGENTS §6.3` 应为 BIGINT 整数而非小数 | W1-CREDIT | ⬜ **开放**（实现哪条 / 删哪条需定源，W0 未擅自判定）|
+| **🆕 W0-7 `COLLATERAL_CHANGED` 聚合键与 status 取值域未定源** | 属业务口径，契约文档里**留白并标 owner**，没有按猜测填。接线前必须由业务给 | 业务 / PM | ⬜ **开放** |
+| **🆕 W0-8 旧措辞仍留在共享代码里** | V21 迁移注释与 `OutboxPublisher` javadoc 写着「aggregate_key 通常是 vin 或借据号」，与已裁决的口径**相反**（同键 SENT 行永久保留 ⇒ 同键实际只能发一条，用 vin 会永久抑制同车第二次合法事件）。迁移与共享层本轮禁改，故只改文档：以 `docs/接口契约-事件与Feign.md` 为准，代码注释 W3 收口时一并清 | W3 收口 | ⬜ **开放**（文档已作废该措辞）|
 
 ---
 
@@ -310,7 +355,8 @@
 
 > **本节的口径**：只列「代码里确实没有 / 只写了骨架 / 默认关闭 / 零测试覆盖 / 只有设计稿」的项，
 > 并**单独列出「文档状态滞后造成的假未完成」**，避免下次把过期的 `[ ]` 当成真实缺口。
-> 当前交付态：**0 bug / 204 项冒烟全绿 / 15 模块编译全绿 / 10 服务启停正常 / Flyway V1–V25 落库**。
+> 当前交付态：**0 运行 bug / 主干 211 项冒烟全绿 / 15 模块编译全绿 / 10 服务启停正常 / Flyway V1–V26 落库 / 事件消费框架已就位（`base-w0-20261122`）**。
+> **但跨服务链路仍未自动打通**：事件生产者一个都没接上（第 7 节 W0-1/W0-2），所以十一环节里的事件驱动衔接照旧靠人工搬数据。
 > 下列均为「功能范围 / 生产化 / 外部对接」层面的未开发需求，**不是缺陷、不阻断运行**。
 
 ### 8.1 真·未开发（代码层没有，含占位/存根）
@@ -344,6 +390,10 @@
 - 本轮 ㉔ 已覆盖：loan(2)/recon(2)/release(1)/bank(3)/collateral-reg(1) 共 9 项「从网关可达」断言。
 - **仍未被冒烟覆盖的端点**：loan `GET /loans/{id}`、`/loans/{id}/dpd`、画像 recompute；release confirm/release/discharge-lien/建单；bank `POST /payments/match`、manual-match/ignore/match-by-transaction、`GET /matches/{id}/release`；collateral-reg `discharge`、`snapshot/import`（单条）；risk `CollateralController` 12 个端点（仅 `smoke-collateral.py` 覆盖）；web 的供应商/采购单/附件/aging/holidays 等 30+ 端点。
 - **教训（两次实证）**：零覆盖 = 假绿。上一轮 ㉓ 补断言揪出 collateral-reg 全端点 500 + V10 漏挂车；本轮实测揪出 `/api/payments/**` 被 core 兜底 404。**新增端点必须同步补冒烟**。
+- **W0 新增覆盖（`scripts/smoke_w0.py`，主干 33 条 / 隔离 35 条）**：消费闭环、per-occurrence 幂等、`event_type` 订阅过滤、
+  游标只按已订阅类型前进、重置游标重放不重复消费、`LoanSnapshotDto` 七个字段对真实生产者逐字段校验 + 404 契约。
+  **仍零覆盖的一条**：发布端 `NOT EXISTS` 去重——没有 HTTP 入口能触发它，冒烟只能直插 `PENDING` 行（见第 7 节 W0-3）。
+  这条属「机制已测、生产者未测」，别说成事件链路已验穿。
 
 ### 8.4 业务口径定源 — ✅ 已全部裁决（2026-11-22，本节不再是待办）
 
@@ -373,6 +423,9 @@ ADR §0.1 用 ✅/⚙️/📌/🌐 四种标记严格区分「已落地 / 默认
 | `00-文档索引.md:103,184` | 「db/migration 只到 V11」「V12/V13/V14 尚未落地」 | 迁移目录实有 V1–V25，`web.log` 实证 `25 migrations validated` |
 | `web/HANDOFF.md:70` | 「/api/disposals 未暴露 cancel 端点」 | `DisposalController:70` 已有 `@PostMapping("/{caseNo}/cancel")` |
 | `CORE_VERIFIER_REPORT.md:92` / 部分 HANDOFF | 残留 `TODO(Q27)`、`ownerName 暂记 co_signed_by` | 全仓 `*.java` 已无 `TODO(Q27)`；V25 加 `owner_name` 专用列，`SalesApplicationService:168-175` 写专用列。报告是历史时点快照 |
+| `AGENTS.md §9`「最要命的五处断裂」第 2 条 | 「**事件机制 0 实现** — `outbox_events` 表 + `OutboxPublisher` 接口都在，**无实现类、无 `@Scheduled`、无消费者幂等、无死信**」 | 2026-11-22 14:03 起该条已过半：`JdbcOutboxPublisher` / `EventDispatcher` 均已落地（`@Scheduled(fixedDelay=1000)` 游标轮询、`(event_id, consumer)` 框架层幂等、三次重试后置 `DEAD` 并放行游标），并有 `smoke_w0.py` 33/35 条断言。**真缺口只剩「没有生产者调用发布端」**（第 7 节 W0-1/W0-2）。⚠️ 同节第 1/4/5 条（借据无生产者、工单 0 Java、前端 8 模块 0 页面）**仍然成立**，别顺手整节销掉 |
+| `AGENTS.md §6.2` + `§7.1` 共享禁区 | 「任何 `V1–V25` 迁移」全员禁改 | 已落库到 **V26**，V26 同样禁改（checksum）。实际禁改范围 = `V1–V26`；手册正文归 W3/文档 owner 同步，本轮只在第 2 节号段表登记 |
+| `docs/并行开发-剩余需求拆分方案.md` | W0 交付物写「`wave0b-baseline` tag」 | 标签已打，但之后又追加了隔离套件与命名规矩两批提交。**新分支一律从 `base-w0-20261122` 起**（见第 1 节「基线标签」行），不要按旧名 checkout |
 
 > **状态准绳（2026-11-22 起）**：业务口径以 `docs/ADR-业务口径总定源.md` 为唯一事实来源，
 > 担保权属以 `docs/ADR-Q27-担保权属权威源裁决.md` 为准。二者已定稿，
