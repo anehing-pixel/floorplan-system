@@ -112,14 +112,31 @@ case "$ACTION" in
   check)
     check_name "$SCHEMA"
     n=$(dbsql "" "SELECT count(*) FROM information_schema.tables WHERE table_schema='${SCHEMA}' AND table_type='BASE TABLE'")
-    v26=$(dbsql "$SCHEMA" "SELECT count(*) FROM flyway_schema_history WHERE version IN ('25','26') AND success = true")
-    # gen_salt 可达性判的是「当前 search_path 会话里能不能解析到这个函数名」，
-    # 它装在 public，靠 search_path 第二段兜住；解析不到就说明 V5 之后必然中断。
+    # V25/V26 必须落在【本 schema】。不带限定名的 flyway_schema_history 会顺 search_path 读到
+    # public 的历史表，于是完全没迁过的空 schema 也报「2/2」——实测过（表数 0/67 却 V26 达标），
+    # 那时整道闸只剩表数一项在用。
+    # 先探表在不在再计数：写成 `CASE WHEN to_regclass(...) IS NULL THEN -1 ELSE (SELECT ... FROM 表)`
+    # 是不行的，不存在的关系在【解析期】就报错，CASE 分支根本兜不住（实测 ERROR 刷一屏、变量取到空串）。
+    hist=$(dbsql "" "SELECT count(*) FROM information_schema.tables WHERE table_schema='${SCHEMA}' AND table_name='flyway_schema_history'")
+    if [ "$hist" = "1" ]; then
+      v26=$(dbsql "$SCHEMA" "SELECT count(*) FROM ${SCHEMA}.flyway_schema_history WHERE version IN ('25','26') AND success = true")
+    else
+      # -1（而不是空串）是为了把「这个 schema 里没有历史表」和「查询本身失败」区分开。
+      v26=-1
+    fi
+    # V5 建的 users 表是「Flyway 真的写进了这个 schema」的本地证据，和表数互补：
+    # 表数看总量，这一项看最早那批有没有落地（半途中断时总量少、V5 也可能缺）。
+    v5=$(dbsql "" "SELECT count(*) FROM information_schema.tables WHERE table_schema='${SCHEMA}' AND table_name='users'")
+    # gen_salt 判的是「本会话能不能解析到这个函数名」，它按设计装在 public，靠 search_path 第二段兜住。
+    # 所以这条【不是】schema 本地检查，别拿它当本地证据——它恒真是正常的，兜本地的是上面两项。
     salt=$(dbsql "$SCHEMA" "SELECT count(*) FROM pg_proc p JOIN pg_namespace ns ON ns.oid=p.pronamespace WHERE p.proname='gen_salt' AND current_schemas(false) @> ARRAY[ns.nspname]")
-    echo "表数=${n}/${PUBLIC_TABLES}   V25+V26 记录=${v26}/2   gen_salt 可达=${salt}"
-    if [ "$n" != "$PUBLIC_TABLES" ] || [ "$v26" != "2" ]; then
-      echo "[不通过] ${SCHEMA} 迁移不完整（表数或 V26 不达标）——这个 schema 不能用，"
+    echo "表数=${n}/${PUBLIC_TABLES}   本schema V25+V26=${v26}/2   本schema V5(users)=${v5}   gen_salt(public可解析)=${salt}"
+    if [ "$n" != "$PUBLIC_TABLES" ] || [ "$v26" != "2" ] || [ "$v5" != "1" ]; then
+      echo "[不通过] ${SCHEMA} 迁移不完整（表数、本 schema 的 V26 或 V5 不达标）——这个 schema 不能用，"
       echo "          不带 schema 的表名会穿透到 public，隔离当场失效。重迁：drop 后 init 再起 web。"
+      # -1 = 这个 schema 里连 Flyway 历史表都没有：服务根本没往这里迁过（连的仍是 public，或 web 没起）。
+      [ "${v26:-0}" = "-1" ] && echo "          [提示] ${SCHEMA} 里没有 flyway_schema_history → Flyway 没往这个 schema 写过东西。"
+      [ "${v26:-0}" = "-1" ] && echo "          先确认 SPRING_DATASOURCE_URL 带 currentSchema=${SCHEMA},public 再起 web（只有 web 跑迁移）。"
       # 表数「多于」基准时，上面那句结论是错的：不是没迁完，而是主干基准涨了（USED 每包 +N 张）。
       # 不分开提示的话，执行的人会 drop 掉一个其实正常的 schema，或者去改默认值 67 —— 那是主干侧基准。
       if [ "${n:-0}" -gt "${PUBLIC_TABLES}" ] 2>/dev/null; then

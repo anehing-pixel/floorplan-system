@@ -128,14 +128,20 @@ if DB_SCHEMA:
     assert_eq("隔离生效：会话 current_schema 就是目标 schema", DB_SCHEMA, cur_schema)
 else:
     print("   [提示] 未设 FLOORPLAN_DB_SCHEMA → 跑 public。合并后全量回归就该这么跑。")
-# 表存在性一律用 to_regclass（按 search_path 解析），和 JDBC 侧不带 schema 的写法同一个解析口径；
-# 用 information_schema.table_name 过滤会把 public 的表也算进来，隔离时就骗人了。
-tabs = psql("SELECT coalesce(to_regclass('event_consumptions')::text,'MISSING'), "
-             "coalesce(to_regclass('consumer_offsets')::text,'MISSING')")
+# 表存在性一律用 to_regclass，但**必须显式限定到目标 schema**：
+# 不带限定名的 to_regclass/flyway_schema_history 会顺 search_path 掉回 public，
+# 于是「迁移半途中断的 schema」也能报「表在、V26 成功」——和 agent_env.sh check 同一个洞（PROGRESS W0-9）。
+# 不设 DB_SCHEMA 时本来就该查 public，所以只在隔离模式下加限定，public 模式行为零变化。
+def q(name):
+    return ("%s.%s" % (DB_SCHEMA, name)) if DB_SCHEMA else name
+
+
+tabs = psql("SELECT coalesce(to_regclass('%s')::text,'MISSING'), "
+             "coalesce(to_regclass('%s')::text,'MISSING')" % (q("event_consumptions"), q("consumer_offsets")))
 ok(tabs and "MISSING" not in tabs[0], "V26 两张表在当前 schema 已存在",
    "解析结果=%r" % (tabs,))
-assert_eq("Flyway 在当前 schema 记录到 V26 成功", "26",
-          psql_one("SELECT version FROM flyway_schema_history WHERE version = '26' AND success = true"))
+assert_eq("Flyway 在【目标 schema 自己的】历史表里就有 V26（不是顺 search_path 读到 public 的）", "26",
+          psql_one("SELECT version FROM %s WHERE version = '26' AND success = true" % q("flyway_schema_history")))
 PUBLIC_MAX_BEFORE = psql_one("SELECT coalesce(max(id),0) FROM public.outbox_events")
 ok(wait_ready("/api/loans/by-vin/" + TAG, base=WEB, timeout=120),
    "web(8080) 已就绪（装配证据：单体带着 4 个 Feign client + EventDispatcher 能起来）", "120s 内未响应")
