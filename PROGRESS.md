@@ -226,9 +226,10 @@
 - **本轮加固**：`updateStatus` 改 CAS `WHERE id AND status=expectedFrom` + 校验影响行数；`ReleaseStateMachineTest` 改硬编码白名单期望表（见第 7 节）。
 - **口径已定稿**：Q9/Q10 由《业务口径总定源》ADR §2 裁决，V24 口径即最终口径，不再有待确认项。
 
-### 3.4 RECON — 已完成，无需接手
+### 3.4 RECON — ✅ 8 条规则全实现，无需接手
 
-- 8 条规则中 R5–R8 是占位，等业务确认口径后再补（见 `recon-service/HANDOFF.md` §4），属后续增强，不是断点。
+- **R5–R8 已闭环（2026-11-22 `d1c90e8`）**：按《业务口径总定源》ADR §10 补 4 条真实取数 SQL + `ExactValueReconRule` 精确相等判定；`ReconRuleCode` 8 条全 `implemented=true`、diffType 为真实类型；删除 `PlaceholderReconRule` 与编排层 `implemented=false → continue` 假绿短路，`ruleCount` 恒 8；`ReconRuleTest` 重写为 34 项并加「同一不等事实 8 条都必须报差异」反假绿护栏。冒烟新增 ㉕ 共 7 项端到端验证。
+- 仍属后续增强、非断点：`recon_diffs` 状态流转接口 / 审计留痕 / 分布式锁 / outbox 事件（见 `recon-service/HANDOFF.md` §4 与本文 §8.1 D3）。
 
 ---
 
