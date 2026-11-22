@@ -12,6 +12,11 @@
 `env -u SERVER__PORT` 不能省：WorkBuddy 会注入 SERVER__PORT=51136，宽松绑定解析成
 server.port 后所有服务都挤到同一个端口，第二个起不来。
 
+多个 agent 并行时不要共用 8080 和 public schema —— 用 scripts/agent_env.sh 给自己分一套
+（见 docs/并行开发-W1环境隔离.md）。设了 FLOORPLAN_DB_SCHEMA 后本脚本自动多两条守卫断言：
+「会话 current_schema 就是目标 schema」+「public 未被本次运行改动」，后者挂了说明服务其实
+还连在 public，这一轮所有断言都不作数。
+
 判据全部落在库里真实状态（event_consumptions / consumer_offsets / outbox_events），
 不看 HTTP 200、不看进程存活：任务卡要验的 5 条语义是——
   1) 事件能被轮询到并写 DONE；
@@ -25,14 +30,15 @@ server.port 后所有服务都挤到同一个端口，第二个起不来。
 并不会被拦（拦的是发布端的 WHERE NOT EXISTS，不是表约束）。已如实记入交付说明，
 需 W0 补 infrastructure 单测要另行扩权（不在卡面写集内）。
 """
+import atexit
 import json
 import os
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agent_smoke_lib import (assert_eq, get, login, ok, psql_exec, psql_one, summary,
-                             wait_ready, wait_until)
+from agent_smoke_lib import (DB_SCHEMA, SEARCH_PATH, assert_eq, get, login, ok, psql,
+                             psql_exec, psql_one, summary, wait_ready, wait_until)
 
 WEB = os.environ.get("SMOKE_WEB", "http://localhost:8080")      # 单体（不承载 /api/loans/**，实查无该路由）
 AUTH = os.environ.get("SMOKE_AUTH", "http://127.0.0.1:8081")    # 登录：/api/auth/login 只存在于 auth-service
@@ -48,6 +54,28 @@ DTO_FIELDS = ["id", "vin", "advanceId", "dealerId", "status", "principal", "dueD
 # 本轮造的事件 id 与借据行，跑完清理，不给后续 wave 留脏数据
 EVENT_IDS = []
 CREATED_LOAN_IDS = []
+_CLEANED = False
+
+
+def cleanup_rows():
+    """删掉本轮造的 outbox / 幂等 / loans 行；重复调用只做一次。
+
+    挂在 atexit 上是必需的而不是洁癖：实测第 5 步之后一旦抛异常（当时是隔壁 agent 没起
+    credit-service，一条打印直接崩栈），第 6 步的清理根本不执行，脏事件行留在 schema 里，
+    下一轮重跑撞 aggregate_key 的发布端去重、计数类断言也随之漂移——查起来像「代码偶发不稳」。
+    """
+    global _CLEANED
+    if _CLEANED or not EVENT_IDS:
+        return
+    _CLEANED = True
+    ids = ",".join(str(i) for i in EVENT_IDS)
+    psql_exec("DELETE FROM event_consumptions WHERE event_id IN (%s)" % ids)
+    psql_exec("DELETE FROM outbox_events WHERE id IN (%s)" % ids)
+    if CREATED_LOAN_IDS:
+        psql_exec("DELETE FROM loans WHERE id IN (%s)" % ",".join(str(i) for i in CREATED_LOAN_IDS))
+
+
+atexit.register(cleanup_rows)   # 崩溃路径也要清；正常路径由第 6 步显式调用并顺带断言清干净了
 
 
 def insert_event(event_type, aggregate_key, payload):
@@ -91,11 +119,24 @@ def payload(vin, advance_id, trace_id):
 # /api/auth/login 只存在于 auth-service（单体没有该控制器），不带它拿不到 JWT，
 # 而 web 的 /api/** 全在 JWT 拦截范围内 —— 少了 token，第 5 步只会收到 401，测不到契约。
 print("== 预检：迁移与服务 ==")
-assert_eq("Flyway 记录到 V26 成功（迁移由 web 启动执行）", "26",
+cur_schema = psql_one("SELECT current_schema()")
+print("   search_path=%s  current_schema=%s  （FLOORPLAN_DB_SCHEMA=%r）"
+      % (SEARCH_PATH, cur_schema, DB_SCHEMA))
+if DB_SCHEMA:
+    # 隔离守卫：脚本查的库必须和服务写的库是同一个。
+    # 不设这道闸时，脚本会退回去查 public（表都在、游标也在），断言照样全绿——最难查的假绿。
+    assert_eq("隔离生效：会话 current_schema 就是目标 schema", DB_SCHEMA, cur_schema)
+else:
+    print("   [提示] 未设 FLOORPLAN_DB_SCHEMA → 跑 public。合并后全量回归就该这么跑。")
+# 表存在性一律用 to_regclass（按 search_path 解析），和 JDBC 侧不带 schema 的写法同一个解析口径；
+# 用 information_schema.table_name 过滤会把 public 的表也算进来，隔离时就骗人了。
+tabs = psql("SELECT coalesce(to_regclass('event_consumptions')::text,'MISSING'), "
+             "coalesce(to_regclass('consumer_offsets')::text,'MISSING')")
+ok(tabs and "MISSING" not in tabs[0], "V26 两张表在当前 schema 已存在",
+   "解析结果=%r" % (tabs,))
+assert_eq("Flyway 在当前 schema 记录到 V26 成功", "26",
           psql_one("SELECT version FROM flyway_schema_history WHERE version = '26' AND success = true"))
-ok(psql_one("SELECT count(*) FROM information_schema.tables WHERE table_name "
-            "IN ('event_consumptions','consumer_offsets')") == "2",
-   "V26 两张表已存在（event_consumptions / consumer_offsets）")
+PUBLIC_MAX_BEFORE = psql_one("SELECT coalesce(max(id),0) FROM public.outbox_events")
 ok(wait_ready("/api/loans/by-vin/" + TAG, base=WEB, timeout=120),
    "web(8080) 已就绪（装配证据：单体带着 4 个 Feign client + EventDispatcher 能起来）", "120s 内未响应")
 ok(wait_ready("/api/loans/by-vin/" + TAG, base=LOAN, timeout=120),
@@ -104,6 +145,9 @@ ok(wait_ready("/api/auth/login", base=AUTH, timeout=120),
    "auth-service(8081) 已就绪", "120s 内未响应")
 login(base=AUTH)
 print("   token 已取得（登录只有 auth-service 提供；token 靠 FLOORPLAN_JWT_SECRET 默认值跨服务通用）")
+# credit-service 只用于第 5 步末尾那条「死契约」现状登记，不是必需进程 → 探测但不断言。
+st_probe, _ = get("/api/credit-lines/34/available", base=CREDIT)
+print("   credit-service(%s)：%s" % (CREDIT, "可达" if st_probe else "未运行（不影响本脚本判据）"))
 
 # ---------------------------------------------------------------------------
 # 1. 端到端消费：插一条 LOAN_CREATED → 轮询写 DONE
@@ -209,24 +253,33 @@ assert_eq("404 仍是统一 ApiResponse，code=NOT_FOUND_001", "NOT_FOUND_001", 
 # 只打印不断言：GET /api/credit-lines/{id}/available 目前全仓无实现（credit-service 回 500，
 # 走静态资源兜底）。W1-CREDIT 实现后这里应变成 200 + 整数；若此刻写成断言，
 # 要么现在红、要么将来绿了反而红，两种都是假信号。留给文档登记。
+# credit-service 不在本脚本的必需进程清单里（web/auth/loan 才必需），没起时 st=0 → 如实打印，
+# 不拿它当结论，也不许它把整轮冒烟带崩。
 st_avail, body_avail = get("/api/credit-lines/34/available", base=CREDIT)
-print("   [现状登记] CreditLineQueryClient 的 GET /api/credit-lines/34/available → HTTP %s %s"
-      % (st_avail, json.dumps(body_avail, ensure_ascii=False)[:120]))
-print("   （W1-CREDIT 需实现为 200 + ApiResponse<Long>；W0 不擅自判定这条未定源契约）")
+if st_avail == 0:
+    print("   [现状登记·跳过] credit-service(%s) 未运行 → %s 这条契约本轮未取到响应"
+          % (CREDIT, body_avail.get("message", "")[:90]))
+else:
+    print("   [现状登记] CreditLineQueryClient 的 GET /api/credit-lines/34/available → HTTP %s %s"
+          % (st_avail, json.dumps(body_avail, ensure_ascii=False)[:120]))
+    print("   （W1-CREDIT 需实现为 200 + ApiResponse<Long>；W0 不擅自判定这条未定源契约）")
 
 # ---------------------------------------------------------------------------
 # 6. 清理本轮造的测试数据（幂等表/事件表都留给后续 wave 复用，只删自己的行）
 # ---------------------------------------------------------------------------
 print("\n== 清理 ==")
 ids = ",".join(str(i) for i in EVENT_IDS)
-psql_exec("DELETE FROM event_consumptions WHERE event_id IN (%s)" % ids)
-psql_exec("DELETE FROM outbox_events WHERE id IN (%s)" % ids)
+cleanup_rows()
 if CREATED_LOAN_IDS:
-    psql_exec("DELETE FROM loans WHERE id IN (%s)" % ",".join(str(i) for i in CREATED_LOAN_IDS))
     assert_eq("本轮测试借据已删除", "0", psql_one(
         "SELECT count(*) FROM loans WHERE id IN (%s)" % ",".join(str(i) for i in CREATED_LOAN_IDS)))
 assert_eq("本轮事件与幂等行已清空", "0", psql_one(
     "SELECT count(*) FROM outbox_events WHERE id IN (%s)" % ids))
+if DB_SCHEMA:
+    # 真隔离的判据不是「我的 schema 干净」，而是「public 一行都没被我碰到」。
+    # 这条挂了就是 schema 没生效（服务连的还是 public），后面所有断言都不作数。
+    assert_eq("public.outbox_events 未被本次运行改动", PUBLIC_MAX_BEFORE,
+              psql_one("SELECT coalesce(max(id),0) FROM public.outbox_events"))
 print("游标保持在 %d（不回滚：历史事件重放会撞已删的幂等行，保留更安全）" % max_lc)
 
 sys.exit(summary("smoke_w0(%s)" % TAG))

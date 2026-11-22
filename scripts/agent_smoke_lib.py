@@ -47,6 +47,18 @@ DB_USER = os.environ.get("FLOORPLAN_DB_USER", "floorplan")
 DB_NAME = os.environ.get("FLOORPLAN_DB_NAME", "floorplan")
 DB_PWD = os.environ.get("FLOORPLAN_DB_PWD", "floorplan")
 DB_CONTAINER = os.environ.get("FLOORPLAN_DB_CONTAINER", "floorplan-db2")
+# 并行开发隔离：W1 每个 agent 一个 schema（见 docs/并行开发-W1环境隔离.md）。
+# 不设 = 沿用 public，基线行为零变化；设了则本库所有 SQL 都显式走
+# `search_path = <schema>, public`——第二个 public 不是可选装饰，pgcrypto 的 gen_salt()
+# 只装在 public，实测缺了它 V5 建 seed 就中断在 "function gen_salt(unknown, integer) does not exist"。
+# 服务侧要配同一个 schema，用 SPRING_DATASOURCE_URL 里的 currentSchema=<schema>,public。
+DB_SCHEMA = os.environ.get("FLOORPLAN_DB_SCHEMA", "").strip()
+if DB_SCHEMA and not all(c.isalnum() or c in "_-" for c in DB_SCHEMA):
+    raise RuntimeError("FLOORPLAN_DB_SCHEMA 只能含字母数字与 _-，实得 %r" % DB_SCHEMA)
+# 逗号后不能有空格：PGOPTIONS 的值最终成为 GUC search_path 的原始串，
+# "w1_demo, public" 会被解析成 ["w1_demo,", " public"] 而报
+# `invalid value for parameter "search_path"`（连接直接失败，psql 返回 rc=2）。
+SEARCH_PATH = ('%s,public' % DB_SCHEMA) if DB_SCHEMA else "public"
 
 TOKEN = None          # 管理员令牌，login() 之后填充
 OPERATOR = "smoke"    # 审计头，与基线同名，便于比对
@@ -60,6 +72,11 @@ def call(method, path, body=None, token=None, headers=None, base=None):
     token=None 用全局 TOKEN；显式传 token 可模拟其他岗位；传空串则不带 Authorization。
     4xx/5xx 不抛异常（HTTPError 里读 body），由调用方判状态码——很多断言要的就是 4xx。
     base 覆盖全局 BASE，用于同一脚本里打多个服务（web:8080、loan-service:8085 …）。
+
+    **传输层失败也不抛**：连不上（进程没起 / 端口被上一轮残留占着 / 超时）返回 `(0, {...})`。
+    HTTP 状态码没有 0，所以调用方拿 `st == 0` 就能区分「服务没在跑」和「服务跑了但报错」。
+    之前这里是裸 URLError 栈：并行时隔壁 agent 的 8183 上没起 credit-service，
+    本脚本一条「现状登记」打印直接崩掉整轮冒烟，连累后面的清理都不执行。
     """
     url = (base or BASE) + path
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -80,6 +97,9 @@ def call(method, path, body=None, token=None, headers=None, base=None):
             return exc.code, json.loads(raw)
         except ValueError:
             return exc.code, {"_raw": raw}
+    except Exception as exc:      # URLError / ConnectionRefusedError / TimeoutError / 非 JSON 响应
+        return 0, {"code": "TRANSPORT_ERROR",
+                   "message": "%s %s → %s: %s" % (method, url, type(exc).__name__, exc)}
 
 
 def get(path, base=None, token=None):
@@ -150,9 +170,18 @@ def psql_text(sql):
     与 smoke-test.py 同一条「本机 psql 优先 → docker exec 兜底」路径：
     本机装了客户端时最快，容器内 psql 是标准兜底。
     注意端口必须显式给 5434，容器里 postgres 不监听默认 5432。
+    设了 FLOORPLAN_DB_SCHEMA 时，会话 search_path 通过 PGOPTIONS 设成 `<schema>, public`，
+    于是脚本查的库和 Spring 用的库必然是同一个——不挂这条会出现「服务写 agent schema、
+    脚本查 public」的错开，断言照样全绿，那才是最难查的假绿。
     失败返回 None（调用方据此区分「查不到」与「查询方式坏了」）。
     """
     env = dict(os.environ, PGPASSWORD=DB_PWD)
+    # search_path 走 PGOPTIONS 而不是在 SQL 前面挂一条 `SET search_path TO …;`：
+    # 后者会把 psql 的命令标签 "SET" 也打进 stdout，于是 psql_one("SELECT …") 拿到的第一个值是 "SET"，
+    # count/RETURNING 之类全被污染（实测把 int('SET') 直接炸出来）。PGOPTIONS 对服务端会话生效，
+    # 输出干净，且和 SPRING_DATASOURCE_URL 里的 currentSchema 是同一个语义。
+    if DB_SCHEMA:
+        env["PGOPTIONS"] = "-c search_path=%s" % SEARCH_PATH
     local = ["psql", "-h", DB_HOST, "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME, "-tAc", sql]
     try:
         r = subprocess.run(local, env=env, capture_output=True, timeout=30)
@@ -160,7 +189,8 @@ def psql_text(sql):
             return r.stdout.decode("utf-8", "replace").strip()
     except Exception:
         pass
-    docker = ["docker", "exec", DB_CONTAINER, "psql", "-h", "127.0.0.1",
+    docker = ["docker", "exec"] + (["-e", "PGOPTIONS=" + env["PGOPTIONS"]] if DB_SCHEMA else []) + \
+             [DB_CONTAINER, "psql", "-h", "127.0.0.1",
               "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME, "-tAc", sql]
     try:
         r = subprocess.run(docker, env=env, capture_output=True, timeout=30)
