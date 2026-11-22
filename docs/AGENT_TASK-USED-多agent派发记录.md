@@ -26,14 +26,14 @@
 | 包 | 角色 / 本轮模型 | 分支 · worktree | schema | 端口偏移 | 表数门槛（主干累计 / **并行同基线分支**） | 冒烟预算 | 上游 |
 |---|---|---|---|---|---|---|---|
 | W-U0 地基 | **PM 本人** / 审计=调研员 · Qwen4-Max | `master` 直干 | `public` | 0 | 67（本包不建 `public` 表） | 0（无业务断言） | — |
-| W-U1 车辆+资质 | 全栈 · DeepSeek-V4-Pro | `used/wu1` · `../wt-used-wu1` | `used_u1` | +700 | 73 / **73**（首包，两套同值） | 28（dealer 12 + vehicle 16） | W-U0 |
-| W-U2 估值+拍卖+放款基准 | 全栈 · GLM-5.3 | `used/wu2` · `../wt-used-wu2` | `used_u2` | +800 | 84 / **78** | 42（valuation 24 + auction 18） | W-U0，部分等 W-U3 |
-| W-U3 DMZ 集成层 | 全栈 · Kimi-K3.1-Pro（**独占**） | `used/wu3` · `../wt-used-wu3` | `used_u3` | +900 | 84 / **67**（本包 public **0** 张，六张全在 `integration`、不进门槛） | 20（含 INV-1..5 证伪） | W-U0 |
-| W-U4 凭证+WMS+放车放证 | 全栈 ×2 · Step-5-Preview | `used/wu4` · `../wt-used-wu4` | `used_u4` | +1000 | 89 / **72** | 56（cert 20 + wms 10 + release 26 含 E2E-0） | W-U1、W-U3、在途 W2-WORKORDER |
-| W-U5 处置+通知+报表 | 全栈 + 审查员 · Qwen3.8-Max | `used/wu5` · `../wt-used-wu5` | `used_u5` | +1100 | 91 / **69** | 18（disposal 10 + reporting 8） | W-U4、W-U3 |
+| W-U1 车辆+资质 | 全栈 · DeepSeek-V4-Pro | `used/wu1` · `../wt-used-wu1` | `used_u1`（**实建 `used_wu1`**，见 §6） | +700 | 74 / **74**（R12 修正：V41 条件项 +1、幽灵表 −1，净 +7） | 28（dealer 12 + vehicle 16） | W-U0 |
+| W-U2 估值+拍卖+放款基准 | 全栈 · GLM-5.3 | `used/wu2` · `../wt-used-wu2` | `used_u2` | +800 | 85 / **79**（R12 连锁） | 42（valuation 24 + auction 18） | W-U0，部分等 W-U3 |
+| W-U3 DMZ 集成层 | 全栈 · Kimi-K3.1-Pro（**独占**） | `used/wu3` · `../wt-used-wu3` | `used_u3` | +900 | 85 / **67**（本包 public **0** 张，六张全在 `integration`、不进门槛） | 20（含 INV-1..5 证伪） | W-U0 |
+| W-U4 凭证+WMS+放车放证 | 全栈 ×2 · Step-5-Preview | `used/wu4` · `../wt-used-wu4` | `used_u4` | +1000（**首轮误派 +800 已纠正**，见 R15⑤） | 90 / **73**（R12 连锁） | 56（cert 20 + wms 10 + release 26 含 E2E-0） | W-U1、W-U3、在途 W2-WORKORDER |
+| W-U5 处置+通知+报表 | 全栈 + 审查员 · Qwen3.8-Max | `used/wu5` · `../wt-used-wu5` | `used_u5` | +1100 | 92 / **69**（R12 连锁；本包不算 W-U1 的表） | 18（disposal 10 + reporting 8） | W-U4、W-U3 |
 
 > **门槛两套值的算法与权威源 = D04 §2.1**，本表只照抄。**分支填的是 `67 + 本分支实际已应用的 public 迁移`**：
-> 五路从同一 `base-*` 标签并行切出，前序包的表不在你分支里，填主干累计值（84/89/91）会让 `check` 必挂
+> 五路从同一 `base-*` 标签并行切出，前序包的表不在你分支里，填主干累计值（85/90/92，R12 连锁后的新值）会让 `check` 必挂
 > ——WU4-20 实测到的正是这个（分支 72 张被要求 94）。`integration` 六张两套都不算。
 > 本列口径于 2026-11-22 按 D13 G10/A6 **二次校正**（原写 89/94/96 把 `integration` 累进了 `public`；
 > 第一版修正只删 integration，未写清分支 ≠ 主干累计）。`scripts/agent_env.sh:144` 的提示语仍印旧阶梯，
@@ -159,3 +159,38 @@
 - [ ] 主工作树 `git status --short` 里**没有** USED 包的文件（本轮开工时的参照快照 = 9 项，全是另一路 W0/W2 的 WIP）；
 - [ ] 是否有人偷跑了 `mvn`/冒烟（看 `target/` 目录时间戳与会话报告）；
 - [ ] 每包的 `docs/AGENT_TASK-W-U<N>-实现说明.md` 里的阻塞项逐条落进 D13 §5.2 或 §8，不要用「已实现」盖过去。
+
+---
+
+## 7. 验证轮实况（2026-11-22 14:2x 起，用户指令解除「不测试」禁令）
+
+用户指令：「你去通知他们挨个跑测试执行、冒烟、连库、建 schema、Flyway、启进程」，随后授权自主决策。
+我按依赖序**串行**下发（最多 2 个包并行，避免 5 个 JVM 同时冷启动把宿主打进 swap），每包口径见 D13 §5.2-R13。
+
+| 包 | 下发时间 | 隔离参数 | 回报 |
+|---|---|---|---|
+| W-U1 | 14:2x | `used_wu1` / +700 / 门槛 R12 修正后 74 | 首轮报 `75/75`（用 `FLOORPLAN_PUBLIC_TABLES=75` 兜绿，**作废**）；删幽灵表后待重跑 |
+| W-U3 | 14:3x | `used_u3` / +900 / 67 | 待报 |
+| W-U4 | 14:3x（用户已先转达「你跑测试吧」，**未带隔离**） | 首派误给 +800（那是 W-U2 的），纠正为 `used_u4` / +1000 / 73 | 待报 |
+| W-U2 / W-U5 | 未派（等前序包释放槽位） | `used_u2` / +800 / 79；`used_u5` / +1100 / 69 | — |
+
+本轮新事实（都不是设计稿里能查到的）：
+
+1. **`agent_env.sh check` 看不见 `integration` schema**：`dbsql` 走的是宿主机 `docker`，本机没有 docker
+   （DB 是别处起的 PostgreSQL，宿主 5434 可直连）。**改判据**：真跑通 = 「web 起来后 Flyway 把 V1–V26
+   落进目标 schema」＋「本包迁移落库数 == 预期」，用 psql/JdbcTemplate 直接证明，不以 `check` 绿为准。
+2. **schema 名别名**：本表 §1 原写 `used_u1`，W-U1 实建 `used_wu1`。以库内实际存在的为准，
+   后续包仍按 §1 的 `used_u2/u3/u4/u5`，不要再造第三种拼法。
+3. **`public` 未被污染（我复核过三次）**：`public` 基表恒 67、`flyway_schema_history` 无 V27+ 成功记录。
+   任何包**不得**往 `public` 写，也不得在 `public` 上 `flyway repair` / `DROP SCHEMA` / `TRUNCATE`。
+   库里另有 `w1_collateral` / `w1_release` / `w1_recon` / `w2_core` 四个在途 W1/W2 agent 的 schema，**都不许动**。
+4. **W-U3 在禁令期内自跑了 `mvn -o -B -DskipTests compile` / `test-compile`**（首轮 10 处编译错误，
+   自述于实现说明 :8、:239）。我已实测证据（它 worktree 里 15 个 `target/`，13:50Z；其余四包 0 个）
+   并**如实上报用户**而非代为掩盖；禁令解除后追认有效，见 R13。
+5. **共享脚本按主干同步**：五路都从 `base-used-dev-20261122`（= `8ea23ab`）切出，缺主干上后来修好的
+   `PYTHON="${PYTHON:-python3}"`、`PYTHONIOENCODING` 注入、`psql` 列分隔符三处修复。
+   已下发唯一豁免：`git checkout master -- run-microservices.sh scripts/agent_smoke_lib.py`
+   （只同步不改；`PYTHON=python` 仍由调用方注入）。W-U1/W-U3 各自建过一份不碰冻结文件的包装脚本，已叫停。
+6. **收口方事故一笔（详见 D13 §5.2-R14）**：我在主工作树 `master` 上误执行试合并产生 `40da5d3`，
+   已 `revert -m 1` → `bda3170`，树内容回到 `34857d9`、USED 迁移计数 0。
+   **合并期必须执行 R14 的 revert-of-revert 判据**，否则 W-U1 的十个迁移会静默缺失。
