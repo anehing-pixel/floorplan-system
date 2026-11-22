@@ -2,6 +2,7 @@ package com.company.floorplan.web;
 
 import com.company.floorplan.infrastructure.outbox.EventDispatcher;
 import com.company.floorplan.infrastructure.outbox.JdbcOutboxPublisher;
+import com.company.floorplan.web.integration.OutboxLoanCreatedPublisher;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.openfeign.EnableFeignClients;
@@ -27,7 +28,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 // web 的 @ComponentScan 覆盖整个 com.company.floorplan，若类上再有组件注解，
 // "扫描 + @Import" 会注册出两个同类型 bean，按类型注入直接 NoUniqueBeanDefinitionException；
 // 其余 8 个服务只扫自身包，反过来必须靠 @Import 才拿得到。统一走 @Import 才能两边都只有一份。
-@Import({JdbcOutboxPublisher.class, EventDispatcher.class})
+// W2-CORE 的 OutboxLoanCreatedPublisher 同属这一类：它是 application 端口 LoanCreatedPublisher
+// 在 web 侧的唯一实现（application 看不见 common，只有 web 同时看得见两边），照样只 @Import、不打 @Component。
+@Import({JdbcOutboxPublisher.class, EventDispatcher.class, OutboxLoanCreatedPublisher.class})
 // core 是 LOAN_CREATED 的生产方（W2-CORE 接），也是 COLLATERAL_CHANGED 的规划消费方，需要调度线程。
 @EnableScheduling
 public class FloorplanApplication {

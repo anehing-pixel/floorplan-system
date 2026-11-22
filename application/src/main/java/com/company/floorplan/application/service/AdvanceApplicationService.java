@@ -1,6 +1,8 @@
 package com.company.floorplan.application.service;
 
 import com.company.floorplan.application.dto.VehicleDraft;
+import com.company.floorplan.application.event.LoanCreatedCommand;
+import com.company.floorplan.application.event.LoanCreatedPublisher;
 import com.company.floorplan.domain.exception.BusinessException;
 import com.company.floorplan.domain.exception.ErrorCode;
 import com.company.floorplan.domain.model.Advance;
@@ -84,6 +86,14 @@ public class AdvanceApplicationService {
      * ADR-Q27：判定源已定为 V10 登记批次表，由 collateral-reg-service 直读后返回。
      */
     private final RoleSeparationPolicy.GuaranteeLookup guaranteeLookup;
+    /**
+     * W2-CORE：借据事件发布端口，由 web 层 {@code OutboxLoanCreatedPublisher} 适配到 outbox 表。
+     *
+     * <p>只在 {@link #confirmAdvance} 里调用——即银行回调确认钱已到账之后。
+     * 挂在 {@code submitAdvance}/{@code disburseAdvance} 上会让借据、额度、DPD、对账四条线
+     * 围着一笔<b>还没到账的钱</b>记账（契约 §2.1：advanceId 为空 = 建据被拒，"钱没到，债不成立"）。</p>
+     */
+    private final LoanCreatedPublisher loanCreatedPublisher;
 
     /**
      * T1-5（B1）：担保门禁总开关，默认 false 仅为本地原型/冒烟保留；
@@ -121,7 +131,8 @@ public class AdvanceApplicationService {
                                      PurchaseOrderRepository purchaseOrderRepository,
                                      BankAccountRepository bankAccountRepository,
                                      CollateralLedgerApplicationService collateralService,
-                                     RoleSeparationPolicy.GuaranteeLookup guaranteeLookup) {
+                                     RoleSeparationPolicy.GuaranteeLookup guaranteeLookup,
+                                     LoanCreatedPublisher loanCreatedPublisher) {
         this.vehicleUnitRepository = vehicleUnitRepository;
         this.creditLineRepository = creditLineRepository;
         this.advanceRepository = advanceRepository;
@@ -134,6 +145,7 @@ public class AdvanceApplicationService {
         this.bankAccountRepository = bankAccountRepository;
         this.collateralService = collateralService;
         this.guaranteeLookup = guaranteeLookup;
+        this.loanCreatedPublisher = loanCreatedPublisher;
     }
 
     /** 批量到货建账：部分成功语义（逐台处理，一台脏数据不阻塞整批）。 */
@@ -523,11 +535,20 @@ public class AdvanceApplicationService {
 
     /**
      * 阶段三（确认，仅银行 webhook 驱动）：支付通道异步确认成功后回填。
-     * 把车辆台账流转到 IN_STOCK、垫款翻 PAID。
-     * 幂等：已是终态直接返回；仅 PENDING/PROCESSING 可确认（PROCESSING 为正常回调路径）。
+     * 把车辆台账流转到 IN_STOCK、垫款翻 PAID，并在<b>同一事务内</b>发布 {@code LOAN_CREATED}。
+     *
+     * <p><b>幂等</b>：已是终态直接返回（{@code :533} 那段早返回就是"重复回调不重复发事件"的实现基础——
+     * 重复回调根本走不到发布那一行）；仅 PENDING/PROCESSING 可确认（PROCESSING 为正常回调路径）。</p>
+     *
+     * <p><b>traceId 只能显式传参</b>：application 层拿不到 {@code HttpServletRequest}，
+     * 全仓也没有用 MDC（{@code grep -rl MDC --include=*.java .} 为空）。口径与
+     * {@code AuditActor.resolve(request)} 传操作人是同一套套路——由 web 层控制器从请求属性取到后传下来，
+     * 取不到就让它抛，不许在业务层兜底造一个 UUID（那等于把"跨服务串不上链"伪装成成功）。</p>
+     *
+     * @param traceId 本次回调的全链路追踪号，随 {@code LOAN_CREATED} 载荷走，缺失即整笔确认失败
      */
     @Transactional
-    public Advance confirmAdvance(Long advanceId, String paymentRef, String actor) {
+    public Advance confirmAdvance(Long advanceId, String paymentRef, String actor, String traceId) {
         Advance a = advanceRepository.findById(advanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "垫款不存在：" + advanceId));
         if (a.getStatus() == AdvanceStatus.PAID
@@ -558,6 +579,14 @@ public class AdvanceApplicationService {
         // 担保物台账建档：放款确认是台账起点（车辆进入担保物清单）
         collateralService.markFinanced(a.getVin(), unit.getDealerId(), a.getAdvanceNo(),
                 a.getAmount(), actor);
+
+        // W2-CORE：借据生产者。钱已到账（PAID）才发 LOAN_CREATED，与上面三次写库同属本事务——
+        // 业务提交则事件必达，业务回滚则事件消失，不存在"事件先落地"的幽灵消息。
+        // 刻意不 catch：载荷不合法（缺 vin/traceId）说明生产方写错了，让这笔确认失败比静默漏债正确。
+        // aggregate_key 用 a.getId()（本次发生的垫款主键），不用 vin——见 AGENTS §6.3 的禁令。
+        loanCreatedPublisher.publish(new LoanCreatedCommand(
+                a.getVin(), a.getId(), unit.getDealerId(), a.getCreditLineId(),
+                a.getAmount(), traceId));
         return a;
     }
 
@@ -693,11 +722,15 @@ public class AdvanceApplicationService {
         return advanceRepository.findByAdvanceNo(advanceNo);
     }
 
-    /** 支付网关回调入口：按业务单号确认支付（走自注入代理，确保独立事务）。 */
-    public Advance confirmByAdvanceNo(String advanceNo, String paymentRef, String actor) {
+    /**
+     * 支付网关回调入口：按业务单号确认支付（走自注入代理，确保独立事务）。
+     *
+     * @param traceId 由控制器从请求属性取到的全链路追踪号，透传给 {@code LOAN_CREATED}
+     */
+    public Advance confirmByAdvanceNo(String advanceNo, String paymentRef, String actor, String traceId) {
         Advance a = advanceRepository.findByAdvanceNo(advanceNo)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "垫款不存在：" + advanceNo));
-        return self.confirmAdvance(a.getId(), paymentRef, actor);
+        return self.confirmAdvance(a.getId(), paymentRef, actor, traceId);
     }
 
     /** 支付网关回调入口：按业务单号标记支付失败（走自注入代理，确保独立事务）。 */

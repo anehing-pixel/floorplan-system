@@ -6,6 +6,7 @@ import com.company.floorplan.domain.exception.ErrorCode;
 import com.company.floorplan.domain.model.Advance;
 import com.company.floorplan.domain.model.Permission;
 import com.company.floorplan.web.config.AuditActor;
+import com.company.floorplan.web.config.RequestLoggingFilter;
 import com.company.floorplan.web.dto.ApiRequests;
 import com.company.floorplan.web.security.PaymentWebhookVerifier;
 import com.company.floorplan.web.security.RequirePermission;
@@ -119,34 +120,49 @@ public class AdvanceController {
      *
      * <p><b>仅银行 webhook 可调用</b>：HMAC 签名校验（{@link PaymentWebhookVerifier}），
      * 不做用户 JWT 鉴权；校验失败返回 401 PAYMENT_001。审计操作人固定为 {@code PAYMENT_GATEWAY}。</p>
+     *
+     * <p><b>traceId 从这里开始透传</b>：确认成功会在同一事务内发布 {@code LOAN_CREATED}，
+     * 载荷必须带 traceId（契约 §2.1 必填）。application 层看不见 {@code HttpServletRequest}，
+     * 所以由本方法从 {@link RequestLoggingFilter#ATTR_TRACE_ID} 取到后显式传下去。
+     * 取不到（值为字面量 {@code "null"}）时<b>不兜底造 UUID</b>——让它抛出去，
+     * 否则"跨服务串不上链"会被伪装成一次成功的放款确认。</p>
      */
     @PostMapping("/{advanceNo}/confirm")
     public ResponseEntity<ApiResponse<Map<String, Object>>> confirm(
             @PathVariable String advanceNo,
             @RequestBody(required = false) Map<String, Object> body,
             @RequestHeader(value = "X-Payment-Signature", required = false) String signature,
-            @RequestHeader(value = "X-Payment-Timestamp", required = false) String timestamp) {
+            @RequestHeader(value = "X-Payment-Timestamp", required = false) String timestamp,
+            HttpServletRequest request) {
         String ref = body != null && body.get("paymentRef") != null
                 ? String.valueOf(body.get("paymentRef")) : null;
         webhookVerifier.verify(advanceNo, timestamp, ref, signature);
-        Advance a = service.confirmByAdvanceNo(advanceNo, ref, PaymentWebhookVerifier.WEBHOOK_ACTOR);
-        return ResponseEntity.ok(ApiResponse.ok(toAdvanceData(a), UUID.randomUUID().toString()));
+        // 同一个 traceId 既进事件载荷、也作为响应体里的追踪号，前端/银行对得上日志
+        String traceId = String.valueOf(request.getAttribute(RequestLoggingFilter.ATTR_TRACE_ID));
+        Advance a = service.confirmByAdvanceNo(advanceNo, ref, PaymentWebhookVerifier.WEBHOOK_ACTOR, traceId);
+        return ResponseEntity.ok(ApiResponse.ok(toAdvanceData(a), traceId));
     }
 
     /**
      * 支付网关回调：标记支付失败（释放额度、翻 FAILED）。同样仅银行 webhook 可调用。
+     *
+     * <p>FAILED <b>不发</b> {@code LOAN_CREATED}——钱没到，债不成立。
+     * 本端点只顺带把响应 traceId 与过滤器生成的那个统一（原来是 {@code UUID.randomUUID()}，
+     * 前端拿到的号对不上日志）。</p>
      */
     @PostMapping("/{advanceNo}/fail")
     public ResponseEntity<ApiResponse<Map<String, Object>>> fail(
             @PathVariable String advanceNo,
             @RequestBody(required = false) Map<String, Object> body,
             @RequestHeader(value = "X-Payment-Signature", required = false) String signature,
-            @RequestHeader(value = "X-Payment-Timestamp", required = false) String timestamp) {
+            @RequestHeader(value = "X-Payment-Timestamp", required = false) String timestamp,
+            HttpServletRequest request) {
         String msg = body != null && body.get("message") != null
                 ? String.valueOf(body.get("message")) : null;
         webhookVerifier.verify(advanceNo, timestamp, msg, signature);
         Advance a = service.failByAdvanceNo(advanceNo, msg, PaymentWebhookVerifier.WEBHOOK_ACTOR);
-        return ResponseEntity.ok(ApiResponse.ok(toAdvanceData(a), UUID.randomUUID().toString()));
+        return ResponseEntity.ok(ApiResponse.ok(toAdvanceData(a),
+                String.valueOf(request.getAttribute(RequestLoggingFilter.ATTR_TRACE_ID))));
     }
 
     /**
