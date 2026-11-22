@@ -51,7 +51,9 @@ public class DealerScoreReview {
     private Instant createdAt;
     /** 更新时间。 */
     private Instant updatedAt;
-    /** 乐观锁版本（V46 本表带 version 列，是本号段唯一带版本的表）。 */
+    /** 乐观锁版本（V46:88 本表带 {@code version}；号段内另两张带版本的表是
+     *  {@code used_config_params}(V41:38) 与 {@code inspection_certificates}(V52:49)，
+     *  资质三表与 {@code dealers} 都没有）。 */
     private Integer version;
 
     public Long getId() { return id; }

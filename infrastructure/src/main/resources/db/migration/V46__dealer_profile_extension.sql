@@ -74,8 +74,14 @@ CREATE TABLE IF NOT EXISTS dealer_score_reviews (
     id                   BIGSERIAL   PRIMARY KEY,
     dealer_id            BIGINT      NOT NULL REFERENCES dealers (id),
     review_year          INT         NOT NULL,
-    operating_score      INT         NOT NULL,
-    stock_quality_score  INT         NOT NULL,
+    -- 两维均可空：D06 §1.2 的签名是逐维录入 scoreDimension(dealerId, dimension, input, idemKey)，
+    -- 而 §1.4 明写两维计算方不同（经营资质分＝人工＋二人签认；在库车辆质量分＝
+    -- StockQualityScoreCalculator 每次重估刷），产出时点不同 ⟹ 一条 PENDING 候选
+    -- 合法地可以只填其中一维。首稿照"候选＝完整两维快照"写成 NOT NULL，
+    -- 那样第一次逐维录入就会撞 NOT NULL，签名与表结构二者必须改一个；
+    -- 改表而不改签名，是因为 §1.4 的业务事实（不同产出方）支持逐维录入。
+    operating_score      INT,
+    stock_quality_score  INT,
     status               VARCHAR(16) NOT NULL DEFAULT 'PENDING',
     scored_by            VARCHAR(64) NOT NULL,
     confirmed_by         VARCHAR(64),
@@ -86,7 +92,10 @@ CREATE TABLE IF NOT EXISTS dealer_score_reviews (
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     version              INT         NOT NULL DEFAULT 0,
-    CONSTRAINT ck_dsr_status CHECK (status IN ('PENDING', 'CONFIRMED', 'CANCELLED'))
+    CONSTRAINT ck_dsr_status CHECK (status IN ('PENDING', 'CONFIRMED', 'CANCELLED')),
+    -- 两维至少填一维：一条"什么都没评"的候选行没有业务含义，还会让 G-A4 的
+    -- "两维均为第二人确认后的终值"退化成只剩应用层一道检查。库侧再兜一层。
+    CONSTRAINT ck_dsr_score_present CHECK (operating_score IS NOT NULL OR stock_quality_score IS NOT NULL)
 );
 
 -- DSCR:{dealerId}:{ts} 的数据库兜底：同键重放只产生一行候选
@@ -104,5 +113,10 @@ COMMENT ON TABLE dealer_score_reviews IS 'R1.3 双维评级评审流水（候选
     || 'PENDING 行的分数不回写 dealers；只有 CONFIRMED 才由应用层在同一事务内 CAS 更新 dealers 两列并写审计。'
     || 'scored_by 与 confirmed_by 不得为同一自然人（RoleSeparationPolicy.assertNoSelfApproval → AUTH_003）。';
 COMMENT ON COLUMN dealer_score_reviews.review_year IS '评审年度（与年审周期对齐；周期起止 [待定源]，本列只存年份不做区间推算）';
+COMMENT ON COLUMN dealer_score_reviews.operating_score IS '经营资质分候选值。'
+    || '取值区间（0–100 还是别的分域）属 [待定源 U-11]，因此本列**不建范围 CHECK**、应用层也不界外拦截——'
+    || '猜一个区间会把未签字的口径写进约束，签字后只能靠改库来纠偏。NULL＝本维度尚未录入。';
+COMMENT ON COLUMN dealer_score_reviews.stock_quality_score IS '在库车辆质量分候选值；口径与范围同 operating_score（U-11 未签字）。'
+    || '两维至少一列非空由 ck_dsr_score_present 保证；两维都非空且 status=CONFIRMED 才算 G-A4 的终值。';
 COMMENT ON COLUMN dealer_score_reviews.confirmed_by IS '第二人（确认人）；NULL 表示尚未确认，此时 G-A4 判定为不通过';
 COMMENT ON COLUMN dealer_score_reviews.request_fingerprint IS '请求内容 SHA-256：同 idempotency_key 但内容不同 → CONFLICT_001（沿用既有幂等口径，不自造新错误码）';

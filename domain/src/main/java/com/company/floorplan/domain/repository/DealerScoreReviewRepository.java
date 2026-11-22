@@ -1,6 +1,7 @@
 package com.company.floorplan.domain.repository;
 
 import com.company.floorplan.domain.model.DealerScoreReview;
+import com.company.floorplan.domain.model.ScoreDimension;
 
 import java.util.List;
 import java.util.Optional;
@@ -73,6 +74,36 @@ public interface DealerScoreReviewRepository {
     DealerScoreReview insert(DealerScoreReview review);
 
     /**
+     * 逐维写入候选分数（{@code scoreDimension} 的落库动作），仅 {@code PENDING} 行可改，带版本 CAS。
+     *
+     * <p><b>为什么需要这个方法</b>：D06 §1.2 的打分签名是<b>逐维</b>的
+     * （{@code scoreDimension(dealerId, dimension, input, idemKey)}），而
+     * {@code uk_dsr_pending} 规定同车商同年度只允许一条在途候选，
+     * 于是第二维只能<b>补写进已有的那条 PENDING 行</b>——只有 {@link #insert} 的话，
+     * 第二次逐维录入会直接撞在途唯一索引。两列各自独立非空，
+     * 因此本方法一次只动一列（{@code COALESCE} 保护另一列与证据/备注不被清空）。</p>
+     *
+     * <p><b>为什么只允许 {@code PENDING}</b>：{@code CONFIRMED} 行是 G-A4 的终值证据，
+     * 签认后改分必须作废原行、新开一条候选，让"改分"这件事在流水里留下第二行；
+     * 直接 UPDATE 终值行会让 {@code confirmed_by} 与分数脱钩（签认人确认的就不是这个分了）。</p>
+     *
+     * <p><b>{@code scored_by} 不改</b>：本列记的是"这条候选的第一打分人"，
+     * 双人约束（G-A4／红线 {@code dealer-rating-two-person-required}）比的是
+     * 打分人与签认人，不是逐维录入人；每一维由谁录入由审计事件承担。</p>
+     *
+     * @param id              候选行 ID
+     * @param dimension       要写哪一维
+     * @param score           该维分数；不允许为 null（清空一维请走 {@link #cancel} 后新开候选，
+     *                        否则会撞上 {@code ck_dsr_score_present} 的两维全空情形）
+     * @param evidencePath    证据路径；null 表示不改动原值
+     * @param note            备注；null 表示不改动原值
+     * @param expectedVersion 期望版本（调用方从 {@code PENDING} 行读来）
+     * @return 是否更新成功（false＝行已不在 PENDING 或版本冲突，调用方需重读）
+     */
+    boolean updateCandidateDimensionScore(Long id, ScoreDimension dimension, Integer score,
+                                          String evidencePath, String note, int expectedVersion);
+
+    /**
      * 签认候选行（{@code PENDING → CONFIRMED}），带版本比较。
      *
      * <p>SQL 必须同时带 {@code status = 'PENDING'} 与 {@code version = expectedVersion} 两个条件：
@@ -88,6 +119,13 @@ public interface DealerScoreReviewRepository {
 
     /**
      * 作废候选行（{@code PENDING → CANCELLED}），带版本比较，条件同上。
+     *
+     * <p><b>本包暂无调用方（如实登记，不是遗漏的半成品）</b>：D06 §1.2 只给了
+     * {@code scoreDimension} 与 {@code confirmScores} 两个写方法，D07 §7.1 也没有作废端点，
+     * 而作废需要一个新的权限点与新端点——那是自派接口范围（AGENTS 派发纪律「不要在 D07 之外自派路径」）。
+     * 本方法与领域方法 {@code DealerScoreReview#cancel(String)} 一起先把状态机与 SQL 口径备好，
+     * 入口由收口方在补端点时接上（已列入实现说明的"未接线项"）。
+     * 在此之前，改分走 {@link #updateCandidateDimensionScore} 的同维覆盖，不需要作废。</p>
      *
      * @param id              候选行 ID
      * @param note            作废原因（写入备注列）

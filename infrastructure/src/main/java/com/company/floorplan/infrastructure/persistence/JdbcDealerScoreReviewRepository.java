@@ -3,6 +3,7 @@ package com.company.floorplan.infrastructure.persistence;
 import com.company.floorplan.domain.exception.BusinessException;
 import com.company.floorplan.domain.exception.ErrorCode;
 import com.company.floorplan.domain.model.DealerScoreReview;
+import com.company.floorplan.domain.model.ScoreDimension;
 import com.company.floorplan.domain.model.ScoreReviewStatus;
 import com.company.floorplan.domain.repository.DealerScoreReviewRepository;
 import org.springframework.dao.DuplicateKeyException;
@@ -122,6 +123,35 @@ public class JdbcDealerScoreReviewRepository implements DealerScoreReviewReposit
     }
 
     @Override
+    public boolean updateCandidateDimensionScore(Long id, ScoreDimension dimension, Integer score,
+                                                 String evidencePath, String note, int expectedVersion) {
+        if (dimension == null) {
+            throw new BusinessException(ErrorCode.VALID_001, "逐维录入缺少评级维度");
+        }
+        if (score == null) {
+            // 见接口注释：清空一维请作废候选后新开一行，本方法不提供把分数写回 NULL 的路径。
+            throw new BusinessException(ErrorCode.VALID_001,
+                    "维度 " + dimension.name() + " 的分数不能为空（清空请作废候选行后重新录入）");
+        }
+        // 列名来自枚举常量，取值集合封闭（只有 operating_score / stock_quality_score 两个字面量），
+        // 不是用户输入；再加一道白名单，是为了将来给 ScoreDimension 加第三维时在这里立刻失败，
+        // 而不是拼出一条没有该列的 SQL 静默少写。
+        String column = dimension.getColumnName();
+        if (!"operating_score".equals(column) && !"stock_quality_score".equals(column)) {
+            throw new BusinessException(ErrorCode.SYS_001,
+                    "评级维度映射到未知列：" + column + "（仓储未同步，拒绝拼接列名）");
+        }
+        // 另一维用 COALESCE 保住：逐维录入只动自己那一列，否则第二维录入会把第一维清空。
+        // 状态守卫 status='PENDING'：终态行是 G-A4 的证据，改分必须新开候选。
+        int rows = jdbc.update("UPDATE dealer_score_reviews SET " + column + " = ?, "
+                + "evidence_path = COALESCE(?, evidence_path), note = COALESCE(?, note), "
+                + "version = version + 1, updated_at = now() "
+                + "WHERE id = ? AND status = 'PENDING' AND version = ?",
+                score, blankToNull(evidencePath), blankToNull(note), id, expectedVersion);
+        return rows > 0;
+    }
+
+    @Override
     public boolean confirm(Long id, String confirmedBy, int expectedVersion) {
         // status 与 version 两个条件都在 WHERE 里：任一不满足就是 0 行，调用方重读重判。
         int rows = jdbc.update("UPDATE dealer_score_reviews SET status='CONFIRMED', confirmed_by=?, "
@@ -149,6 +179,11 @@ public class JdbcDealerScoreReviewRepository implements DealerScoreReviewReposit
     }
 
     // ---- 小工具 ----
+
+    /** 空白串按"不改动"处理（与 {@code updateCandidateDimensionScore} 的 COALESCE 语义配对）。 */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
 
     /** INT 列取值：NULL 与 0 是两件事（未评 vs 评了 0），所以不能直接 getInt。 */
     private static Integer intOrNull(java.sql.ResultSet rs, String column) throws java.sql.SQLException {

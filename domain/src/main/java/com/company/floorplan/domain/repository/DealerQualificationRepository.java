@@ -31,11 +31,11 @@ import java.util.Optional;
  * 事务内的再查询必然报 "current transaction is aborted"，那样错误码会被 500 覆盖。</p>
  *
  * <p><b>乐观锁的适用范围（实测结论，不是推测）</b>：V45 三张表都没有 {@code version} 列，
- * {@code dealers} 也没有（V1 建表未带、V46 只 ADD COLUMN 未补 version），
- * 号段内唯一带 {@code version} 的新表是 {@code dealer_score_reviews}（V46:88）。
- * 因此本接口只有 {@code dealer_score_reviews} 那条路径（见
- * {@link DealerScoreReviewRepository}）能做版本 CAS，
- * {@link #updateAdmissionState} 只能按"当前值不同才写"处理，理由与后果见该方法注释。</p>
+ * {@code dealers} 也没有（V1 建表未带、V46 只 ADD COLUMN 未补 version）。
+ * 因此本接口做不到版本 CAS，{@link #updateAdmissionState} 只能按"当前值不同才写"处理，
+ * 理由与后果见该方法注释；号段内带 {@code version} 的表是
+ * {@code dealer_score_reviews}（V46:88）、{@code inspection_certificates}（V52:49）、
+ * {@code used_config_params}（V41:38），前者的 CAS 见 {@link DealerScoreReviewRepository}。</p>
  */
 public interface DealerQualificationRepository {
 
