@@ -320,9 +320,11 @@
 | ~~R5–R8~~ | 对账规则口径 / 占位规则补全 | **✅ 已闭环（2026-11-22）**：4 条全部补真实取数 SQL + `ExactValueReconRule` 精确相等判定，8 条全 `implemented=true`、`ruleCount` 恒 8；口径见 ADR §10 |
 | **Q-EVT1 🆕（2026-11-22 W0）** | `COLLATERAL_CHANGED` 的 `aggregate_key` 按什么取值、「担保权属的一次变更」边界是什么、`status` 有哪些取值？——同键 SENT 行永久保留 ⇒ 键选错会**永久抑制后续合法事件**，属业务口径不能由实现方猜 | W1-COLLATERAL 发布端接线 |
 | **Q-EVT2 🆕（2026-11-22 W0）** | 「可用额度」契约二选一：`GET /api/credit-lines/available?dealerId=` + `BigDecimal`，还是 `GET /api/credit-lines/{id}/available` + `Long`（金额按 `AGENTS §6.3` 须 BIGINT 整数）？还是两条都删。**当前两条都无实现**，其中后者实测 500 | W1-CREDIT |
+| **Q-EVT3 🆕（2026-11-22 W2-CORE 派单时实查）** | `LOAN_CREATED` 载荷里的 `dueDate` / `gracePeriodDays`（到期日 / 宽限期）**权威源是谁**？唯一像样的出处是 `financing_terms`（V11，列 `new_maturity_date` / `new_grace_days` / `term_source`），但该表**全仓零写入方**——唯一 Java 引用是 `SqlStructureSelfCheck`（只数表存不存在）。不裁决就只能不发这两个字段，消费侧 `generateRepaymentPlan` 会 WARN「期限未录入」跳过还款计划生成（`loan-service` `LoanApplicationService:94-98`，实测确认不抛异常、不阻断建据） | 业务 / PM；W2-CORE 已按「不发」派单，**不许自造默认值**（AGENTS 铁律 3） |
 
-> 上两行是 W0 契约冻结时**留白**产生的，不是代码缺陷：未签字前不许按「合理默认值」先实现（AGENTS 铁律 3）。
-> 口径与选项已写进 `docs/接口契约-事件与Feign.md`，签字后只需替换文档 + 接线，框架不用改。
+> 上三行是 W0 契约冻结时**留白**产生的，不是代码缺陷：未签字前不许按「合理默认值」先实现（AGENTS 铁律 3）。
+> Q-EVT1 / Q-EVT2 的口径与选项已写进 `docs/接口契约-事件与Feign.md`，签字后只需替换文档 + 接线，框架不用改；
+> Q-EVT3 的实查证据（表列、零写入方、消费侧降级行为）写在 `docs/AGENT_TASK-w2-core.md` 任务 4。
 
 ---
 
@@ -353,7 +355,7 @@
 | **B-5 授信单人自动审批绕过 SOD** | 兼容入口 `createCreditLine` 用同一 actor 跑完 initiate→complete，绕过「发起与执行分离」。代码层已有双段审批链，但默认放行 | PM | ✅ **已修复 `6dfc4cc`（代码层能力完整 + 生产配置强制）**：V23 `credit_lines.initiated_by` + `floorplan.credit.strict-sod` 开关。默认 `false` 保持本地原型/冒烟可用；**生产必须置 `true`**，届时兼容入口拒绝（`AUTH_003`）且 `completeCreditLine` 强制复核人 ≠ 发起人。是否强制属部署配置，不是代码 bug |
 | **V22/V23 迁移号段** | 本轮收口新增两个共享层迁移，需登记避免后续 agent 撞号 | PM | ✅ 已登记：V22 = 处置冻结增量（B-2）、V23 = 授信发起人（B-5）；`web.log` 实证 `now at version v23` |
 | **`.microservice-pids/` 运行时文件误跟踪** | 6 个 pid 文件被提交进版本库，且 `.gitignore` 未覆盖 | PM | ✅ **已修复 `6dfc4cc`**：`.gitignore` 加 `.microservice-pids/`，`git rm --cached` 移除 6 个已跟踪 pid；smoke 结束后目录为空 |
-| **🆕 W0-1 事件发布端零业务调用方** | `JdbcOutboxPublisher` 实查只出现在 10 个启动类的 `@Import` 里，没有任何业务方法调用它 → `outbox_events` 现在只能靠脚本造数，**跨服务链路依旧靠人工搬数据**。接线点已在 `docs/接口契约-事件与Feign.md` §5 钉死：core 在垫款 `PAID` 后发 `LOAN_CREATED`（键 `advanceId`）、bank 在回款匹配后发 `PAYMENT_MATCHED`（键 `paymentRef`）、collateral-reg 在权属变更时发 `COLLATERAL_CHANGED`（键未定源，见下） | W1-CORE / W1-BANK / W1-COLLATERAL | ⬜ **开放**（消费框架已就位并冒烟验证，缺生产者）|
+| **🆕 W0-1 事件发布端零业务调用方** | `JdbcOutboxPublisher` 实查只出现在 10 个启动类的 `@Import` 里，没有任何业务方法调用它 → `outbox_events` 现在只能靠脚本造数，**跨服务链路依旧靠人工搬数据**。接线点已在 `docs/接口契约-事件与Feign.md` §5 钉死：core 在垫款 `PAID` 后发 `LOAN_CREATED`（键 `advanceId`）、bank 在回款匹配后发 `PAYMENT_MATCHED`（键 `paymentRef`）、collateral-reg 在权属变更时发 `COLLATERAL_CHANGED`（键未定源，见下） | W1-CORE / W1-BANK / W1-COLLATERAL | ⬜ **开放**（消费框架已就位并冒烟验证，缺生产者）；`LOAN_CREATED` 已于 2026-11-22 15:30 拆卡派给 W2-CORE = `docs/AGENT_TASK-w2-core.md`。**接线点定为 `confirmAdvance`（`AdvanceApplicationService:530`，PAID 之后）**——拆分方案 §11 那行写的「`disburseAdvance` 成功后发」与冻结契约 §2「银行回调 PAID 之后」冲突：`disburseAdvance` 只推到 `PROCESSING`、钱没到账，按它接会让四条线为空账记账。**以契约为准，方案文档那行由收口方改**（`AGENTS §7.1` 方案文档不在我写入集，未擅动）|
 | **🆕 W0-2 `createFromLoanCreated` 仍无调用方 → `loans` 表恒空** | `LoanApplicationService.createFromLoanCreated()` 全仓无调用方；W0 交付的 `LoanCreatedConsumer` 里那行**刻意注释着**（骨架只做校验 + 留痕，不越权建业务）。DPD / 画像 / 逾期 / 对账四条线继续空转 | W1-LOAN | ⬜ **开放** |
 | **🆕 W0-3 发布端 `NOT EXISTS` 去重端到端 0 验证** | 没有 HTTP 入口能触发发布端，冒烟只能绕开它直插 PENDING 行。**2026-11-22 用户裁决 = A：不扩权建 `infrastructure/src/test`**——不为一段还没人调用的 SQL 引入全仓第一个连库测试（`mvn -B clean package` 是全员硬门槛，保持不依赖 5434）。改由**第一个真实生产者接线时在冒烟里收口**：最早触发发布端的是 **W1-BANK**（`PAYMENT_MATCHED`，卡面第 6 步已写「再调一次不产生第二条事件」），W2-CORE 的 `LOAN_CREATED` 在其后 | W1-BANK（效果层 + 机制层断言）+ W2-CORE（第二个生产者复验）+ W3（合并进 `smoke-test.py`）| 🟡 **已裁决 A，已写进 `docs/AGENT_TASK-w1-bank.md` 任务 6 与「交付」要求**（2026-11-22 用户批准改那张卡），待 W1-BANK 执行。⚠️ 两点必须交代给执行人：① **卡面那条断言的归因不唯一**——同一 `transaction_id` 再匹配会先被步骤 3 的 `uk_payment_match_txn` 唯一约束挡住，走不到发布端，所以它证明的是「端到端不重复」而不是「`NOT EXISTS` 有效」；要单独钉机制，加一步：匹配成功后用 psql **删掉该行 `payment_matches`、保留 outbox 的 SENT 行**，再调一次匹配 → 此时唯一约束不再拦（键已空），只有发布端的 `WHERE NOT EXISTS` 能压住重复，断言 `outbox_events` 该 `(event_type, aggregate_key)` 仍只 1 行（`JdbcOutboxPublisher` 实查抑制条件为 `status IN ('PENDING','SENT')`）。此取法要等 W1-BANK 真接线后才可跑，届时按当时状态核实可跑性：若首条事件的下游已改掉匹配前置（借据状态等），就为这条断言单独造一组新流水 + 新借据，不要硬套上面那步。② 在此之前那段 SQL 只有人工审阅、零自动化覆盖，碰它的提交须在信息里显式说明 |
 | **🆕 W0-4 `DEAD` 事件无人工重放接口** | 死信只有 `event_consumptions.status='DEAD'` 可查；游标已越过该 id，重放需要人工把 `consumer_offsets.last_event_id` 回退，而回退会连带重放历史事件（框架层幂等会跳过已 DONE 的，但业务侧副作用不由框架兜）。本期只留接缝 | W3 收口 | ⬜ **开放** |
