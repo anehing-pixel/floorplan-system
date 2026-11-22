@@ -19,6 +19,14 @@
       <artifactId>floorplan-domain</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- W0-2：实现 common 里的 OutboxPublisher 契约要用到 DomainEvent / JsonPayloadReader，
+         依赖方向是 infrastructure → common → application → domain，无环（common 不反向依赖 infra）。
+         顺带带来 spring-boot-starter-web 传递的 jackson-databind，payload 的 JSON 校验需要它。 -->
+    <dependency>
+      <groupId>com.company</groupId>
+      <artifactId>floorplan-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-jdbc</artifactId>
