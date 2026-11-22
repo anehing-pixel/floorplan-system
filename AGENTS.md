@@ -217,6 +217,14 @@ Flyway 直接拒绝启动，冒烟全断。
 - 并行期先按第 4 节坑 5 分一套 schema + 端口偏移，别在 `public` 和偏移 0 上互踩。
 - 合并前查越界：`git diff --name-only <baseline>..HEAD`，对照任务卡写入集。
 - 提交前 `git status --short` 确认没有把别人的 WIP 卷进来——这个项目踩过，一次提交掺进三个工作流的改动。
+- **但 `git status` 自检挡不住竞态**：现在有两个会话在同一个工作树、同一个 `.git/index` 上交替提交，
+  而你看完状态到敲下 `git commit` 之间，对方 `git add` 的文件会进你这一笔——因为
+  **`git commit`（不带路径）提交的是整个暂存区，不是你 `git add` 的那几个**。
+  所以本仓库的提交一律写成 **pathspec 形式**：`git commit -m "…" -- <路径1> <路径2>`。
+  2026-11-22 实测：B 已被对方 stage 时，`git commit -- C` 只提交 C，B 原样留在 index 不受影响；
+  自己新增的文件仍需先 `git add` 自己那几个。
+- **发现别人的 WIP 时不要 stash、不要移走、不要代提交**——它可能正在被写。判活法是看时间戳：
+  实测过 8 分钟内脏文件从 2 个涨到 5 个，那种状态下任何"顺手清理"都是在改别人的稿子。
 
 ---
 
@@ -346,4 +354,5 @@ GuaranteeGatePolicyTest 补 noDealerBypass / unknownStatus，共 7 项。
 - [ ] `mvn -B package` 全绿
 - [ ] `bash run-microservices.sh smoke` EXIT 0、FAIL 0
 - [ ] 报「已交付」前，回到 `public`（`unset FLOORPLAN_DB_SCHEMA SPRING_DATASOURCE_URL`）再跑一次全量
-- [ ] 提交信息带验证结论，`git status` 干净
+- [ ] 提交信息带验证结论；`git status --short` 里**属于这次工作的**文件都已 pathspec 提交，
+      别人的 WIP 原样留着不碰（共享工作树里 status 本来就不会「干净」，不要为了清零而动了对方文件）
