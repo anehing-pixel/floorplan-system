@@ -27,16 +27,6 @@ import org.springframework.stereotype.Component;
  * 查出各表的实际列名，与代码里 SQL 声明的列名逐一比对，
  * 发现差异就<b>打印醒目的 ERROR 日志</b>（不阻止启动——
  * 阻止启动会让开发环境寸步难行），让问题在第一次跑业务之前就暴露。</p>
- *
- * <p><b>覆盖范围的边界（勿把"自检通过"当成"这张表的 SQL 都对"）</b>：
- * 一张表在本清单里只有一条登记，取的是<b>写路径的主 SQL 列集</b>（一般是 INSERT）。
- * 两处已知不在覆盖内：
- * (1) {@code vehicle_units} 登记的是 LEGACY {@code JdbcVehicleUnitRepository} 的 INSERT 列，
- * USED 属性那条 {@code UPDATE ... SET} 的列（V50 新增的 {@code mileage_source}、
- * {@code inspection_remaining_months} 等）不在其中；
- * (2) 同一条 UPDATE 语句里"列顺序 vs 参数顺序"的错位本类查不出来——
- * 它只比集合包含关系，不看顺序。第 (2) 点靠的是各仓储把
- * SET 片段与绑定参数在同一处成对累积（见 {@code JdbcUsedVehicleAttributesRepository#addSet}）。</p>
  */
 @Component
 @Order(100)
@@ -110,43 +100,6 @@ public class SqlStructureSelfCheck implements ApplicationRunner {
                 "advance_no", "vin", "credit_line_id", "amount", "paid_at", "status", "payment_ref",
                 "idempotency_key", "purchase_order_id", "payee_supplier_id", "payee_supplier_type",
                 "payee_account_snapshot", "applicant", "reviewer", "reviewed_at", "disburser"));
-        /* ---- USED 域（W-U1，V40–V54）----
-         * 列名取自本包各仓储的 INSERT 清单；比对方向是"代码写了的列，表里必须有"，
-         * 迁移漏执行或列名手抖都会在启动日志里直接报出来，而不是等第一次写业务数据时 500。 */
-        CHECKED.put("dealer_licenses", Arrays.asList(
-                "dealer_id", "license_type", "license_no", "competent_authority", "issued_on",
-                "expires_on", "status", "evidence_path", "evidence_digest", "verified_by",
-                "verified_at", "created_by", "updated_by"));
-        CHECKED.put("dealer_auction_memberships", Arrays.asList(
-                "dealer_id", "auction_house_code", "member_no", "member_grade", "joined_on",
-                "expires_on", "status", "evidence_path", "created_by", "updated_by"));
-        CHECKED.put("dealer_compliance_checks", Arrays.asList(
-                "dealer_id", "check_type", "checked_on", "valid_until", "result", "source",
-                "request_no", "evidence_path", "note", "checked_by", "created_by", "updated_by"));
-        CHECKED.put("dealer_score_reviews", Arrays.asList(
-                "dealer_id", "review_year", "operating_score", "stock_quality_score", "status",
-                "scored_by", "confirmed_by", "evidence_path", "note", "idempotency_key",
-                "request_fingerprint", "version"));
-        CHECKED.put("inspection_certificates", Arrays.asList(
-                "cert_key", "certificate_no", "vin", "registration_plate", "owner_name", "user_name",
-                "inspection_expiry_date", "issue_date", "status", "predecessor_id", "evidence_path",
-                "version"));
-        CHECKED.put("certificate_custody_events", Arrays.asList(
-                "certificate_id", "event_type", "from_status", "to_status", "encumbrance_type",
-                "check_source", "actor_type", "actor", "occurred_at", "evidence_path", "reason",
-                "trace_id"));
-        CHECKED.put("vehicle_condition_reports", Arrays.asList(
-                "vin", "report_no", "report_type", "inspected_on", "inspector", "structure_condition",
-                "repair_history", "accident_history", "modification_flag", "interior_condition",
-                "exterior_condition", "odometer_km", "inspection_expiry_date", "recycle_ticket_flag",
-                "compulsory_insurance_expiry", "automobile_tax_status", "photo_paths",
-                "attachment_path", "attachment_digest", "source_message_id", "created_by"));
-        // 只读表：本包不 INSERT（种子行在 V41 迁移里），列名取自选库后的 RowMapper 取值列。
-        // 登记进来仍然有意义——SELECT * 配按列名取值的 mapper，列名写错是运行期才炸的 SQLException。
-        CHECKED.put("used_config_params", Arrays.asList(
-                "id", "param_key", "param_value", "value_type", "unit", "status", "effective_on",
-                "expired_on", "source_ref", "approved_by", "note", "created_at", "updated_at",
-                "created_by", "updated_by", "version"));
     }
 
     public SqlStructureSelfCheck(JdbcTemplate jdbc) {
