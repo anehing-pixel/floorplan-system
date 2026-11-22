@@ -13,6 +13,8 @@ import java.math.BigDecimal;
  * 仍在 core 的行锁事务内，本契约只读可用量——把写入挪到跨服务调用会破坏最强一致性边界。</p>
  */
 @FeignClient(name = "credit-service", path = "/api/credit-lines",
+        // W0-5 本地直连：url 非空即直连该地址（本地不启 Nacos 时用），空串回退服务名 lb://，生产零影响。
+        url = "${floorplan.clients.credit.url:}",
         fallback = CreditLineClient.Fallback.class)
 public interface CreditLineClient {
 

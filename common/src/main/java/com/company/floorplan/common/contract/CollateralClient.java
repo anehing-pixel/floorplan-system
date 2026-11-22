@@ -11,6 +11,11 @@ import org.springframework.web.bind.annotation.RequestParam;
  * 实现方是 collateral-reg-service；本地未起该服务时 core 侧走 fallback 拒绝放款。</p>
  */
 @FeignClient(name = "collateral-reg-service", path = "/api/collateral-reg",
+        // W0-5 本地直连：url 非空即直连该地址（本地不启 Nacos 时用），空串回退服务名 lb://，生产零影响。
+        // 属性键刻意用 collateral 而不是 collateral-reg：Spring 宽松绑定把环境变量里的下划线
+        // 解析成点，FLOORPLAN_CLIENTS_COLLATERAL_REG_URL 会被读成 floorplan.clients.collateral.reg.url，
+        // 带连字符的键无法用环境变量稳定表达。
+        url = "${floorplan.clients.collateral.url:}",
         fallback = CollateralClient.Fallback.class)
 public interface CollateralClient {
 

@@ -33,6 +33,27 @@ mkdir -p "$PIDDIR" "$LOGDIR"
 
 JAR() { echo "$ROOT/$1/target/floorplan-$1-1.0.0-SNAPSHOT.jar"; }
 
+# ----------------------------------------------------------------------------
+# W0-5 本地直连：不启 Nacos 时让 Feign 也能真的打到对端服务。
+#
+# 背景：契约只有 @FeignClient(name=...) 没有 url，本地没注册中心时 Feign 解析不到实例，
+# agent 只能对着存根测——于是"写了代码没接通"（/api/payments/** 被 core 兜底 404 就是同类）。
+# 现在契约统一写成 url = "${floorplan.clients.<key>.url:}"：
+#   给了值 → 直连该地址；不给（生产）→ 空串回退 lb://服务名，行为零变化。
+#
+# 键名规矩：<key> 一律用小写单个单词（loan / credit / collateral），不要带连字符。
+#   原因：Spring 宽松绑定把环境变量里的下划线解析成点，
+#   FLOORPLAN_CLIENTS_COLLATERAL_REG_URL 会被读成 floorplan.clients.collateral.reg.url，
+#   带连字符的属性键没法用环境变量稳定表达。
+#
+# 端口值与下面网关的 ROUTE_* 严格一致，两处不一致就会有一处骗人。
+# 在这里 export 而不是逐个 start_one 传参：Feign 调用方会随波次增加（W1 起 bank 也要用），
+# 逐个传要改 N 行，全局 export 只加一次，且各服务 application.yml 无需任何改动。
+# ----------------------------------------------------------------------------
+export FLOORPLAN_CLIENTS_LOAN_URL=http://127.0.0.1:8085
+export FLOORPLAN_CLIENTS_CREDIT_URL=http://127.0.0.1:8083
+export FLOORPLAN_CLIENTS_COLLATERAL_URL=http://127.0.0.1:8086
+
 start_one() {
   local name="$1" jar="$2"; shift 2
   if [ ! -f "$jar" ]; then echo "[跳过] $jar 不存在，请先 mvn clean package"; return 1; fi
