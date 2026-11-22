@@ -224,9 +224,12 @@
 | CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ✅ 已合并 `dba931d`（⚠️ 合并时 verifier 未回结论，见第 0 节流程更正；补验中） |
 
 | W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线未做**（见第 7 节）| **不写死笔数**：逐笔看 `git log --oneline a047568..HEAD`（其中 `8457b78` 起为 W0 工作，`d95a485` 及更早属上一轮）。本格曾三次填总数、三次被自己的下一笔提交过期——计数交给 git，文档只写范围 | 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md`、`AGENTS.md`（手册校正）| `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
+| **USED 设计集 D00–D12**（二手车库存垫资改造） | `master` 直干（纯文档，用户 2026-11-22 授权合入） | 仓库根，不建 worktree | ✅ 13 份设计产物已合入；**开发暂缓 = 零代码、零 `.sql`、零接口实现** | 逐笔看 `git log --oneline d30b3b9..HEAD -- docs/`（计数交给 git） | 交付说明 = `docs/二手车库存垫资改造-00…-12`，索引登记在 `docs/00-文档索引.md §A2` | `base-used-design-20261122` = `9136ac8`（⊇ `base-w0-20261122`，纯文档无新增可运行能力） | ✅ 已在 master `9136ac8` |
 
 > 迁移号段（写入集互斥，绝不越界）：V16=loan · V17=payment · V18=collateral · V19=release · V20=recon · V21=eng(outbox) · **V22=收口(B-2 处置冻结增量) · V23=收口(B-5 授信发起人)** · V24=custodian scope（Q9/Q10 口径）· V25=ADR-Q27 `owner_name` 专用列 · **V26=W0 事件消费幂等 + 游标（`event_consumptions` / `consumer_offsets`）**。
 > **下一可用号 = V27**（2026-11-22 14:03 实查：`db/migration/` 最大 V26，八个 agent 分支里无人在建 V27+，Flyway 已实证 `public` 到 V26）。
+> **USED 域号段 = V40–V79**（2026-11-22 登记）。USED 从 V40 起跳正是为了不和在途波次抢 V27–V31，V32–V39 留缓冲；映射与建表阶梯见 `docs/二手车库存垫资改造-04-数据库设计.md §2 / §2.1`：阶梯 `73 / 84 / 89 / 94 / 96` 是各包完成后的 `public` 基准表数，**并行期 `agent_env.sh check` 门槛按此设 `FLOORPLAN_PUBLIC_TABLES`，不许沿用默认 67**。
+> **USED 侧下一可用号 = V80**；`public` 主干侧下一可用号仍是 V27。两条 `base-*` 并存时（`base-w0-*` 会随 W0 收尾继续前移）：起分支一律 `git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/base-*` 取最新，文档里不写死标签名。
 > 号段无冲突：V26=W0 这一格在 `AGENTS.md §6.2`、`docs/并行开发-剩余需求拆分方案.md §4`、W0 任务卡三处写法一致。
 > 本轮补的是**登记本身**——此前本表只到 V23，而 V24（custodian scope）、V25（`owner_name`）早已落库、V26 是本轮新建，
 > 后续 agent 若照本表找号会以为 V24–V26 可拿，那正是「两个同号迁移 → Flyway 拒启动」的老事故路径。
