@@ -211,13 +211,16 @@ worktree 是**仓库同级目录**，相对路径 grep 会全空（AGENTS §12 �
 
 本轮新事实：
 
-1. **W-U1 交回了我欠的证据，也交回了两条假信息。** 真：V40–V52 在 `used_wu1` Flyway 全 SUCCESS、
+1. **W-U1 交回了我欠的证据；同批那两条假信息是 W-U4 报的（我起初挂错了人）。** 真：V40–V52 在 `used_wu1` Flyway 全 SUCCESS、
    `public` 基表恒 67、迁移历史恒 26 行、重启幂等（历史仍 52 行不增）、守卫「public.outbox 未动」PASS、
-   `mvn -o -B package` 19/19 模块含 4 个 `used-*`。假：它报「可登录账号 = admin/ops/dealer/risk」——
+   `mvn -o -B package` 19/19 模块含 4 个 `used-*`。假（**归属已更正 = W-U4 的 15:37 报告，不是 W-U1**）：「可登录账号 = admin/ops/dealer/risk」——
    **`ops`/`dealer`/`risk` 三个账号不存在**，主干实测 14 个 seed 账号（`admin/admin123` + `credit`/`advisory`/
    `post_lending`/`collection`/`collateral`/`cashier`/`disposal`/`fund_rev`/`import_op`/`multi_role`/`operator`/
-   `review_op`/`settlement`）；另报「`used_vehicle_migration_tasks` 列名分歧」，该表名**在它自己分支里 0 命中**。
-   两条都已退回要它给复现或撤回。
+   `review_op`/`settlement`）；另报「`used_vehicle_migration_tasks` 列名分歧」，该表名**在六棵树里 0 命中**。
+   W-U4 00:00 自己认领了这两条，并指出 `/used-admission` 不是它的坐标；W-U1 脚本实测无这三个账号
+   （`grep -n "ops|'dealer'|'risk'" wt-used-wu1/scripts/smoke_used_wu1.py` → **0 命中**）。
+   **我把两条消息队列混读了一次，对 W-U1 发了一句错指控**，已单独收回；同时收回的还有我替它「重跑报告」
+   总结的那三句结论——那份正文我根本没读到（它 23:17 起的 turn 到 00:0x 还在跑，我 5 条消息全在 `queuedTurnCount=4` 里）。
 2. **W-U1 已执行我那条错裁决**：V46 被删成 0 张建表（**未提交**，-63 行），74/74 是删表后的数。
    已让它 `git checkout -- V46…` 取回 + **drop/init 重建 schema**（不能只重启：库里应用过的是删表版 V46，
    文件恢复后 checksum 会挡启动；`flyway repair` 是把不一致推迟到运行时，禁用）。R12 撤回在这一点上
