@@ -23,8 +23,11 @@
 车辆售出后回款解押。原为 Rails 单体，正在重写为 Java 17 + Spring Boot 3.2.5 并做微服务化。
 
 **当前真实状态**：后端主干功能可运行、全部 Maven 模块全绿（模块数不写死，以父 `pom.xml` `<modules>` 为准）、冒烟 200+ 断言通过；
-但**事件驱动层未落地**（outbox 只有表没有实现、借据没有生产者、工单表没有 Java 类），
-所以 11 个业务环节里所有跨服务的衔接仍靠人工搬数据。不要假设「表建了就是功能有了」。
+事件机制已落地（W0）且**第一条业务线已接上**（2026-11-22 18:55：放款确认 → `LOAN_CREATED` → 建借据，
+见 `web/HANDOFF-W2-CORE.md`、`loan-service/HANDOFF-W1.md`）；
+但**回款匹配 `PAYMENT_MATCHED`、权属变更 `COLLATERAL_CHANGED` 两个生产者仍是零调用方**、
+**工单表没有 Java 类**，所以 11 个业务环节里除「放款 → 借据」外的跨服务衔接仍靠人工搬数据。
+不要假设「表建了就是功能有了」。
 
 `ai-service/` 是 Python deep-agent 模板骨架，**不在本期范围**，不要改它。
 
@@ -267,14 +270,19 @@ Flyway 直接拒绝启动，冒烟全断。
 `PROGRESS.md §8` 是**全量实查清单**，分七类：真未开发 / 骨架占位 / 默认关闭 / 零覆盖 / 仅设计稿 /
 业务定源 / **文档状态滞后造成的「假未完成」**。动手前先看，避免重复调查或误判。
 
-当前最要命的五处断裂（P0）：
+当前最要命的五处断裂（P0；2026-11-22 18:55 接线轮复核：**第 1、2 条已闭合，第 3/4/5 条原样成立**）：
 
-1. **借据没有生产者** — `LoanApplicationService.createFromLoanCreated()` 全仓无调用方；`loans` 表恒空，
-   DPD、画像、逾期、对账四条线一起空转。
-2. **事件机制只到「框架能用」，没到「业务会发」** — W0 已落地发布、轮询、游标、消费幂等、死信
-   （`JdbcOutboxPublisher` / `EventDispatcher` / `@Scheduled` / `event_consumptions`+`consumer_offsets`，
-   机制冒烟 `scripts/smoke_w0.py`），但**发布端在业务代码里仍然零调用方**。没有生产者就没有事件，
-   所有跨服务衔接照旧卡在第 1 条。接线归 W1/W2，**别把「调度器和表都在」读成「闭环已通」**。
+1. ~~**借据没有生产者**~~ **✅ 已接线** — `LoanApplicationService.createFromLoanCreated()` 现由
+   `LoanCreatedConsumer:114` 调用，`loans` 表不再恒空（判据 = `scripts/smoke_w1_loan.py` 端到端 8 段，落库不看 HTTP 码）。
+   **但别读成「四条线都活了」**：`dueDate`/`gracePeriodDays` 因 Q-EVT3 未签字仍不进事件载荷
+   ⟹ 新建借据 `due_date IS NULL`、`repayment_plans` 零行，逾期 DPD 与对账仍转不起来。
+2. ~~**事件机制只到「框架能用」，没到「业务会发」**~~ **✅ `LOAN_CREATED` 这一条已发到业务里** —
+   W0 的发布 / 轮询 / 游标 / 消费幂等 / 死信机制（`JdbcOutboxPublisher` / `EventDispatcher` / `@Scheduled` /
+   `event_consumptions`+`consumer_offsets`，机制冒烟 `scripts/smoke_w0.py`）之上，
+   现在有了第一个真实调用方 `AdvanceApplicationService.confirmAdvance`（PAID 之后、同事务、键 `advanceId`）。
+   **余下两个生产者仍零调用方**：`PAYMENT_MATCHED`（回款匹配，归 W1-BANK）、`COLLATERAL_CHANGED`
+   （聚合键与 status 取值域待业务定源，见 `PROGRESS.md §7` W0-1/W0-7）。**「调度器和表都在」不等于「闭环已通」，
+   「一根线通了」也不等于「事件驱动层落地了」。**
 3. **回款匹配后不解押不回补** — `ReleaseOrchestrator` 解押只记日志，`availableAfter = before`。
 4. **工单体系 0 Java** — `work_orders` / `work_order_actions` 表齐全，零实体零 Service。
    门禁拒付说「生成 HIGH 工单」，实际只写 `risk_alerts`。

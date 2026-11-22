@@ -4,7 +4,33 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 14:16（GMT+8） · **W0 事件地基 + 并行环境隔离 + AGENTS.md 校正已交付主干，基线 tag `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+最后更新：2026-11-22 18:55（GMT+8） · **W2-CORE + W1-LOAN 事件接线已交付（`LOAN_CREATED` 发布端 + 消费端建据），主干 `loans` 表不再恒空；基线 tag 仍为 `base-w0-20261122`**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+
+> ✅ **2026-11-22 18:55 事件链路第一根线接通（用户指令「开发吧」，按 W2-CORE / W1-LOAN 两张卡做，未新增业务口径）**：
+> - **发布端**：`AdvanceApplicationService.confirmAdvance`（`:551`，PAID 之后、同一事务内）调用新端口
+>   `application/event/LoanCreatedPublisher`，适配器 `web/integration/OutboxLoanCreatedPublisher`（`:100` 写 outbox，
+>   `aggregate_key = advanceId`）→ **`JdbcOutboxPublisher` 从此有了第一个真实业务调用方**（W0-1 的 `LOAN_CREATED` 半边）。
+>   `AdvanceController.confirm:141` 把 `RequestLoggingFilter` 的 traceId 显式传下去，取到 `"null"` 直接抛，不兜底 UUID。
+> - **消费端**：`loan-service/.../LoanCreatedConsumer.java:114` 拉下 W0 那行注释，真调
+>   `LoanApplicationService.createFromLoanCreated`（`:53`）→ **`loans` 表恒空这条 P0 解除**，
+>   落 `LN-<advanceId>` / `DRAFT` / `term_source=CONTRACT` + 一条状态史（`operator=system`、reason 带事件 traceId）。
+> - **载荷本期不发 `dueDate`/`gracePeriodDays`**（Q-EVT3 未签字、权威源 `financing_terms` 全仓零写入方），
+>   消费侧因此**不生成还款计划**（`generateRepaymentPlan:95-96` 见 null 只 WARN）——这是有意的临时口径，
+>   已被 `smoke_w2_core.py` 第 5 步、`smoke_w1_loan.py` 第 2 步两条断言钉住，签字后要随之改，不许悄悄改代码。
+> - **单测**：`loan-service` 新增 16 个（`LoanCreatedConsumerTest` 9 + `LoanCreateIdempotencyTest` 7），全部不依赖数据源。
+> - **冒烟**：新增 `scripts/smoke_w2_core.py`（发布端 49 条）+ `scripts/smoke_w1_loan.py`（消费端 70 条），
+>   判据一律落库内真实状态（`outbox_events` / `loans` / `event_consumptions` / `loan_status_history`），不看 HTTP 200。
+>   两侧分开写：发布端红/消费端红的定位方式不同，不能互相代绿。`smoke_w0.py` 同批修三处（每轮唯一 `advanceId`、
+>   借据与子表清理、`to_regclass` 表存在性探针原本是**恒真**的列表成员比较）。
+> - **验证**：`mvn -B clean package` **16/16 SUCCESS**；`public` 主干冒烟 **0 FAIL**（211 条 `[PASS]`，与 14:16 基线持平未退化）；
+>   `smoke_w0.py` 36/0、`smoke_w2_core.py` 49/0、`smoke_w1_loan.py` 70/0，EXIT 均为 0；服务全停、无残留 JVM。
+>   ⚠️ 一条**环境侧现成障碍**要交收口方：`run-microservices.sh:164` 硬调 `python3`，本机 PATH 里只有
+>   `python`（`command -v python3` 为空）→ `bash run-microservices.sh smoke` 直接 `127 command not found`、
+>   冒烟根本没跑。本轮**未动这个禁区文件**，改为同法手工启停 + `SMOKE_BASE=http://127.0.0.1:18080 python smoke-test.py`
+>   取到同一条判据；建议改成 `PYTHON=${PYTHON:-python3}`，需用户点头。
+> - **仍未闭合**：`PAYMENT_MATCHED`（W1-BANK）与 `COLLATERAL_CHANGED`（W0-7 键未定源）两个生产者照旧零调用方，
+>   所以「事件闭环已通」这句话仍然不能说 —— 本轮只通了「放款 → 借据」这一根线，回款解押/权属变更两条仍靠人工搬数据。
+>   交付说明：`web/HANDOFF-W2-CORE.md`、`loan-service/HANDOFF-W1.md`。
 
 > ✅ **2026-11-22 14:03 W0-FOUNDATION（事件地基）已交付并验证**——在 master 直干、无 agent 分支，9 笔 `[W0]` 提交（`8457b78`…`1a730bb`）：
 > - **事件模型**：`common/event/DomainEvent` + `EventConsumer`（payload 取数单一口径）；
@@ -223,7 +249,7 @@
 | PAYMENT（Wave2） | `agent/payment` | `../wt-payment` | ✅ 完整交付 + reasoning verifier 通过 | 8 | ✅ | `agent/payment-done` = `d50b806` | ✅ 已合并 `d31ae9a` |
 | CORE（Wave2） | `agent/core` | `../wt-core` | ✅ 完整交付（9/9 断点）+ 46 单测；B1 因 Q27 默认关 | 10 | ✅ | `agent/core-done` = `8a6c363` | ✅ 已合并 `dba931d`（⚠️ 合并时 verifier 未回结论，见第 0 节流程更正；补验中） |
 
-| W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线未做**（见第 7 节）| **不写死笔数**：逐笔看 `git log --oneline a047568..HEAD`（其中 `8457b78` 起为 W0 工作，`d95a485` 及更早属上一轮）。本格曾三次填总数、三次被自己的下一笔提交过期——计数交给 git，文档只写范围 | 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md`、`AGENTS.md`（手册校正）| `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
+| W0-FOUNDATION（事件地基 + 并行隔离）| **`master` 直干**（地基改动全在共享层，按规矩不能开分支）| 仓库根，不建 worktree | ✅ 已交付并验证；**业务接线：`LOAN_CREATED` 已于 2026-11-22 18:55 接完（W2-CORE 发布端 + W1-LOAN 消费端），余两个生产者未接**（见第 7 节 W0-1/W0-2）| **不写死笔数**：逐笔看 `git log --oneline a047568..HEAD`（其中 `8457b78` 起为 W0 工作，`d95a485` 及更早属上一轮）。本格曾三次填总数、三次被自己的下一笔提交过期——计数交给 git，文档只写范围 | 交付说明 = `docs/接口契约-事件与Feign.md`、`docs/事件机制实现说明.md`、`docs/并行开发-W1环境隔离.md`、`AGENTS.md`（手册校正）| `base-w0-20261122`（等价旧名 `wave0c-isolation` / `wave0b-baseline`）| ✅ 本就在 master |
 | **USED 设计集 D00–D13**（二手车库存垫资改造） | `master` 直干（纯文档，用户 2026-11-22 授权合入） | 仓库根，不建 worktree | ✅ 14 份设计产物已合入（D13 = 七路纸面审计汇总与**开发轮开工门禁**，其 15 组 G1–G15 已把 14 组回灌进 D00/D02/D03/D04/D05/D07/D08/D11/D12；W-U2 首报截断、补发原文后追加**第二批回灌 A11–A19**（错误码逐码定源、LTV 快照权威落 `advances`、`aging_exempt_rules` 定名、D07/D02 事件键对齐、待定源编号归位）；**第三批 = W-U3 原文校对 + G10 第二层补齐**：该会话答「无原文留存」⟹ D13 §4.5 的 08–18 降级为「仅摘要」并逐格标 `PM 展开`，同时纠出我自己上一版只改了 integration 归列、没写清「分支门槛 ≠ 主干累计」（现 D04/D11/D12/派发记录四处并列两套值，`agent_env.sh:144` 旧提示语走禁区请求 R3；**第四批 = W-U0 原文回读后的 PM 自查回灌**（G16–G20 五组，全部由我实测得出、不冒充审计结论：D00 §7.2 扩展表登记重排为 18 行 / 17 表并清掉 65 等死数、D01 §5.2 补 U-10~U-13 及「登记 U 项同批必须进签字清单」新规矩、D12 §7 未签字表按三份权威重编号（11 行错 7 行，两个主题实为「无待定源号」）、D07 §11 挡板统一为 `TEST-*` 并补 I-11 / 凭证保管方 / I-12 非 partner 行说明、D12 W-U1 与 W-U2 端点行按 D07 §7.1/§7.2/§7.4 改齐并因 D07 缺 R2 端点小节新登记禁区请求 R8（未自造 `/api/vehicles/used`））；累计 **20 组 / 19 组已回灌**；第四批同时完成 **W-U4 原文回读**：20 条里 19 条与审计方重发稿一致，唯一实差是 WU4-20 级别我记高了一档（原文 S1，已改回并标校准），另核出 D09 证据链第 6 条的载体表 `inventory_releases` 在 D04 无 DDL 规格 ⟹ 新登记禁区请求 **R9 待用户裁决**（建表 = public 新建数 +1、两套门槛与全部引用点同批重算；审计方建议的「改指 `wms_inventory_items`」经 D04 §3.17 实测判为语义不对，未采纳）））；**审计轮收口时零代码、零 `.sql`、零接口实现**；**第五批 = W-U5 原文收录**（01–04 逐字进 D13 §4.7、05–16 回调未到；新增共因 G21 幽灵表 / G22 未签字口径被配置默认值预先定死 / G23 文档列名与实建列名不符，其中 G22/G23 已回灌、G21 须裁决 ⟹ 累计 **23 组 / 21 组落地**，并新登记禁区请求 **R10**（`repayment_allocations` 同 `inventory_releases` 无载体）、**R11**（INV-2 的「依赖树」判据与「只依赖 `common`」互斥，`common/pom.xml` 自身 compile-scope 依赖 domain/application，且 `RequirePermission`/`GlobalExceptionHandler`/`JwtAuthInterceptor` 三处在字节码层拽这两个包；本轮按源码级红线实施，不加 `<exclusions>` 假绿））；**开发轮 2026-11-22 开工**（用户指令「开发吧，并行开发，都不需要测试，等我确认再开始测试」）：五路从 `base-used-dev-20261122` 并行做 D12 §7 划定的**骨架层**，本轮**不跑 `mvn`、不跑冒烟、不连库、不建 schema** ⟹ 五路都不算「已交付」，「已交付」这句话要等测试轮全量冒烟才能说 | 逐笔看 `git log --oneline d30b3b9..HEAD -- docs/`（计数交给 git） | 交付说明 = `docs/二手车库存垫资改造-00…-13`，索引登记在 `docs/00-文档索引.md §A2`；**开工前先读 D13 §7 门禁与 §8 未签字清单** | `base-used-design-20261122` = `9136ac8`（纯文档，⊇ `base-w0-20261122`）→ **开发轮基线另立 `base-used-dev-20261122` = `ea21473`**。为什么要另立：设计标签里**没有 D13、也没有五批审计对 D00/D04/D06/D07/D11/D12 的修正**，从它切分支等于把审计前的稿子发给五个 agent 重做一遍已知缺陷（旧标签保留但不再开新分支） | ✅ 已在 master；五路分支 `used/wu1`…`used/wu5` 从 `ea21473` 切出 |
 | **USED 开发轮 W-U1…W-U5（骨架层）** | `used/wu1`…`used/wu5` | `../wt-used-wu1`…`../wt-used-wu5`（基线 `ea21473`） | 🟡 **进行中**：只做 D12 §7 划定的「与数值无关的骨架」（表结构 / 状态机 / 权限点 / SOD / 传输安全 / 错误码 / 服务边界 / 号段）；`[待定源]` 的数值与效力判断一律不实现。**本轮按用户指令不测试** ⟹ 表数门槛 73/78/67/72/69 **未验证**、schema 与端口偏移**未分配**（本轮无消费者），这两件是测试轮的第一件事 | 合并前不写死笔数，逐路看 `git -C ../wt-used-wu<N> log --oneline ea21473..HEAD` | 派发实况（含「五路是独立会话不是子 agent：本机 5 个自定义 agent 的 `usageScopes` 不含 `subagent`，`Agent` 工具会挡回来，并行入口是 `create_chat_session`」与本轮两处偏差）、回收核对清单 = `docs/AGENT_TASK-USED-多agent派发记录.md §6`；各包交回 `docs/AGENT_TASK-W-U<N>-实现说明.md` | `base-used-dev-20261122` = `ea21473`（收口方的 R11 登记 `06b2096` 落在其后，不在五路分支里） | ⏳ 未合并，合并由收口方统一做 |
 
@@ -333,8 +359,11 @@
 ## 7. 集成 TODO（代码里留了接缝，合并后必须处理）
 
 > **2026-11-22 14:03 复核**：下表前 14 项（Wave1/2 与收口期）**全部 ✅ 已闭环**，保留作审计记录；
-> **W0-1…W0-8 八项 ⬜ 开放**，是事件链路的接线与部署待办，不是运行缺陷——主干冒烟 211 项全绿与这八项开放**同时成立**，
+> **W0-1…W0-8 八项 2026-11-22 14:03 复核时全部 ⬜ 开放**，是事件链路的接线与部署待办，不是运行缺陷——主干冒烟全绿与这八项开放**同时成立**，
 > 因为冒烟验的是「消费框架本身可用」，而八项要的是「生产者接上、死契约定源、多实例与重放接缝」。别把绿的数字读成闭环。
+> **2026-11-22 18:55 接线轮之后**：W0-2 ✅ 闭环（`LoanCreatedConsumer` 真建据）、W0-1 只剩 `PAYMENT_MATCHED`/`COLLATERAL_CHANGED` 两半、
+> W0-3 🟡 交了 W2-CORE 那一半；W0-4（死信重放）/W0-5（多实例游标）/W0-6（credit 死契约）/W0-7（权属键待业务）/W0-8（旧措辞）
+> **五条原样开放**，本轮一条都没顺手扩权。
 > **另 W0-9（隔离工具侧）已于 `6a55381` 修复**：`agent_env.sh check` 的 V26 / gen_salt 两项子检查
 > 原先不带 schema 限定，对空 schema 会顺 `search_path` 读到 `public` 而恒真，表数是唯一真正兜住的判定
 > （已实测复现，修法与复核见下表 W0-9 行 + `docs/并行开发-W1环境隔离.md §8.1`）。
@@ -357,9 +386,9 @@
 | **B-5 授信单人自动审批绕过 SOD** | 兼容入口 `createCreditLine` 用同一 actor 跑完 initiate→complete，绕过「发起与执行分离」。代码层已有双段审批链，但默认放行 | PM | ✅ **已修复 `6dfc4cc`（代码层能力完整 + 生产配置强制）**：V23 `credit_lines.initiated_by` + `floorplan.credit.strict-sod` 开关。默认 `false` 保持本地原型/冒烟可用；**生产必须置 `true`**，届时兼容入口拒绝（`AUTH_003`）且 `completeCreditLine` 强制复核人 ≠ 发起人。是否强制属部署配置，不是代码 bug |
 | **V22/V23 迁移号段** | 本轮收口新增两个共享层迁移，需登记避免后续 agent 撞号 | PM | ✅ 已登记：V22 = 处置冻结增量（B-2）、V23 = 授信发起人（B-5）；`web.log` 实证 `now at version v23` |
 | **`.microservice-pids/` 运行时文件误跟踪** | 6 个 pid 文件被提交进版本库，且 `.gitignore` 未覆盖 | PM | ✅ **已修复 `6dfc4cc`**：`.gitignore` 加 `.microservice-pids/`，`git rm --cached` 移除 6 个已跟踪 pid；smoke 结束后目录为空 |
-| **🆕 W0-1 事件发布端零业务调用方** | `JdbcOutboxPublisher` 实查只出现在 10 个启动类的 `@Import` 里，没有任何业务方法调用它 → `outbox_events` 现在只能靠脚本造数，**跨服务链路依旧靠人工搬数据**。接线点已在 `docs/接口契约-事件与Feign.md` §5 钉死：core 在垫款 `PAID` 后发 `LOAN_CREATED`（键 `advanceId`）、bank 在回款匹配后发 `PAYMENT_MATCHED`（键 `paymentRef`）、collateral-reg 在权属变更时发 `COLLATERAL_CHANGED`（键未定源，见下） | W1-CORE / W1-BANK / W1-COLLATERAL | ⬜ **开放**（消费框架已就位并冒烟验证，缺生产者）；`LOAN_CREATED` 已于 2026-11-22 15:30 拆卡派给 W2-CORE = `docs/AGENT_TASK-w2-core.md`。**接线点定为 `confirmAdvance`（`AdvanceApplicationService:530`，PAID 之后）**——拆分方案 §11 那行写的「`disburseAdvance` 成功后发」与冻结契约 §2「银行回调 PAID 之后」冲突：`disburseAdvance` 只推到 `PROCESSING`、钱没到账，按它接会让四条线为空账记账。**以契约为准；方案文档 §11 那行已于 2026-11-22 用户点头后同步更正为 `confirmAdvance`，表下留了更正说明**（留着原句会让下一个 agent 接错点，这不是擅动：改动由用户明确指令「把方案文档那行改成 confirmAdvance」授权）|
-| **🆕 W0-2 `createFromLoanCreated` 仍无调用方 → `loans` 表恒空** | `LoanApplicationService.createFromLoanCreated()` 全仓无调用方；W0 交付的 `LoanCreatedConsumer` 里那行**刻意注释着**（骨架只做校验 + 留痕，不越权建业务）。DPD / 画像 / 逾期 / 对账四条线继续空转 | W1-LOAN | ⬜ **开放** |
-| **🆕 W0-3 发布端 `NOT EXISTS` 去重端到端 0 验证** | 没有 HTTP 入口能触发发布端，冒烟只能绕开它直插 PENDING 行。**2026-11-22 用户裁决 = A：不扩权建 `infrastructure/src/test`**——不为一段还没人调用的 SQL 引入全仓第一个连库测试（`mvn -B clean package` 是全员硬门槛，保持不依赖 5434）。改由**第一个真实生产者接线时在冒烟里收口**：最早触发发布端的是 **W1-BANK**（`PAYMENT_MATCHED`，卡面第 6 步已写「再调一次不产生第二条事件」），W2-CORE 的 `LOAN_CREATED` 在其后 | W1-BANK（效果层 + 机制层断言）+ W2-CORE（第二个生产者复验）+ W3（合并进 `smoke-test.py`）| 🟡 **已裁决 A，已写进 `docs/AGENT_TASK-w1-bank.md` 任务 6 与「交付」要求**（2026-11-22 用户批准改那张卡），待 W1-BANK 执行。⚠️ 两点必须交代给执行人：① **卡面那条断言的归因不唯一**——同一 `transaction_id` 再匹配会先被步骤 3 的 `uk_payment_match_txn` 唯一约束挡住，走不到发布端，所以它证明的是「端到端不重复」而不是「`NOT EXISTS` 有效」；要单独钉机制，加一步：匹配成功后用 psql **删掉该行 `payment_matches`、保留 outbox 的 SENT 行**，再调一次匹配 → 此时唯一约束不再拦（键已空），只有发布端的 `WHERE NOT EXISTS` 能压住重复，断言 `outbox_events` 该 `(event_type, aggregate_key)` 仍只 1 行（`JdbcOutboxPublisher` 实查抑制条件为 `status IN ('PENDING','SENT')`）。此取法要等 W1-BANK 真接线后才可跑，届时按当时状态核实可跑性：若首条事件的下游已改掉匹配前置（借据状态等），就为这条断言单独造一组新流水 + 新借据，不要硬套上面那步。② 在此之前那段 SQL 只有人工审阅、零自动化覆盖，碰它的提交须在信息里显式说明 |
+| **🆕 W0-1 事件发布端零业务调用方** | `JdbcOutboxPublisher` 实查只出现在 10 个启动类的 `@Import` 里，没有任何业务方法调用它 → `outbox_events` 现在只能靠脚本造数，**跨服务链路依旧靠人工搬数据**。接线点已在 `docs/接口契约-事件与Feign.md` §5 钉死：core 在垫款 `PAID` 后发 `LOAN_CREATED`（键 `advanceId`）、bank 在回款匹配后发 `PAYMENT_MATCHED`（键 `paymentRef`）、collateral-reg 在权属变更时发 `COLLATERAL_CHANGED`（键未定源，见下） | W1-CORE / W1-BANK / W1-COLLATERAL | ⬜ **开放**（消费框架已就位并冒烟验证，缺生产者）；`LOAN_CREATED` 已于 2026-11-22 15:30 拆卡派给 W2-CORE = `docs/AGENT_TASK-w2-core.md`。**接线点定为 `confirmAdvance`（`AdvanceApplicationService:530`，PAID 之后）**——拆分方案 §11 那行写的「`disburseAdvance` 成功后发」与冻结契约 §2「银行回调 PAID 之后」冲突：`disburseAdvance` 只推到 `PROCESSING`、钱没到账，按它接会让四条线为空账记账。**以契约为准；方案文档 §11 那行已于 2026-11-22 用户点头后同步更正为 `confirmAdvance`，表下留了更正说明**（留着原句会让下一个 agent 接错点，这不是擅动：改动由用户明确指令「把方案文档那行改成 confirmAdvance」授权）。**2026-11-22 18:55 `LOAN_CREATED` 半边已接线 ✅**：`confirmAdvance:551` → `LoanCreatedPublisher`（端口在 application，适配器 `web/integration/OutboxLoanCreatedPublisher:100`，键 `advanceId`），实测输出与判据见 `scripts/smoke_w2_core.py`（49 条 0 失败）+ `web/HANDOFF-W2-CORE.md`；`PAYMENT_MATCHED`（W1-BANK）/ `COLLATERAL_CHANGED`（键待 W0-7 定源）**两个生产者仍零调用方** ⟹ 本行只剩这两半开放 |
+| **🆕 W0-2 `createFromLoanCreated` 仍无调用方 → `loans` 表恒空** | `LoanApplicationService.createFromLoanCreated()` 全仓无调用方；W0 交付的 `LoanCreatedConsumer` 里那行**刻意注释着**（骨架只做校验 + 留痕，不越权建业务）。DPD / 画像 / 逾期 / 对账四条线继续空转 | W1-LOAN | ✅ **2026-11-22 18:55 已闭环**：`LoanCreatedConsumer:114` 拉下注释真调 `createFromLoanCreated`，落 `LN-<advanceId>` / `DRAFT` / 一条状态史；缺字段一律抛（不静默 return）⟹ `FAILED×3 → DEAD`。判据 = `scripts/smoke_w1_loan.py` 70 条 0 失败 + 本服务 16 个不连库单测，说明见 `loan-service/HANDOFF-W1.md`。**注意 `dueDate` 本期不进事件** ⟹ 新建借据无还款计划，四条线里「逾期/对账」仍等 Q-EVT3 签字，别把本行翻绿读成四条线都活了 |
+| **🆕 W0-3 发布端 `NOT EXISTS` 去重端到端 0 验证** | 没有 HTTP 入口能触发发布端，冒烟只能绕开它直插 PENDING 行。**2026-11-22 用户裁决 = A：不扩权建 `infrastructure/src/test`**——不为一段还没人调用的 SQL 引入全仓第一个连库测试（`mvn -B clean package` 是全员硬门槛，保持不依赖 5434）。改由**第一个真实生产者接线时在冒烟里收口**：最早触发发布端的是 **W1-BANK**（`PAYMENT_MATCHED`，卡面第 6 步已写「再调一次不产生第二条事件」），W2-CORE 的 `LOAN_CREATED` 在其后 | W1-BANK（效果层 + 机制层断言）+ W2-CORE（第二个生产者复验）+ W3（合并进 `smoke-test.py`）| 🟡 **已裁决 A，已写进 `docs/AGENT_TASK-w1-bank.md` 任务 6 与「交付」要求**（2026-11-22 用户批准改那张卡），待 W1-BANK 执行。⚠️ 两点必须交代给执行人：① **卡面那条断言的归因不唯一**——同一 `transaction_id` 再匹配会先被步骤 3 的 `uk_payment_match_txn` 唯一约束挡住，走不到发布端，所以它证明的是「端到端不重复」而不是「`NOT EXISTS` 有效」；要单独钉机制，加一步：匹配成功后用 psql **删掉该行 `payment_matches`、保留 outbox 的 SENT 行**，再调一次匹配 → 此时唯一约束不再拦（键已空），只有发布端的 `WHERE NOT EXISTS` 能压住重复，断言 `outbox_events` 该 `(event_type, aggregate_key)` 仍只 1 行（`JdbcOutboxPublisher` 实查抑制条件为 `status IN ('PENDING','SENT')`）。此取法要等 W1-BANK 真接线后才可跑，届时按当时状态核实可跑性：若首条事件的下游已改掉匹配前置（借据状态等），就为这条断言单独造一组新流水 + 新借据，不要硬套上面那步。② 在此之前那段 SQL 只有人工审阅、零自动化覆盖，碰它的提交须在信息里显式说明。**2026-11-22 18:55 W2-CORE 这一半已交实测输出**：`scripts/smoke_w2_core.py` 第 8 步「先 psql 造同键 `SENT` 夹具，再从 HTTP 打真回调 ⟹ 该 `(event_type, aggregate_key)` 仍只 1 行、且留下的那行 id 仍是夹具」——这条绕不开发布端，因为事件本身就是发布端写的；PASS 原文贴 `web/HANDOFF-W2-CORE.md §4`。W1-BANK 那半（`PAYMENT_MATCHED`）仍未接线 ⟹ **本行保持 🟡**，两边都到齐收口方才翻 ✅ |
 | **🆕 W0-4 `DEAD` 事件无人工重放接口** | 死信只有 `event_consumptions.status='DEAD'` 可查；游标已越过该 id，重放需要人工把 `consumer_offsets.last_event_id` 回退，而回退会连带重放历史事件（框架层幂等会跳过已 DONE 的，但业务侧副作用不由框架兜）。本期只留接缝 | W3 收口 | ⬜ **开放** |
 | **🆕 W0-5 多实例共用一条游标** | `consumer_offsets` 按 `consumer` 一行；两个进程用同一个 consumer 名会互相覆盖游标 → 漏读或重复读。本地冒烟与当前部署都是单实例，故未加分布式锁。**多实例部署前必须**改 `FOR UPDATE SKIP LOCKED` 或按实例名分片 | W3 / 运维 | ⬜ **开放**（部署前置条件）|
 | **🆕 W0-6 credit 两条死契约互不相符** | `CreditLineClient`（`GET /available?dealerId=`，返回 `BigDecimal`）全仓无实现；`CreditLineQueryClient`（`GET /{id}/available`，返回 `Long`）实测 500 `SYS_001`「No static resource」。两者签名冲突，且金额按 `AGENTS §6.3` 应为 BIGINT 整数而非小数 | W1-CREDIT | ⬜ **开放**（实现哪条 / 删哪条需定源，W0 未擅自判定）|
@@ -373,8 +402,10 @@
 
 > **本节的口径**：只列「代码里确实没有 / 只写了骨架 / 默认关闭 / 零测试覆盖 / 只有设计稿」的项，
 > 并**单独列出「文档状态滞后造成的假未完成」**，避免下次把过期的 `[ ]` 当成真实缺口。
-> 当前交付态：**0 运行 bug / 主干 211 项冒烟全绿 / 15 模块编译全绿 / 10 服务启停正常 / Flyway V1–V26 落库 / 事件消费框架已就位（`base-w0-20261122`）**。
-> **但跨服务链路仍未自动打通**：事件生产者一个都没接上（第 7 节 W0-1/W0-2），所以十一环节里的事件驱动衔接照旧靠人工搬数据。
+> 当前交付态（2026-11-22 18:55 复跑）：**0 运行 bug / 主干冒烟 0 FAIL（211 条 `[PASS]`，数字随开发变，判据看 FAIL）/ 16 个构建单元编译全绿 / 10 服务启停正常 / Flyway V1–V26 落库 / 事件消费框架已就位 + `LOAN_CREATED` 生产者与消费者已接线（`confirmAdvance` → `LoanCreatedConsumer` 建据）**。
+> **跨服务链路只通了第一根线**：`LOAN_CREATED` 已接线（第 7 节 W0-1 的一半 / W0-2），
+> `PAYMENT_MATCHED`、`COLLATERAL_CHANGED` 两个生产者仍零调用方（W0-1 余下两半 / W0-7 键未定源），
+> 所以十一环节里「回款解押」「权属变更」的衔接照旧靠人工搬数据。
 > 下列均为「功能范围 / 生产化 / 外部对接」层面的未开发需求，**不是缺陷、不阻断运行**。
 
 ### 8.1 真·未开发（代码层没有，含占位/存根）
@@ -408,11 +439,17 @@
 - 本轮 ㉔ 已覆盖：loan(2)/recon(2)/release(1)/bank(3)/collateral-reg(1) 共 9 项「从网关可达」断言。
 - **仍未被冒烟覆盖的端点**：loan `GET /loans/{id}`、`/loans/{id}/dpd`、画像 recompute；release confirm/release/discharge-lien/建单；bank `POST /payments/match`、manual-match/ignore/match-by-transaction、`GET /matches/{id}/release`；collateral-reg `discharge`、`snapshot/import`（单条）；risk `CollateralController` 12 个端点（仅 `smoke-collateral.py` 覆盖）；web 的供应商/采购单/附件/aging/holidays 等 30+ 端点。
 - **教训（两次实证）**：零覆盖 = 假绿。上一轮 ㉓ 补断言揪出 collateral-reg 全端点 500 + V10 漏挂车；本轮实测揪出 `/api/payments/**` 被 core 兜底 404。**新增端点必须同步补冒烟**。
-- **W0 新增覆盖（`scripts/smoke_w0.py`，主干 33 条 / 隔离 35 条）**：消费闭环、per-occurrence 幂等、`event_type` 订阅过滤、
+- **W0 新增覆盖（`scripts/smoke_w0.py`，2026-11-22 18:55 复跑 36 条 0 失败；条数会随开发变，判据看 FAIL）**：
+  消费闭环、per-occurrence 幂等、`event_type` 订阅过滤、
   游标只按已订阅类型前进、重置游标重放不重复消费、`LoanSnapshotDto` 七个字段对真实生产者逐字段校验 + 404 契约。
-  **仍零覆盖的一条**：发布端 `NOT EXISTS` 去重——没有 HTTP 入口能触发它，冒烟只能直插 `PENDING` 行（见第 7 节 W0-3；
-  2026-11-22 已裁决走 A 方案：不建连库单测，由 W1-BANK 首个真实生产者接线时在冒烟里收口）。
-  这条属「机制已测、生产者未测」，别说成事件链路已验穿。
+- **2026-11-22 18:55 接线轮新增覆盖**：`scripts/smoke_w2_core.py`（发布端：PROCESSING 不发、非法签名不发、
+  合法回调恰一行、`aggregate_key`= `advances.id` 且 ≠ VIN、载荷逐字段 + 整数日元 + 不含 `dueDate`、traceId 同源、
+  重复回调不重复发、**`NOT EXISTS` 机制层去重从 HTTP 入口验到**）+ `scripts/smoke_w1_loan.py`（消费端：
+  端到端建据、无 `dueDate` ⇒ 计划表空、状态史带事件 traceId、两层幂等、合成带期日 ⇒ 生成一期计划、
+  by-vin 字段对齐、坏载荷 `DEAD` 且不留半条借据）。
+  **原先「零覆盖」那条已闭合**：`confirmAdvance` 接上之后有了真实 HTTP 入口，发布端不再只能靠直插 `PENDING` 绕开
+  （第 7 节 W0-3 因此只剩 W1-BANK 那一半）。仍要说清的边界：单线程冒烟跑不出 `NOT EXISTS` 的读-判-写并发窗口，
+  「没复现」不等于「不存在」；黑盒也证不了「业务写与事件写同一事务」，那两条是代码约定，见 `web/HANDOFF-W2-CORE.md`。
 
 ### 8.4 业务口径定源 — ✅ 已全部裁决（2026-11-22，本节不再是待办）
 
