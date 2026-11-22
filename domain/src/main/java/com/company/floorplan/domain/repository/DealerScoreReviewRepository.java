@@ -62,11 +62,13 @@ public interface DealerScoreReviewRepository {
     /**
      * 新增候选行（PENDING）。
      *
-     * <p>实现必须在 {@code uk_dsr_idem} / {@code uk_dsr_pending} 冲突时返回已存在行，
-     * 由应用层比对指纹，而不是把数据库异常直接抛给调用方。</p>
+     * <p>调用方（应用层）必须先 {@link #findByIdempotencyKey} / {@link #findPending} 探测再写；
+     * 若两个事务同时穿过探测撞上 {@code uk_dsr_idem} 或 {@code uk_dsr_pending}，
+     * 实现把冲突翻成 {@code CONFLICT_001} 抛出，<b>不在同一事务内回查</b>
+     * （PostgreSQL 撞约束后当前事务已中止，回查只会得到 "current transaction is aborted"）。</p>
      *
      * @param review 候选行
-     * @return 带 ID 与 version 的行（可能是既有行）
+     * @return 带 ID 与 version 的行
      */
     DealerScoreReview insert(DealerScoreReview review);
 

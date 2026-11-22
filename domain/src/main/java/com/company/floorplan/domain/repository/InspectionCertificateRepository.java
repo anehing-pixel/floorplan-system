@@ -23,7 +23,12 @@ import java.util.Optional;
  *   链不自引用    → ck_cert_predecessor_not_self（V53）
  *   状态与时间戳  → ck_cert_status_timestamps（V53：PLEDGED 要有 pledged_at 等）
  * </pre>
- * 冲突时仓储返回空/false，由应用层翻成 {@code CERT_002} 或 {@code CONFLICT_001}。</p>
+ * 撞唯一约束时仓储抛错（成因可分辨时分别是 {@code CERT_002}／{@code CONFLICT_001}），
+ * CAS 未命中时 {@link #transitStatus} 返回 false 由上层翻码。
+ * 之所以不再用"返回空让上层判断"：PostgreSQL 撞约束后当前事务已中止，
+ * 上层拿着空值再查一次只会得到 "current transaction is aborted"，
+ * 409 会被 500 覆盖——这条口径与 {@code DealerQualificationRepository}、
+ * {@code VehicleConditionReportRepository} 统一。</p>
  */
 public interface InspectionCertificateRepository {
 
@@ -54,10 +59,13 @@ public interface InspectionCertificateRepository {
     /**
      * 插入証書行。
      *
+     * <p>{@code cert_key} 必传（键公式 {@code CERT-{certificate_no}} 的定源在 D00 §13.1，
+     * 由应用层拼装，仓储不另算一份）。</p>
+     *
      * @param certificate 証書
-     * @return 带 ID 的行；命中 {@code uk_cert_key} 或 {@code uk_cert_active_vin} 时返回空
+     * @return 带 ID 的行
      */
-    Optional<InspectionCertificate> insert(InspectionCertificate certificate);
+    InspectionCertificate insert(InspectionCertificate certificate);
 
     /**
      * 状态迁移（乐观锁）。

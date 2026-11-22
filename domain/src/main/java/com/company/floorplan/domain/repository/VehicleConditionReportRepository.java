@@ -17,14 +17,20 @@ public interface VehicleConditionReportRepository {
     /**
      * 插入一张票。
      *
-     * <p>幂等由 {@code uk_vcr_report_no}（部分唯一，{@code report_no} 为空的人工票不受限）兜底：
-     * {@code report_no} 命中已存在行时返回空，由应用层按 D00 §13 的
-     * {@code CRR:{report_no}} 语义决定"回首次结果"还是抛 {@code CONFLICT_001}。</p>
+     * <p><b>撞约束的处理口径（与 {@code DealerQualificationRepository} 一致）</b>：
+     * 幂等 {@code CRR:{report_no}} 的正常路径是应用层先 {@link #findByReportNo} 探测，
+     * 命中则比票面指纹决定"回首次结果"还是抛 {@code CONFLICT_001}；
+     * 两个事务同时穿过探测时，后者会撞 {@code uk_vcr_report_no}，
+     * 本方法把 {@code DuplicateKeyException} 翻成 {@code CONFLICT_001} 抛出。
+     * 这里<b>不在同一事务里回查已存在行</b>——PostgreSQL 撞唯一约束后当前事务已中止，
+     * 事务内再发任何语句都只会报 "current transaction is aborted"，
+     * 真正的 409 会被 500 覆盖。因此返回类型是实体而不是 Optional：
+     * "返回空让上层再查一次"这种写法在 PG 上是走不通的（原注释已据此更正）。</p>
      *
      * @param report 票
-     * @return 带 ID 的票；{@code report_no} 重复时为空
+     * @return 带 ID 的票
      */
-    Optional<VehicleConditionReport> insert(VehicleConditionReport report);
+    VehicleConditionReport insert(VehicleConditionReport report);
 
     /**
      * 按票号取票（幂等探测）。

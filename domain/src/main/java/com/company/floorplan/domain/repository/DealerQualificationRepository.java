@@ -24,8 +24,11 @@ import java.util.Optional;
  *   DMEM:{dealerId}:{house}:{memberNo} → uk_dmem_dealer_house_no（表级 UNIQUE）
  *   CHK:{partner}:{requestNo}  → uk_dchk_request_no（部分唯一，人工行 request_no 为 NULL 不受限）
  * </pre>
- * 冲突时仓储返回已存在行，由应用层比对请求指纹后决定"回首次结果"还是抛
- * {@code CONFLICT_001}（与 {@code AdvanceApplicationService} 的既有做法一致）。</p>
+ * 并发或重放撞约束时的处理口径（与 {@code AdvanceApplicationService} 的先查后写一致）：
+ * 应用层先用 {@code findXxx} 探测，命中则比指纹决定"回首次结果"还是抛 {@code CONFLICT_001}；
+ * 万一两个事务同时穿过探测，仓储实现把唯一约束冲突翻成 {@code CONFLICT_001} 抛出，
+ * <b>不在同一事务里回查已存在行</b>——PostgreSQL 撞约束后当前事务已中止，
+ * 事务内的再查询必然报 "current transaction is aborted"，那样错误码会被 500 覆盖。</p>
  *
  * <p><b>乐观锁的适用范围（实测结论，不是推测）</b>：V45 三张表都没有 {@code version} 列，
  * {@code dealers} 也没有（V1 建表未带、V46 只 ADD COLUMN 未补 version），
@@ -110,11 +113,18 @@ public interface DealerQualificationRepository {
     /**
      * 按外部请求号取合规行（{@code CHK:} 幂等探测）。
      *
-     * @param partnerCode 合作方代码（幂等键第一段）
-     * @param requestNo   外部请求号
+     * <p><b>为什么没有 partnerCode 参数</b>：D04 §3.3 给这张表列的列里没有合作方代码列
+     * （{@code request_no} 直接写成 {@code UNIQUE NULL}），而 D00 §13/D06 §1.5 的幂等键
+     * 却带合作方段。本包按"文档表结构逐列照抄、不擅自加列"的纪律实现，
+     * 于是 {@code partner_code} 段<b>没有落库位置</b>：唯一索引只能按 {@code request_no} 单列建
+     * （V45 的 {@code uk_dchk_request_no}）。后果如实登记：两个合作方撞同一个报文号时，
+     * 后来者会被唯一索引拒成 {@code CONFLICT_001}——这属"幂等锚点过宽"，不是漏检。
+     * 要收窄成 (partner_code, request_no) 需要收口方在 D04 §3.3 补列；本包不自决（已上报）。</p>
+     *
+     * @param requestNo 外部请求号（人工录入为 null，调用方不应传 null 进来探测）
      * @return 已存在的行
      */
-    Optional<ComplianceCheck> findComplianceByRequestNo(String partnerCode, String requestNo);
+    Optional<ComplianceCheck> findComplianceByRequestNo(String requestNo);
 
     /**
      * 新增合规核查行（append-only：结论更正＝插新行）。
