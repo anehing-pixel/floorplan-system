@@ -59,11 +59,13 @@ spring:
           predicates:
             - Path=/api/inventory/**,/api/alerts/**,/api/disposals/**,/api/collateral/**
 
-        # ---------------- 银行服务（其余 bank 端点，本阶段只有 bank-fetch）----------------
+        # ---------------- 银行服务（流水采集 / 回款匹配工作台）----------------
+        # /api/payments/** 必须显式归入 bank：bank-service 的 PaymentMatchController 挂在这个前缀，
+        # 若漏配会被下面 core 的 /api/** 兜底接走 → web 无此端点直接 404（2026-11-22 实测复现并修复）。
         - id: bank
           uri: ${ROUTE_BANK:lb://bank-service}
           predicates:
-            - Path=/api/bank/**
+            - Path=/api/bank/**,/api/payments/**
 
         # ================= Wave 0 预留路由（specific 在前，必须早于 core 兜底）=================
         # 借据 / DPD / 经销商画像（新服务 loan-service，端口 8085）

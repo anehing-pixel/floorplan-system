@@ -4,7 +4,16 @@
 > 更新规则：**每完成一个原子步骤，立刻改本文件对应行 + commit**，不要攒着批量更新。
 > 本文件记录"代码实查状态"，不记录"计划做什么"。计划见路线图，状态见本文件。
 
-最后更新：2026-11-22 09:45（GMT+8） · **Q27 权威源裁决全量收口：0 bug / 195 项全绿**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+最后更新：2026-11-22 10:40（GMT+8） · **外围服务网关可达性补修：0 bug / 204 项全绿**（当前真实 HEAD 一律以 `git log -1` 为准，本行不追踪后续提交号）
+
+> ✅ **2026-11-22 10:40 重新审查「未开发需求」时，实测抓到并修复 1 个回归缺陷**：
+> `bank-service` 的 `PaymentMatchController` 挂在 `/api/payments/**`，但网关只把 `/api/bank/**` 与 `/api/jobs/bank-fetch`
+> 路由到 bank，`/api/payments/**` 被 core 的 `/api/**` 兜底接走 → web 无此端点返回 404（`web.log` 三条请求铁证）。
+> 根因与上一轮 `CollateralRegController` 500 同类：**四个外围服务（loan/recon/release/bank）此前零冒烟覆盖，"写了代码"不等于"接通了"**。
+> 修复：网关 `bank` 路由 predicate 加 `/api/payments/**`；冒烟新增 ㉔ 小节 9 项断言，从网关端到端验穿五个外围服务全部可达
+> （loan/recon/release/bank/collateral-reg，判据是目标服务返回带业务语义的响应而非 core 兜底的「资源不存在」）。
+> 验证：`mvn clean package` 15/15 SUCCESS；`smoke` EXIT 0 / **204 PASS · 0 FAIL**；Flyway 25 迁移落库；10 服务自动清理。
+> **本轮审查的「未开发需求」全量清单见第 8 节**（区分：真未开发 / 骨架占位 / 默认关闭 / 零覆盖 / 仅设计稿 / 业务定源 / 文档状态滞后）。
 
 > ✅ **Q21 业务定源已落地（2026-11-22 08:26）**：用户裁决「采用 A，硬阻断」。
 > 代码改动：`RoleSeparationPolicy.evaluateGuarantee` 删除 `dealerRelaxed` 参数与「白名单先于 `view == null` 直接 allow」分支（改两参），
@@ -293,3 +302,66 @@
 | **B-5 授信单人自动审批绕过 SOD** | 兼容入口 `createCreditLine` 用同一 actor 跑完 initiate→complete，绕过「发起与执行分离」。代码层已有双段审批链，但默认放行 | PM | ✅ **已修复 `6dfc4cc`（代码层能力完整 + 生产配置强制）**：V23 `credit_lines.initiated_by` + `floorplan.credit.strict-sod` 开关。默认 `false` 保持本地原型/冒烟可用；**生产必须置 `true`**，届时兼容入口拒绝（`AUTH_003`）且 `completeCreditLine` 强制复核人 ≠ 发起人。是否强制属部署配置，不是代码 bug |
 | **V22/V23 迁移号段** | 本轮收口新增两个共享层迁移，需登记避免后续 agent 撞号 | PM | ✅ 已登记：V22 = 处置冻结增量（B-2）、V23 = 授信发起人（B-5）；`web.log` 实证 `now at version v23` |
 | **`.microservice-pids/` 运行时文件误跟踪** | 6 个 pid 文件被提交进版本库，且 `.gitignore` 未覆盖 | PM | ✅ **已修复 `6dfc4cc`**：`.gitignore` 加 `.microservice-pids/`，`git rm --cached` 移除 6 个已跟踪 pid；smoke 结束后目录为空 |
+
+---
+
+## 8. 未开发需求全量清单（2026-11-22 10:40 全仓实查）
+
+> **本节的口径**：只列「代码里确实没有 / 只写了骨架 / 默认关闭 / 零测试覆盖 / 只有设计稿」的项，
+> 并**单独列出「文档状态滞后造成的假未完成」**，避免下次把过期的 `[ ]` 当成真实缺口。
+> 当前交付态：**0 bug / 204 项冒烟全绿 / 15 模块编译全绿 / 10 服务启停正常 / Flyway V1–V25 落库**。
+> 下列均为「功能范围 / 生产化 / 外部对接」层面的未开发需求，**不是缺陷、不阻断运行**。
+
+### 8.1 真·未开发（代码层没有，含占位/存根）
+
+| 编号 | 需求 | 实证 | 依赖 |
+|---|---|---|---|
+| D1 | **回款自动匹配到 VIN + 自动解押/额度释放层** | `bank-service` 三个存根：`LoggingLoanLookupClient`（按无在贷债务处理）、`LoggingCreditLineClient`（降级返回 0）、`InMemoryPaymentStore`（内存实现，非 JDBC）；`ReleaseOrchestrator:76,109` 解押/额度回补只留痕、`availableAfter=before` 明确"尚未真实回补"；五级匹配规则仅实现 VIN(95)+金额(60/45)，订单号/时间窗/付款人信号未补 | 借据/授信 Feign 契约 + V17 三表 JDBC 落地 |
+| D2 | **对拍规则 R5–R8** | `ReconRuleCode:29-36` 四条 `implemented=false` / `diffType="TODO"`；`PlaceholderReconRule.evaluate()` 固定 `List.of()`；`JdbcReconRepository:150` 取数 `List.of()`；`ReconApplicationService:71-74` 直接 `continue` 不计入 `ruleCount`。ADR-Q27 已给口径「两口径数值精确相等才无差异，不等即产出差异，不做容差/舍入猜测」，**代码尚未落地** | 口径已定，可自行补 |
+| D3 | recon 差异处置闭环 | `HANDOFF:68-75`：`recon_diffs.status` 的 CONFIRMED/IGNORED/RESOLVED 流转无接口；`actor` 未写 `audit_events`；无分布式锁；未发布任何 outbox 事件 | 后续增强 |
+| D4 | release 撤销端点 + 账实缺口巡检 | `HANDOFF:185,194`：设计稿 `POST /api/release-orders/{no}/cancel`、`SENT 超期未回执`/`RELEASED 但台账未更新` 巡检作业未实现 | 后续增强 |
+| D5 | 三源快照实际导入作业 | `collateral-reg-service/HANDOFF:118`：只有 `POST /snapshot/import` 接口，没有推送方/定时拉取方来调用它 | 跨服务依赖 |
+| D6 | M11 客户支付确认凭证 | `customer_payment_confirmations` 全仓只出现在 `SalesApplicationService:101` 的 TODO 注释，无表、无持久化；`confirmCustomerPayment` 只写审计 + 返回带 TODO 的 note | 需新迁移 + 与 B2 出库门禁联动 |
+| D7 | 违约通知 / 法律清算 HTTP 端点 | 领域层 `DisposalCase`/`DisposalStatus` 已有 `NOTIFIED`/`LEGAL_ACTION`/`CANCELLED` 三态（`T2-6` 落地），但 `DisposalController` 只有 open/repossess/liquidate/close/cancel，无 notify/legal-action 端点；全仓零通知代码（短信/邮件） | 后续增强 |
+| D8 | M1 风险扫描等作业 + 调度器 | 全仓 `RISK_SCAN` 0 处；`技术设计文档:230-238` 规划中的 `RISK_SCAN`/`TERM_CHECK`/`DEALER_METRIC_SCAN`/`RECON_FILE_GEN`/`SUBSIDY_SETTLE` 均不存在；所有现有作业靠 `POST /api/jobs/*` 手动触发，**未接 Quartz** | 生产化 |
+| D9 | 放款前置（垫付合同/法务局登记门槛） | `docs/放款前置…设计.md:3` 标「待实现」，`:182-187` 的 6 个端点（contract/certificate/vehicles/pending-vehicles/documents/readiness）全仓 Java 0 处；`:250` 前端担保页面不存在 | 仅设计稿 |
+| D10 | 贷后风险分层 P2–P7 | V16 五表 + DPD + 画像主体已落地（非"仅有设计稿"）；但 `dpd_stage_rules`/`default_events`/`deduction_failures` 表未建，分档固化在 `DpdCalculator` 常量，画像 `deduction_fail_rate_30d` 置 NULL（`LoanApplicationService:225-226` 用近似） | 规则中心/后续 |
+| D11 | 外部系统对接 | 真实征信（T5-1）、银企直连/MT940 + webhook（T5-2）、法务局登记真实对接（T5-3）、external-api 独立入口（`ADR009:29` 全库 0 处）、外部 WMS（`ManualReleaseChannel` 明确不连外部系统） | **第三方排期，开发侧解不了** |
+| D12 | 生产化工程能力 | 全仓 pom 无 `actuator`/`micrometer`（`ENGINEERING_HANDOFF:47` 称 Runbook 里该路径是占位约定）；CI 静态检查插件未接；JVM 调优/全链路压测/灰度回滚演练/灾备演练（T4-3~T4-7） | 生产化 |
+
+### 8.2 已实现但默认关闭（配置，不是代码缺口）
+
+| 开关 | 默认值出处 | 关闭时跳过什么 |
+|---|---|---|
+| `floorplan.core.guarantee-gate.enabled` | `AdvanceApplicationService:92-93` `@Value(...:false)` | `:394-396` `enforceGuaranteeGate` 直接 return，**连权属服务都不查询**；开启才走 V10 门禁 + GUARANTEE_PENDING 工单 + GUARANTEE_001 拒付。ADR-Q27 已裁决 V10 为权威源，**门禁判定逻辑已实现**，置 true 即启用 |
+| `floorplan.credit.strict-sod` | `CreditApplicationService:41-42` `:false` | 关闭时单人自动审批入口放行、不校验复核人≠发起人。**生产必须 true** |
+| `floorplan.collateral.authoritative-source.enabled` | `DefaultAuthoritativeSourceStrategy:42` `:false` | 关闭时三源对账诊断返回 skipped；**不影响门禁**（门禁直读 V10） |
+| `floorplan.bank-fetch.source` / `lock.provider` / `s3.bucket` | `web/application.yml:157,149,126` | demo 流水源 / 内存锁 / 空桶名 → 走本地文件实现。**文件存储按用户要求继续用本地**，不引入 S3/MinIO |
+
+### 8.3 已实现但零/低端到端覆盖（本轮已补 ㉔ 验穿网关可达性，但业务断言仍稀疏）
+
+- 本轮 ㉔ 已覆盖：loan(2)/recon(2)/release(1)/bank(3)/collateral-reg(1) 共 9 项「从网关可达」断言。
+- **仍未被冒烟覆盖的端点**：loan `GET /loans/{id}`、`/loans/{id}/dpd`、画像 recompute；release confirm/release/discharge-lien/建单；bank `POST /payments/match`、manual-match/ignore/match-by-transaction、`GET /matches/{id}/release`；collateral-reg `discharge`、`snapshot/import`（单条）；risk `CollateralController` 12 个端点（仅 `smoke-collateral.py` 覆盖）；web 的供应商/采购单/附件/aging/holidays 等 30+ 端点。
+- **教训（两次实证）**：零覆盖 = 假绿。上一轮 ㉓ 补断言揪出 collateral-reg 全端点 500 + V10 漏挂车；本轮实测揪出 `/api/payments/**` 被 core 兜底 404。**新增端点必须同步补冒烟**。
+
+### 8.4 业务口径待书面确认（非代码缺陷，不阻断运行）
+
+| 编号 | 事项 | 现状 |
+|---|---|---|
+| Q9/Q10 | 出库指令接收方 / 有无外部 WMS | **建议口径已落地 V24**：放车线 `DEALER_WAREHOUSE` + 放证线 `CERTIFICATE_DEPOSITORY`，按释放项指定 `custodian_id`，起步 `MANUAL` 人工转交 + 我方见证代录回执；另两类接收方标为须业务书面启用。最终仍待书面确认 |
+| R5–R8 细化 | 对账规则口径 | ADR-Q27 已定「精确相等」总口径，但各规则的具体取数范围（计提日切/期数/损失认定时点）仍待确认 |
+| Q7 / Q17 等 | 厂家回购算不算担保已设定 / 盘点频次 | 分散在各设计文档的「待业务确认清单」（回款闭环 11 项、放车放证 13 项、贷后分层 8 项） |
+
+### 8.5 ⚠️ 文档状态滞后造成的「假未完成」（**不是需求缺口，别被误导**）
+
+| 文档 | 过期表述 | 实查事实 |
+|---|---|---|
+| `任务进度与演进路线图.md` | 47 项全 `[ ]`、4 项 `[!]`，`:10` 称「B1–B4、B1b、M1–M12 全部仍未修复」 | 文件头 `:3-6` 自带**状态盲区提示**：勾选未随并行开发更新，实时状态以 PROGRESS 为准。实查：V1–V25 迁移全部落库、B1–B4/B2/B3 已修、M9 登记编号/M12 授信审批链/处置状态机已落地、smoke 204 项全绿 |
+| `十一环节闭环核查报告.md` | `:698-703` 称「4 严重断点 + 12 中等缺口 + 全库零实现模块」 | 2026-10-26 时点快照；`:474` 称状态机无 NOTIFIED/LEGAL_ACTION/CANCELLED，实查 `DisposalStatus` 三态已实现 |
+| `00-文档索引.md:103,184` | 「db/migration 只到 V11」「V12/V13/V14 尚未落地」 | 迁移目录实有 V1–V25，`web.log` 实证 `25 migrations validated` |
+| `web/HANDOFF.md:70` | 「/api/disposals 未暴露 cancel 端点」 | `DisposalController:70` 已有 `@PostMapping("/{caseNo}/cancel")` |
+| `CORE_VERIFIER_REPORT.md:92` / 部分 HANDOFF | 残留 `TODO(Q27)`、`ownerName 暂记 co_signed_by` | 全仓 `*.java` 已无 `TODO(Q27)`；V25 加 `owner_name` 专用列，`SalesApplicationService:168-175` 写专用列。报告是历史时点快照 |
+
+> **结论**：按「已交付范围」口径，系统 **0 bug / 可运行、需求已闭环**（第 6、7 节全部 ✅）；
+> 按「生产可用 / 全量业务」口径，尚有 8.1 的 D1–D12、8.2 的开关启用、8.4 的业务定源与 8.5 的文档校正。
+> 其中 **D11（外部系统）、8.4 业务定源属开发侧解不了**，其余为可排期的工程增强。

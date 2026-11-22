@@ -13,11 +13,12 @@
   ⑪ 提前部分还款   ⑫ 车辆保险         ⑬ 展期续贷
   ⑭ 结清证明       ⑮ 额度年审         ⑯ 结算宽限期/OOT 升级
   ⑰ 违约处置闭环   ⑱ 评级口径动态配置 + 季度归档
-以及主数据、权限与角色矩阵（⑲~㉓）：
+以及主数据、权限与角色矩阵（⑲~㉔）：
   ⑲ 角色权限边界（角色矩阵：401 与 403 严格区分 + 自然人级职责分离）
   ⑳ 经销商主数据 CRUD（PATCH 语义 / 状态机 / 删除护栏）
   ㉑ 名下车辆聚合视图（汇总口径 == 明细逐行求和）
   ㉓ 担保权属权威源（ADR-Q27：门禁直读 V10 / #29 权限点 / #31 批量对账不改账）
+  ㉔ 外围微服务网关可达性（loan / recon / release / bank / collateral-reg 全部端点经网关可达，不被 core 兜底）
 """
 import json
 import os
@@ -1180,13 +1181,55 @@ def main():
     st, r = call("POST", "/api/collateral-reg/snapshot/import-batch", {"sources": mixed})
     ok(st == 400, "批量快照混用不同 VIN 被拒 -> %s/VALID_001（参数错误不冒泡成 500）" % st)
 
+    # ㉔ 四个外围服务的网关可达性（此前零冒烟覆盖 → 曾潜伏 /api/payments/** 被 core 兜底 404）
+    # 判据：目标服务返回带业务语义的 code/message，而非 core 兜底的 NOT_FOUND_001「资源不存在」。
+    print("\n㉔ 外围微服务网关可达性（loan / recon / release / bank / collateral-reg）")
+
+    # loan-service：/api/loans/** 与 /api/dealer-profile/risk/** 归 8085
+    st, r = call("POST", "/api/loans/dpd/refresh", {})
+    ok(st == 200 and isinstance(r.get("data"), dict) and "processed" in r["data"],
+       "loan-service /loans/dpd/refresh 可达 -> %s/processed=%s"
+       % (st, (r.get("data") or {}).get("processed")))
+    st, r = call("GET", "/api/dealer-profile/risk/999999")
+    ok(st == 404 and "经销商画像不存在" in (r.get("message") or ""),
+       "loan-service 业务 404 带画像语义（未被 core 兜底）-> %s" % st)
+
+    # recon-service：/api/recon/** 归 8088
+    st, r = call("POST", "/api/recon/run", {})
+    ok(st == 200 and bool((r.get("data") or {}).get("batchNo")),
+       "recon-service /recon/run 可达 -> %s/batchNo=%s" % (st, (r.get("data") or {}).get("batchNo")))
+    st, r = call("GET", "/api/recon/diffs")
+    ok(st == 200 and isinstance(r.get("data"), list),
+       "recon-service /recon/diffs 可达且返回列表 -> %s" % st)
+
+    # release-service：/api/releases/** 归 8087
+    st, r = call("GET", "/api/releases/999999")
+    ok(st == 404 and "出库指令不存在" in (r.get("message") or ""),
+       "release-service 业务 404 带出库指令语义（未被 core 兜底）-> %s" % st)
+
+    # bank-service：/api/payments/** 修复前被 core 的 /api/** 兜底接走 → 404「资源不存在」
+    st, r = call("GET", "/api/payments/matches")
+    ok(st == 200 and isinstance(r.get("data"), list),
+       "bank-service /payments/matches 可达（网关路由已接通）-> %s" % st)
+    st, r = call("GET", "/api/payments/unmatched")
+    ok(st == 200 and isinstance(r.get("data"), list),
+       "bank-service /payments/unmatched 可达（网关路由已接通）-> %s" % st)
+    st, r = call("POST", "/api/jobs/bank-fetch", {})
+    ok(st == 200 and (r.get("data") or {}).get("jobName") == "BANK_FETCH",
+       "bank-service 精确路由 /jobs/bank-fetch 仍归 bank -> %s" % st)
+
+    # collateral-reg-service：此前只覆盖 3/6 端点，补齐 history 读接口
+    st, r = call("GET", "/api/collateral-reg/registration/history?vin=PROBE-NOT-EXIST")
+    ok(st == 200 and isinstance(r.get("data"), list),
+       "collateral-reg-service /registration/history 可达 -> %s" % st)
+
     print("\n" + "=" * 68)
     if FAILS:
         print("冒烟测试失败 %d 项：" % len(FAILS))
         for f in FAILS:
             print("  - " + f)
         sys.exit(1)
-    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉓）验证通过")
+    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉓）+ 外围服务网关可达性（㉔）验证通过")
     print("=" * 68)
 
 
