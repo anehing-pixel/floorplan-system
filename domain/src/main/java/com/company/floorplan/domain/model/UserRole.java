@@ -54,7 +54,11 @@ public enum UserRole {
      * 且系统初始化与批量建账场景需要管理员参与，故保留该权限。</p>
      */
     SYSTEM_ADMIN("系统管理员", RoleDomain.PLATFORM,
-            set(CONFIG_MAINTAIN, JOB_TRIGGER, DEALER_MAINTAIN, SUPPLIER_MAINTAIN, CREDIT_MANAGE)),
+            set(CONFIG_MAINTAIN, JOB_TRIGGER, DEALER_MAINTAIN, SUPPLIER_MAINTAIN, CREDIT_MANAGE,
+                    // USED R1：許可／会员／合规三类档案都挂在经销商主数据下，
+                    // 本仓现网只有本角色持 DEALER_MAINTAIN，故先落在此处（岗位缺口见下方注释）。
+                    DEALER_QUALIFICATION_MAINTAIN, DEALER_COMPLIANCE_CHECK,
+                    DEALER_SCORE_SET, DEALER_ADMISSION_MANAGE)),
 
     /**
      * 授信审查岗：准入与评级。
@@ -62,9 +66,18 @@ public enum UserRole {
      * <p>对应环节①授信准入与环节⑪额度年审。新建授信额度、录入征信结论、
      * 给出评级建议、执行年审复核。
      * <b>不碰打款</b>——额度批了不等于钱可以出去。</p>
+     *
+     * <p><b>USED R1 的角色映射（D00 §11）</b>：该清单把资质维护授予「业务运营、风控」、
+     * 双维评分授予风控侧。本仓 {@code UserRole} 里没有"业务运营"与"合规"两个岗位，
+     * 风控侧能对上的是本岗（已持 {@code RISK_GRADE_ADJUST}／{@code ANNUAL_REVIEW}），
+     * 因此资质维护、评分、准入重算三点授予本岗；
+     * <b>{@code DEALER_COMPLIANCE_CHECK} 不授予本岗</b>——"合规"是独立岗位，
+     * 把它并进授信审查岗会让核查录入与授信判定同源，违背 P-7 的分离意图。
+     * 是否新增 {@code COMPLIANCE_OFFICER} 角色属权限矩阵（D10）的裁决，本包不擅自加角色。</p>
      */
     CREDIT_REVIEWER("授信审查岗", RoleDomain.CREDIT,
-            set(CREDIT_MANAGE, ANNUAL_REVIEW, RISK_GRADE_ADJUST)),
+            set(CREDIT_MANAGE, ANNUAL_REVIEW, RISK_GRADE_ADJUST,
+                    DEALER_QUALIFICATION_MAINTAIN, DEALER_SCORE_SET, DEALER_ADMISSION_MANAGE)),
 
     /**
      * 采购数据录入岗（人工导入）。

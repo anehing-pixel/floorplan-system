@@ -150,7 +150,42 @@ public enum Permission {
     /* ---- 评级域 ---- */
 
     /** 经销商风险评级人工调整（评级唯一写入口）。 */
-    RISK_GRADE_ADJUST("风险评级调整");
+    RISK_GRADE_ADJUST("风险评级调整"),
+
+    /* ---- USED 域 · 车商资质（R1；权限点定源 D00 §11，端点映射定源 D07 §7.1） ---- */
+
+    /**
+     * 车商资质／許可／会员档案维护（D00 §11 授予「业务运营、风控」）。
+     * <p>覆盖 {@code POST /api/dealers/{id}/licenses} 与
+     * {@code POST /api/dealers/{id}/auction-memberships}。</p>
+     */
+    DEALER_QUALIFICATION_MAINTAIN("车商资质与许可会员维护"),
+
+    /**
+     * 反社／AML 核查录入与结论（D00 §11 授予「合规」）。
+     * <p>D07 §7.1 把这一行的权限点写成 {@code COMPLIANCE_CHECK_DONE}——那是
+     * D00 §14 的<b>审计动作名</b>（D04 §3.1/§3.3 的 {@code verified_by}/{@code checked_by}
+     * 注释都指向它），不是权限点。本包按定源清单 D00 §11 用本权限点，
+     * 差异已登记为文档冲突。</p>
+     */
+    DEALER_COMPLIANCE_CHECK("合规核查录入与结论"),
+
+    /**
+     * 双维评分录入（D07 §7.1 的 {@code scores} 行，标「二人」）。
+     * <p><b>D00 §11 未列本权限点</b>（该清单里没有任何 R1.3 双维评级的点），
+     * 取自 D07 §7.1 的接口口径；需收口方在 D00 §11 补登记。
+     * "二人"不由权限点表达，而由 {@code RoleSeparationPolicy.assertNoSelfApproval}
+     * 在确认环节校验（同人回 {@code AUTH_003}）。</p>
+     */
+    DEALER_SCORE_SET("车商双维评分录入"),
+
+    /**
+     * 准入态重算与人工触发（D07 §7.1 的 {@code admission/recalculate} 行）。
+     * <p><b>D00 §11 未列本权限点</b>，同 {@link #DEALER_SCORE_SET} 的处理。
+     * 注意重算是无副作用的推导＋快照写入，<b>没有任何"手工设为 ADMITTED"的入口</b>，
+     * 因此本权限点不构成旁路（Q21 红线）。</p>
+     */
+    DEALER_ADMISSION_MANAGE("车商准入态重算");
 
     private final String label;
 
