@@ -16,10 +16,13 @@ import com.company.floorplan.infrastructure.persistence.JdbcDealerRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcRatingConfigRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcSupportRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcVehicleUnitRepository;
+import com.company.floorplan.infrastructure.outbox.EventDispatcher;
+import com.company.floorplan.infrastructure.outbox.JdbcOutboxPublisher;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 授信管理服务启动入口（真正拆分版）。
@@ -61,8 +64,12 @@ import org.springframework.context.annotation.Import;
         // 共用 Web/鉴权基础设施（来自 common）
         JwtAuthInterceptor.class,
         WebMvcConfig.class,
-        GlobalExceptionHandler.class
+        GlobalExceptionHandler.class,
+        // W0-6 事件地基装配：发布端 + 消费轮询器（无消费者的服务 poll() 直接返回，不发 SQL）
+        JdbcOutboxPublisher.class,
+        EventDispatcher.class
 })
+@EnableScheduling
 @EnableDiscoveryClient
 public class CreditServiceApplication {
 

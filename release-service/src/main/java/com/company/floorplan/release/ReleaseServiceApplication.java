@@ -8,10 +8,13 @@ import com.company.floorplan.infrastructure.persistence.JdbcAuthUserRepository;
 import com.company.floorplan.release.channel.ManualReleaseChannel;
 import com.company.floorplan.release.repository.JdbcReleaseOrderRepository;
 import com.company.floorplan.release.service.ReleaseApplicationService;
+import com.company.floorplan.infrastructure.outbox.EventDispatcher;
+import com.company.floorplan.infrastructure.outbox.JdbcOutboxPublisher;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 出库指令服务启动入口（Wave 0 骨架）。
@@ -32,8 +35,12 @@ import org.springframework.context.annotation.Import;
         // T2-9 新增 bean：Controller 带 @RestController 走组件扫描，这里只装配无注解的三类
         ManualReleaseChannel.class,         // Q10 起步口径：人工转交，替换原日志占位实现
         JdbcReleaseOrderRepository.class,
-        ReleaseApplicationService.class
+        ReleaseApplicationService.class,
+        // W0-6 事件地基装配：发布端 + 消费轮询器（无消费者的服务 poll() 直接返回，不发 SQL）
+        JdbcOutboxPublisher.class,
+        EventDispatcher.class
 })
+@EnableScheduling
 @EnableDiscoveryClient
 public class ReleaseServiceApplication {
 

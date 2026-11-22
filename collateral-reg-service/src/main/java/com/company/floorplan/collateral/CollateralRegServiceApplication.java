@@ -8,10 +8,13 @@ import com.company.floorplan.common.config.GlobalExceptionHandler;
 import com.company.floorplan.common.config.JwtAuthInterceptor;
 import com.company.floorplan.common.config.WebMvcConfig;
 import com.company.floorplan.infrastructure.persistence.JdbcAuthUserRepository;
+import com.company.floorplan.infrastructure.outbox.EventDispatcher;
+import com.company.floorplan.infrastructure.outbox.JdbcOutboxPublisher;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 担保权属权威源服务启动入口（Wave 0 骨架）。
@@ -34,8 +37,12 @@ import org.springframework.context.annotation.Import;
         // CollateralRegController 已用 @RestController 交给组件扫描注册，勿重复 @Import（否则映射冲突）
         JdbcCollateralRegistrationRepository.class,
         DefaultAuthoritativeSourceStrategy.class,
-        CollateralRegistrationService.class
+        CollateralRegistrationService.class,
+        // W0-6 事件地基装配：发布端 + 消费轮询器（无消费者的服务 poll() 直接返回，不发 SQL）
+        JdbcOutboxPublisher.class,
+        EventDispatcher.class
 })
+@EnableScheduling
 @EnableDiscoveryClient
 public class CollateralRegServiceApplication {
 

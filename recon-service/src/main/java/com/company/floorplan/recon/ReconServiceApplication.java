@@ -9,10 +9,13 @@ import com.company.floorplan.recon.controller.ReconController;
 import com.company.floorplan.recon.repository.JdbcReconRepository;
 import com.company.floorplan.recon.rule.ReconRuleConfig;
 import com.company.floorplan.recon.service.ReconApplicationService;
+import com.company.floorplan.infrastructure.outbox.EventDispatcher;
+import com.company.floorplan.infrastructure.outbox.JdbcOutboxPublisher;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 对账清算服务启动入口（Wave 0 骨架）。
@@ -31,11 +34,15 @@ import org.springframework.context.annotation.Import;
         JdbcReconRepository.class,
         ReconRuleConfig.class,
         ReconApplicationService.class,
-        ReconController.class
+        ReconController.class,
         // NamedParameterJdbcTemplate 由 Spring Boot 的 JdbcTemplateAutoConfiguration
         // 基于现有 DataSource 自动装配（spring-boot-starter-jdbc 由 infrastructure 传递引入），
         // 无需在此重复声明——手动 new 会绕过 Hikari 数据源与自动事务管理。
+        // W0-6 事件地基装配：发布端 + 消费轮询器（无消费者的服务 poll() 直接返回，不发 SQL）
+        JdbcOutboxPublisher.class,
+        EventDispatcher.class
 })
+@EnableScheduling
 @EnableDiscoveryClient
 public class ReconServiceApplication {
 
