@@ -178,6 +178,7 @@ for _t in ("event_consumptions", "consumer_offsets"):
     # 逐表单列判定。原来写的是 psql("SELECT a,b") 配 `"MISSING" not in tabs[0]`，那是**恒真**：
     # `psql -tA` 的列分隔符是竖线不是 tab，公共库按 tab 拆完 tabs[0] 只有一个元素，
     # 而 `x not in [列表]` 比的是元素相等，永远不成立 MISSING → 表不存在也照样 PASS。
+    # 分隔符那条 2026-11-22 19:00 已由公共库 `-F "\t"` 根治，但恒真与分隔符无关，这个改法照旧必要。
     # 这类「断言写成了看起来在断言」的假绿，正是本文件第 8 段自己警告过的东西。
     # 也不比布尔文本：本库实测 (x IS NOT NULL)::text 返回 'true'，不是 psql 常见的 't'。
     reg = psql_one("SELECT coalesce(to_regclass('%s')::text,'MISSING')" % q(_t))

@@ -128,7 +128,8 @@ W1-BANK 那半（`PAYMENT_MATCHED`）仍按 `docs/AGENT_TASK-w1-bank.md` 任务 
 | `AdvanceController:82 :98 :115 :196` 仍用 `UUID.randomUUID()` 当响应 traceId | `confirm` 已改成透传过滤器的值，其余四个端点同样该改，但它们在 `app.js` 与主干冒烟里有既有期望，属共享层收口 | W3 |
 | `PAYMENT_MATCHED` / `COLLATERAL_CHANGED` 发布端 | 仍零调用方；键与口径分别见 §7 W0-1、W0-7 | W1-BANK / 业务签字 |
 | 主干合并 | `scripts/smoke_w2_core.py` + `smoke_w1_loan.py` + `smoke_w0.py` 修正由收口方合并进 `smoke-test.py`，本轮不碰 `smoke-test.py` | W3 |
-| `agent_smoke_lib.psql()` 多列读取分隔符 bug | `psql -tA` 默认列分隔符是 `\|`，公共库按 tab 拆 ⇒ 多列 SELECT 全部错位（实测 `psql("SELECT 1,'a\|b',3") -> [['1\|a\|b\|3']]`）。本轮**没有**改这个共享禁区文件，改为在脚本侧统一用单列 `row_to_json` / `json_agg` 读法规避。建议修法：`local`/`docker` 两条命令各加 `"-F", "\t"`。**需 W0 owner 提案 + 用户书面点头**（AGENTS §7.1） | 待点头 |
+| `agent_smoke_lib.psql()` 多列读取分隔符 bug | `psql -tA` 默认列分隔符是 `\|`，公共库按 tab 拆 ⇒ 多列 SELECT 全部错位（实测 `psql("SELECT 1,'a\|b',3") -> [['1\|a\|b\|3']]`）。本轮**没有**改这个共享禁区文件，改为在脚本侧统一用单列 `row_to_json` / `json_agg` 读法规避。**2026-11-22 19:10 用户点头已根治**：`local`/`docker` 两条命令各加 `"-F", "\t"`（`agent_smoke_lib.py:202`、`:211`），实测两条分支都正确切列（本机 psql 分支 + 隐藏 psql 后走 docker 分支），三个冒烟脚本复跑零回归（36/49/70 条各 0 失败）。脚本侧的 JSON 读法**保留**，理由改为「NULL 显式化 + 字段名自证」而不是绕 bug；`.strip()` 造成末列 NULL 掉列、全 NULL 行掉行这条**未扩权**，见库内 docstring | ✅ 已闭环（判据登记进 PROGRESS §1） |
+| 冒烟输出重定向 ⟹ GBK 崩栈、只剩 51 条断言 | 19:17 实测：`bash run-microservices.sh smoke > logs/x.txt 2>&1` 时 python 的 stdout 变成文件、Windows 编码回落 cp936，`smoke-test.py:519` 打 `⑪`(U+246A) 抛 `UnicodeEncodeError`，**后面 160 条断言一条没跑而屏幕半屏绿**；全仓实查该文件 53 行含 GBK 编不出的字符（`⑪`–`㉕`、`⑴`–`⑸`、`✅`），崩点随执行进度变、不是固定行。本轮按规矩不碰 `smoke-test.py`/`run-microservices.sh`，跑法写成 `PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke`（19:18 实测 EXIT 0 / 211 PASS · 0 FAIL）。**建议收口二选一**：① `run-microservices.sh:172` 那条调用注入 `PYTHONIOENCODING`；② `smoke-test.py` 顶部 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`。两者都在禁区内，等用户点头 | 待点头 / W3 |
 
 ---
 

@@ -170,6 +170,22 @@ def psql_text(sql):
     与 smoke-test.py 同一条「本机 psql 优先 → docker exec 兜底」路径：
     本机装了客户端时最快，容器内 psql 是标准兜底。
     注意端口必须显式给 5434，容器里 postgres 不监听默认 5432。
+
+    **`-F "\\t"` 不能省**：psql 在非对齐模式（-A）下默认列分隔符是**竖线**，而 psql() 是按
+    tab 切列的——两者不一致时多列 SELECT 会被并成一个字段（实测 `SELECT 1,'a|b',3` 回来
+    `[['1|a|b|3']]`），于是 `rows[0][1]` 直接 IndexError，而更坏的是「拿 rows[0][0] 比字符串」
+    这类断言会拿着黏在一起的整行去比对，看着像在判定其实是恒假/恒真。2026-11-22 由 W0 owner
+    提案、用户点头后加上（默认行为对单列查询零影响：没有列间分隔符可打）。
+    副作用要如实知道（2026-11-22 实测，四条都是这样，不是推测）：
+      · 值里真含 tab ⟹ 多切出一段（`SELECT E'x\ty', 2` → `[['x','y','2']]`）；
+      · 值里含换行 ⟹ 多出一行（`-R` 记录分隔符仍是默认换行，没改）；
+      · NULL：`-tA` 下打成空串，中间列正常（`SELECT 1,NULL,2` → `[['1','','2']]`），
+        但**末列 NULL 会被本函数末尾的 `.strip()` 连分隔符一起削掉**（`SELECT 'a',NULL` → `[['a']]`），
+        全 NULL 的一行则整行消失（`SELECT NULL,NULL` → `[]`）。这是 strip 的老问题，
+        不是 `-F` 引入的，改 strip 会波及 psql_text/psql_one 的全部调用方，本轮**未扩权**，
+        要改单独提。
+      所以：读多列且列可空 / 含自由文本，仍推荐单列 `row_to_json(...)` / `json_agg(...)` 再
+      `json.loads`——与分隔符和 strip 都无关，这也是 smoke_w1_loan.py / smoke_w2_core.py 的写法。
     设了 FLOORPLAN_DB_SCHEMA 时，会话 search_path 通过 PGOPTIONS 设成 `<schema>, public`，
     于是脚本查的库和 Spring 用的库必然是同一个——不挂这条会出现「服务写 agent schema、
     脚本查 public」的错开，断言照样全绿，那才是最难查的假绿。
@@ -182,7 +198,8 @@ def psql_text(sql):
     # 输出干净，且和 SPRING_DATASOURCE_URL 里的 currentSchema 是同一个语义。
     if DB_SCHEMA:
         env["PGOPTIONS"] = "-c search_path=%s" % SEARCH_PATH
-    local = ["psql", "-h", DB_HOST, "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME, "-tAc", sql]
+    local = ["psql", "-h", DB_HOST, "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME,
+             "-F", "\t", "-tAc", sql]
     try:
         r = subprocess.run(local, env=env, capture_output=True, timeout=30)
         if r.returncode == 0:
@@ -191,7 +208,7 @@ def psql_text(sql):
         pass
     docker = ["docker", "exec"] + (["-e", "PGOPTIONS=" + env["PGOPTIONS"]] if DB_SCHEMA else []) + \
              [DB_CONTAINER, "psql", "-h", "127.0.0.1",
-              "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME, "-tAc", sql]
+              "-p", DB_PORT, "-U", DB_USER, "-d", DB_NAME, "-F", "\t", "-tAc", sql]
     try:
         r = subprocess.run(docker, env=env, capture_output=True, timeout=30)
         if r.returncode == 0:
@@ -205,7 +222,8 @@ def psql(sql):
     """执行 SQL 并返回**行列表**：list[list[str]]，空结果 → []。
 
     单列查询时长度就是行数，配合 assert_eq 直接判「插了几条 / 有没有重复」。
-    多列查询按 tab 切列。DDL/DML 无返回集时同样是 []，判成功请用影响行数或再查一次。
+    多列查询按 tab 切列（靠 psql_text 里的 `-F "\\t"` 才成立，理由见那里的说明）。
+    DDL/DML 无返回集时同样是 []，判成功请用影响行数或再查一次。
     """
     text = psql_text(sql)
     if text in (None, ""):

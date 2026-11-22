@@ -136,6 +136,10 @@ mvn -B -pl domain,application -am test
 bash run-microservices.sh smoke
 #    本机 PATH 里没有 python3 时（Git Bash + miniconda 只有 `python`）写成：
 #    PYTHON=python bash run-microservices.sh smoke     # 不加会 EXIT 127、冒烟一行都没跑（2026-11-22 实测）
+#    要把输出存文件时再加一个 PYTHONIOENCODING=utf-8：stdout 一旦重定向/管道，Windows 上编码
+#    回落到 GBK，smoke-test.py 的 ⑪–㉕ 这类字符直接抛 UnicodeEncodeError——实测只剩 51 条 PASS、
+#    后面 160 条没跑，而屏幕半屏绿（2026-11-22 19:17 实测）。
+#    PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke > logs/x.txt 2>&1
 
 # 4) 并行开发：给自己分一套隔离环境（schema + 端口偏移），别抢 public/8080
 bash scripts/agent_env.sh init <你的名字>          # 建 schema
@@ -219,7 +223,7 @@ Flyway 直接拒绝启动，冒烟全断。
 | 父 `pom.xml` | 需要新依赖写进自己服务的 pom |
 | `gateway/src/main/resources/application.yml` | 新增内部端点不经过网关，不需要加路由 |
 | `run-microservices.sh` | 由地基任务一次性注入 `CLIENT_*` 直连地址后冻结。**授权改动一例** = 2026-11-22 19:00 用户点头，把冒烟解释器写成 `PYTHON="${PYTHON:-python3}"`（默认值不变；本机 Git Bash 无 `python3` 时该命令 EXIT 127、服务起完但冒烟一行没跑，是最危险的「看着像跑过」）|
-| `scripts/agent_env.sh`、`scripts/agent_smoke_lib.py` | 全部 wave 共用（隔离环境 + 冒烟公共库），改一处波及所有人。**改法**：由这两个文件的 owner（W0）提出、经用户书面点头后提交，并在信息里写明授权；其余人一律提给收口方。两例授权改动 = 2026-11-22 `check` 的表数判因提示（`dc64865`）、同日 W0-9 把 Flyway 判据改成 schema 本地（`6a55381`，用户指令「W0-9 现在一起修」） |
+| `scripts/agent_env.sh`、`scripts/agent_smoke_lib.py` | 全部 wave 共用（隔离环境 + 冒烟公共库），改一处波及所有人。**改法**：由这两个文件的 owner（W0）提出、经用户书面点头后提交，并在信息里写明授权；其余人一律提给收口方。三例授权改动 = 2026-11-22 `check` 的表数判因提示（`dc64865`）、同日 W0-9 把 Flyway 判据改成 schema 本地（`6a55381`，用户指令「W0-9 现在一起修」）、同日 19:10 把 `psql` 列分隔符显式化为 tab（用户指令「改 agent_smoke_lib.py 的分隔符 bug」；此前多列 SELECT 在公共库里全部错位） |
 | 任何 `V1`–`V26` 迁移 | checksum |
 
 ### 7.2 分支纪律

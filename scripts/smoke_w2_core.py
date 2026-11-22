@@ -104,8 +104,9 @@ def events(key):
 
     为什么走单列 JSON 而不是多列 SELECT：公共库 psql() 按 tab 拆列，而 `psql -tA` 的默认列
     分隔符是竖线——实测 `SELECT 1,'a|b',3` 回来是 [['1|a|b|3']]，多列读全部错位（第 3 步就是这么
-    IndexError 的）。根治要给 agent_smoke_lib 加 `-F` 制表符，但那是全波次共用文件，需 owner 提案
-    + 用户点头；这里先用不受分隔符影响的写法，并把坑记进 HANDOFF。
+    IndexError 的）。这条 2026-11-22 19:00 经用户点头已根治（agent_smoke_lib 两条 psql 命令都加
+    `-F "\\t"`），本脚本仍留 JSON 单列读法：它同时避开 `-tA` 把 NULL 打空串、末列 NULL 被 strip
+    吃掉整列这两个坑，而且字段名自证——列序改了断言也不会悄悄错位。
     """
     raw = psql_one("SELECT json_agg(t)::text FROM (SELECT id, status, aggregate_key "
                    "FROM outbox_events WHERE event_type='LOAN_CREATED' AND aggregate_key='%s' "

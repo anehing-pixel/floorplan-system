@@ -192,9 +192,10 @@ def one_json(sql):
     为什么不能直接多列 SELECT：公共库 psql() 按 tab 拆列，而 `psql -tA` 的列分隔符默认是竖线，
     实测 `SELECT 1,'a|b',3` 回来是 [['1|a|b|3']]——多列读会整体错位成第一个字段，
     「第 0 行第 1 列」这种下标要么 IndexError 要么拿到黏在一起的字符串。
-    根治是给 agent_smoke_lib 加 `-F` 制表符，但那是全波次共用文件，需 owner 提案 + 用户点头，
-    所以本轮先在脚本侧用 JSON 单列，并把这条坑写进 HANDOFF。JSON 还顺带把 NULL 显式化成 null，
-    不像 psql 的 -tA 把 NULL 打成空串、与空字符串分不开。
+    （这条已在 2026-11-22 19:00 由用户点头根治：agent_smoke_lib 的两条 psql 命令都加了 `-F "\\t"`，
+    多列 SELECT 现在能正确切开。本脚本仍保留 JSON 单列读法，理由换成下面这条而不是绕开 bug：
+    JSON 把 NULL 显式化成 null，而 psql 的 -tA 把 NULL 打成空串、末列 NULL 还会被 strip 掉整列，
+    「这列没值」和「这列是空串」在后者里分不开——本脚本判的正是 due_date/grace_period_days 这类可空列。）
     """
     raw = psql_one(sql)
     return json.loads(raw) if raw else None
