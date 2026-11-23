@@ -9,7 +9,8 @@
 > 那段过程记录要查就查 git 历史（`git log --oneline -- PROGRESS.md docs/`，删除前的最后一份是 `d3ec429`）。
 > 本文件只保留仍然成立的事实与待办。
 
-最后更新：2026-11-23 17:40（GMT+8） · **浏览器端到端测试首次落地（37/37）+ 修复参数绑定异常误报 500（见 §2）**；
+最后更新：2026-11-23 22:04（GMT+8） · **生产级差距清单落档（全局 + 13 模块代码实查，见 §2 与 `docs/生产级差距清单.md`；仅分析、未改代码）**；
+此前：浏览器端到端测试首次落地（37/37）+ 修复参数绑定异常误报 500（见 §2）；
 此前：USED R2 车辆主数据／車検証切片贯通（见 §2），R1 之后第二个贯通的业务切片；
 此前提交进仓库的 domain 三件套里那份 stash 冲突标记已解，
 迁移集补齐到 V1–V74，`floorplan` 库改成从迁移链干净重建（56 版、现位于 v74），
@@ -73,6 +74,7 @@
 | 自检口径修正 | `SqlStructureSelfCheck` 原来只查 INSERT 列、且不带 schema 过滤。R1 首跑时 `UPDATE dealers ... SET updated_by=?` 撞 500（该表从 V1 起就没这列）暴露两个洞：① UPDATE 引用的列不在任何 INSERT 清单里 ⟹ 查不到；② 同库有 `floorplan_legacy_20261123` 同名表，只按 `table_name` 过滤会把两套列并起来 ⟹ 假通过 | 已加 `table_schema = current_schema()` 与 `dealers` 条目；启动期 **22 张表**列名一致（R2 再补 4 张 USED 表条目，并把 `vehicle_units` 清单加进 `updated_at`） |
 | **浏览器端到端测试（2026-11-23 17:40 落地）** | 新增 `browser-test.py`（Playwright + 本机 Chrome，经网关 18080）：登录页错误密码/正确登录/令牌写入、11 个视图逐个真实渲染、新增/编辑经销商弹窗、名下车辆/车辆详情抽屉、全局刷新、admin vs operator 写按钮权限差、退出登录、浏览器内 fetch 冒烟；全程收集 console.error/pageerror/失败请求并落截图到 `browser-test-results/`（已 gitignore） | `PYTHONIOENCODING=utf-8 python browser-test.py` → **37 PASS / 0 FAIL / EXIT 0**，截图 18 张；主干 `smoke-test.py` 211 PASS / 0 FAIL、USED `smoke_used.py` 209 PASS / 0 FAIL |
 | **修复：参数绑定异常误报 500（浏览器测试揪出）** | `GET /api/vehicles`、`/api/credit-lines` 缺必填 `dealerId` 时抛 `MissingServletRequestParameterException`，web 与 common 的 `GlobalExceptionHandler` 都只兜底到 `handleUnknown` ⟹ 500 SYS_001。这属客户端传参错误，应是 400 | web/common 两处 `GlobalExceptionHandler` 新增 `handleBadRequest`，接 `MissingServletRequestParameterException`/`MethodArgumentTypeMismatchException`/`HttpMessageNotReadableException` → 400 VALID_001（`ErrorCode.VALID_001` 既有，400）。浏览器测试加两条断言钉住：缺参 `/api/vehicles` 与 `/api/credit-lines` 均返回 400 VALID_001（不再 500）；`mvn -B -DskipTests package` 全绿 |
+| **生产级差距清单（2026-11-23 22:04，仅分析零代码改动）** | 全局 + 按模块两份视角归集成 `docs/生产级差距清单.md`。**全局 P0 六项**：密钥无强校验（web 硬编码 `floorplan/floorplan`、JWT/webhook/账户 key 全有 dev 兜底）、核心闭环未完成、生产开关默认关、JWT 不可撤销且权限不回查、无健康检查/容器化/保活、无备份恢复。**模块视角 13 块**：gateway 路由吞噬 `/api/dealers/{id}/bank-accounts`（经网关必 404）＋治理六项全无；web 出款是内存 Mock＋银行流水 demo＋作业全手动点；auth 无 MFA/锁定/审计/租户；external-api 纯骨架零 Controller；common 幂等键只是回显＋Feign 无认证头致担保门禁形同虚设；bank 匹配只两级＋内存存储重启即丢；loan 借据 7 态只写 3 态、还款计划利息恒 0；release 解押只打日志、回补 `availableAfter=before`；recon 只比内部表、actor 不写审计；credit 可用额度三套口径、乐观锁无 `AND version=?`；risk 告警只落库、`risk_rules` 零读写；collateral-reg 零事务/零锁、门禁默认关 | 全部条目带文件路径+行号，可复现。动手顺序见该文档 §3。**注意：本文是分析快照，唯一事实来源仍是本 PROGRESS.md；业务口径以 ADR 总定源为准** |
 
 **架构裁决（本轮定，写进代码注释）**：不逐字搬任一并行分支的业务层，结构取 serial 版、
 application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路都没按 D07 契约写完且 master 上
