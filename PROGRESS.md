@@ -18,8 +18,13 @@
 
 ## 0. 现状三句话
 
+> **服务拓扑与「目标态 vs 现状」的差**见《库存融资核心系统-目标微服务架构设计.md》**§0 当前实况**（2026-11-23 实查）：
+> 11 个可部署进程 = 1 网关 + 9 业务服务 + 1 DMZ 接入面，另有 4 个共享库模块（domain/application/infrastructure/common）；
+> 物理拆库未开始（仍共用 `public` schema）；Feign 与 outbox 机制已落地但只通一条异步链路。
+
 1. **核心（新车）链路可运行**：16 个构建单元编译全绿、主干冒烟 211 条 `[PASS]` / 0 FAIL、
-   10 服务启停正常、`work_orders` 之外的业务表齐全。历史技术债（B-2 处置解冻、B-3 处置期不回补、
+   10 服务启停正常（`run-microservices.sh` 一键起的 10 个进程，不含 DMZ 的 `external-api`）、
+   `work_orders` 之外的业务表齐全。历史技术债（B-2 处置解冻、B-3 处置期不回补、
    collateral-reg 全端点 500、`/api/payments/**` 被 core 兜底 404、四个新服务漏装 `AuthApplicationService`、
    `V19` 部分唯一索引非法语法）**均已闭环**，细节在 git 历史里。
 2. **事件链路只通了一根线**：`LOAN_CREATED`（放款确认 → 建借据）端到端已通，
