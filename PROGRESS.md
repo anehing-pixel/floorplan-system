@@ -47,7 +47,7 @@
 | 分支 | `master`（主干）· `used-floorplan-dev`（USED 改造，2026-11-23 从 `d3ec429` 切出） |
 | 数据库 | Docker 容器 `floorplan-db2`，端口 **5434**（5432 被占用），库/用户/密码均 `floorplan`；宿主无 `psql`，用 `docker exec floorplan-db2 psql -h 127.0.0.1 -p 5434 -U floorplan -d floorplan` |
 | 库的来源 | **2026-11-23 从仓库迁移链干净重建**：`public` 重建那一刻 = 56 版 Flyway、位于 v74，90 张表（此后 R1/R2 又落了 V75–V78，现位于 v78，见下一行）。重建前的库改名 `floorplan_legacy_20261123`（内含并行期 agent 直打 public 留下的漂移：history 记到 V27 而 `V27__release_payment_ref.sql` 只存在于未合并的 `agent/w1-release`；另有六个 agent 隔离 schema）。整库备份 `backups/pre-used-rebuild-20261123-102807.sql.gz` |
-| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`：**V75–V77 已被 R1 资质切片占用**（V75 种 3 个配置键、V76 合规二人签认列+CHECK、V77 dealers 双维评分四列+CHECK），**V78 已被 R2 占用**（种里程差异阈值 `floorplan.used.mileage-diff-threshold-km`），**V79 留给处置与报表**。库里现位于 **v78 / 60 版**（下一可用号 V79，取号前先 `select max(version) …` 复核，别信本文摘要）。⚠️ 号段只能往 head 之上取：库里 head=V74 且 Flyway 未开 `out-of-order`，低号（含 D04 §2 预留的 V42–V44）会让启动校验抛 `Detected resolved migration not applied to database` 整栈起不来，那几个号从此是永久空号。核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
+| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`：**V75–V77 已被 R1 资质切片占用**（V75 种 3 个配置键、V76 合规二人签认列+CHECK、V77 dealers 双维评分四列+CHECK），**V78 已被 R2 占用**（种里程差异阈值 `floorplan.used.mileage-diff-threshold-km`），**V79 已被 R3 占用**（种估值三键 + 回正 V78 source_ref）。库里现位于 **v79 / 61 版**（下一可用号 V80，取号前先 `select max(version) …` 复核，别信本文摘要）。⚠️ 号段只能往 head 之上取：库里 head=V74 且 Flyway 未开 `out-of-order`，低号（含 D04 §2 预留的 V42–V44）会让启动校验抛 `Detected resolved migration not applied to database` 整栈起不来，那几个号从此是永久空号。核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
 | 编译 | Windows JDK 17 + Maven 3.9.16 |
 | 启动坑 | 启动一律 `env -u SERVER__PORT`（否则覆盖各服务端口）；`run-microservices.sh` 已处理 |
 | 进程坑 | 后台 JVM 随 shell 回收 → 启动 + 测试 + 清理必须在**同一条命令**内 |
@@ -68,6 +68,7 @@
 | 迁移集 | V40–V64 + V70–V74 从 `used/serial-20261123` 取入，与 master 原有 V65–V69 合成 USED 全量结构。**V65–V69 此前从未在任何库上执行过** | 空库启动 → `Successfully applied 56 migrations ... now at version v74`；`SqlStructureSelfCheck` 13 张表列名一致 |
 | **USED R1 业务切片（2026-11-23 12:20 落地）** | 车商资质准入打通到端：`DealerAdmissionPolicy`（D03 §2.1 五规则按序判定，无白名单入参）＋ `DealerQualificationRepository`/`UsedConfigRepository` 两套接口与 JDBC 实现 ＋ `DealerQualificationApplicationService`/`DealerRatingApplicationService` ＋ 8 个端点 `/api/dealer-qualifications/**`（路径裁决见控制器类注释：`/api/dealers/**` 已被网关让给 credit-service，故另起前缀由 core 兜底）＋ V75–V77 三版迁移。二人红线（合规签认、双维评分）同时落在服务判定与库内 CHECK 两处 | `mvn -B package` 全绿；**经网关** `SMOKE_BASE=http://127.0.0.1:18080 python smoke_used.py` → 43 条 `[PASS]` / 0 FAIL / EXIT 0（含 401/403 分档、四类合规 UNKNOWN 不折叠、同人自证 403、换发降级、配置窗口改值即变、直写库被 CHECK 拒） |
 | **USED R2 业务切片（2026-11-23 13:20 落地）** | 车辆主数据／車検証打通到端：`MileageSource`/`RepairHistory`/`EncumbranceType`/`CertificateStatus` 等 13 个 domain 模型＋`MileageResolutionPolicy`（来源可信序＋采集时点＋取严，纯函数）＋`CertificateStateMachine`＋`EncumbrancePolicy`＋`UsedVehicleMasterRepository`/`JdbcUsedVehicleMasterRepository`（V50/V51/V52/V53/V66 五张表，只写 USED 列，不动 LEGACY 业务列）＋`UsedVehicleMasterApplicationService` 6 个用例＋`/api/used-vehicles/**` 6 个端点＋V78 阈值种子。四个坑本轮各自修掉：① 非法枚举词由用例翻成 400（原先 IllegalArgumentException 冒成 500 SYS_001）；② 收证先判「同証書番号」再判「在场证」，顺序反了幂等重放永远回 409；③ 换发必须先让旧证 `REISSUED` 再插新证，否则撞 `uk_cert_active_vin`；④ 控制器 `toDraft` 必须传**报文** vin，传路径 vin 等于把 G-D1 那条不一致校验永久短路 | `mvn -B package` 全绿、`mvn -B -pl domain,application -am test` 49/49；**经网关** `SMOKE_BASE=http://127.0.0.1:18080 python smoke_used.py` → 101 条 `[PASS]` / 0 FAIL / EXIT 0（含 UNKNOWN 里程「建账放行、放款阻断」、阈值从库里现读（改成 0 立刻开单）、票先于建账入账、二人换发留下 AMENDED/REISSUED/RECEIVED 流水、ADMIN 无换发审批位） |
+| **USED R3 业务切片（2026-11-23 15:20 落地）** | 估值与 LTV 定价打通到端：`VehicleValuation`/`ValuationInput`/`LtvPolicy`/`LtvBand` 等 12 个 domain 模型＋`PrudentValueCalculator`（多源审慎值算法，MIN_OF_SOURCES/WEIGHTED 两档）＋`LtvPolicyValidator`（L1〜L4 不变式校验，纯函数）＋`LtvTierResolver`（分档定档，边界样本导出）＋`UsedAdvanceCeilingCalculator`（覆盖上限 115%）＋`UsedValuationApplicationService`/`LtvPolicyApplicationService` 11 个用例＋`/api/valuations/**` 4 个端点＋`/api/ltv-policies/**` 5 个端点＋V79 配置种子（三键：valid-days/uplift/rule）。鉴权链路修复：`UserRole.implicitReadPermissions()` 新增，`RoleSeparationPolicy.effectivePermissions()` 并上隐式读层（根因：`can()` 里的读层放行从未参与令牌签发，带 `@RequirePermission` 的查询端点对所有角色回 403） | `mvn -B clean package` 全绿；**经网关** `SMOKE_BASE=http://127.0.0.1:18080 python smoke_used.py` → 209 条 `[PASS]` / 0 FAIL / EXIT 0（含单源/降级源/缺署名一律拒在写之前、同键重放幂等、二人覆盖 +115% 上限 + 同日防线、L1〜L4 校验未通过整体不写、换人批准生效、试算只算不落、配置键三键读库含脏值 fail-closed） |
 | 自检口径修正 | `SqlStructureSelfCheck` 原来只查 INSERT 列、且不带 schema 过滤。R1 首跑时 `UPDATE dealers ... SET updated_by=?` 撞 500（该表从 V1 起就没这列）暴露两个洞：① UPDATE 引用的列不在任何 INSERT 清单里 ⟹ 查不到；② 同库有 `floorplan_legacy_20261123` 同名表，只按 `table_name` 过滤会把两套列并起来 ⟹ 假通过 | 已加 `table_schema = current_schema()` 与 `dealers` 条目；启动期 **22 张表**列名一致（R2 再补 4 张 USED 表条目，并把 `vehicle_units` 清单加进 `updated_at`） |
 
 **架构裁决（本轮定，写进代码注释）**：不逐字搬任一并行分支的业务层，结构取 serial 版、
@@ -95,6 +96,28 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 - `floorplan.used.master-data-diff-alert-enabled`（D06 §2.5 第二项）**没种**：代码里没有读方
   （主数据差异告警未接线），按 `UsedConfigKeys` 自己的原则「只登记真的有读方的键」留空，
   接上告警那条线时再随迁移种值。
+
+**实现与设计稿的偏差登记（R3 轮，逐条都是实查后的事实，不是「以后再补」的托词）**：
+
+- **鉴权链路修复（READ_TIER 不在令牌签发路径）**：`UserRole.can()` 里的读层放行从未参与
+  `RoleSeparationPolicy.effectivePermissions()`，导致令牌 `perms` 缺读点、带 `@RequirePermission` 
+  的查询端点对所有角色回 403。修复法：新增 `UserRole.implicitReadPermissions()` 返回 `READ_TIER`，
+  `effectivePermissions()` 并上隐式读层。不改成「给每个角色手铺读点」：逐角色读矩阵属 D10 未签字部分
+  （AGENTS §0 铁律 3），而且读点铺进 `permissions` 会让「该角色是否写岗」的 `isWriter()` 判定失真。
+- **SOD 同人分支不可达**：当前角色矩阵下 `MANAGE` 与 `APPROVE`、`RECORD` 与 `OVERRIDE` 都不并列，
+  所以换人校验只可能以 403 `AUTH_002` 出现（角色层就拦了），同人分支（`AUTH_003`）在冒烟里触不到。
+  冒烟断言 `SOD_VIOLATION_BLOCKED == 0` 并如实登记缺口，同人分支由单测覆盖。
+- **政策列表不新建 GET /{id}**：D07 §7.2 的契约里没点这个端点，`GET /api/ltv-policies?status=ACTIVE`
+  的响应已经内联带集合与校验结论（PUT 是全量替换，客户端必须能读到当前带集当底本）。新建 GET /{id}
+  会让「读草稿」与「读生效版」的语义混在一起，不如让客户端用 list 筛 status。
+- **同日重复覆盖回 409 CONFLICT_001**：D08 §3.4 的「同日防线」在代码里落成了「同一估值行当天
+  第二次覆盖回 409」，而不是「回 200 但留审计痕迹」。理由：覆盖是高敏操作（改放款基准），静默成功
+  会让调用方以为「改完了」而不去翻审计表；显式 409 强制调用方知道「今天已经有人动过这台车的估值」。
+- **两条刻意不种的绕过键**：① `valuation.require-second-source-for-advance=false`（D08 §3.2 的
+  「除人工覆盖外，单源不得作放款基准」是与 Q21 同族的硬策略，给它一个能置为 false 的键 = 留一条
+  把硬策略软放行的可配置旁路）；② `valuation.default-max-ratio-fallback=0.40`（兜底成数已经有
+  权威源 = `ltv_policies.default_ratio`，再种一枚全局默认值会把 L2 阻断改成放行）。两枚都登记在
+  §4.1 待签字清单的「刻意不种」行。
 
 ---
 
@@ -147,6 +170,11 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 | 红线 | 双维评分二人签认 | `true`，且读到 `false` 仍按 `true` 执行并打 ERROR | `floorplan.used.reporting.dealer-rating-two-person-required`（V75） | `DealerRatingApplicationService` | **不改**：这条登记是为了「有人试图关闭红线」在库里留下可读痕迹，不是提供关闭能力 |
 | 无编号（D06 §2.5 直接给值，未标待定源） | 里程勾稽阈值 | 1000 km（日本二手车市把 1,000 km 以内当作「运输／整备里程」的常规容差） | `floorplan.used.mileage-diff-threshold-km`（V78） | `MileageResolutionPolicy` ＋ `UsedVehicleMasterApplicationService.applyMileage` | 改值只改「超没超阈值 ⟹ 开不开 `ODOMETER_DIFF`」，不改采信哪个来源；冒烟已实测改成 0 立刻开单，证明这个数运行时从库里读 |
 | D-11 | 里程差异是否阻断放款 | 只在「无任何可用观测」（`UNDETERMINED`）时阻断；超阈值只开差异、不阻断 | 无键（属策略，不属参数） | `MileageResolutionPolicy.Decision.blocksAdvance` | 若签字要求「超阈值也压放款」，改 `Decision` 的判定而不是加开关 |
+| D-05 | 估值有效天数 | 45 天 | `floorplan.used.valuation.valid-days`（V79） | `UsedValuationApplicationService` 闸门判定 | 改值只改「哪天失去放款资格」，不回算存量行 |
+| — | 人工覆盖上限倍率 | 1.15（115%） | `floorplan.used.valuation.manual-override-max-uplift`（V79） | `PrudentValueCalculator.overrideCeiling` | 改值只改「人工能抬高到自动源的多少倍」，下限不设限 |
+| — | 审慎值默认算法 | `MIN_OF_SOURCES`（取小） | `floorplan.used.valuation.default-prudent-rule`（V79） | `PrudentValueCalculator.calculate` | 改成 `WEIGHTED` 前必须确认存量政策的权重数据齐备 |
+| 刻意不种 | 单源是否可作放款基准 | `true`（但 D08 §3.2 的「除人工覆盖外，单源不得作放款基准」是硬策略） | 无键（属硬策略，不属参数） | `PrudentValueCalculator` 拒因 `SINGLE_SOURCE_NOT_MANUAL` | 要改这条口径应当改 D08 §3.2 并签字，不是在库里翻开关 |
+| 刻意不种 | 兜底成数全局默认 | 无（走 `ltv_policies.default_ratio`） | 无键（政策已带版本、带二人批准、带 L3 校验） | `LtvTierResolver` 未给兜底则零命中判 `LTV_002` | 再种一枚全局默认值会把阻断改成放行 |
 
 > 只登记**代码里真的有读方**的键（`UsedConfigKeys.wired()` 与这张表逐条对得上）。
 > D06 §16 全表 28 个键里其余的（估值容差、LTV 档位、账龄阶梯…）随 R3 起的各自切片进这张表，
