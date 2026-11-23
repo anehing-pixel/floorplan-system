@@ -13,7 +13,8 @@ __pycache__/
 # 浏览器端到端测试截图/报告（browser-test.py 的运行产物）
 browser-test-results/
 
-# IDE
+# IDE / 本地 agent 工作数据（memory 日志只留本机，不进版本库）
 .idea/
 *.iml
 .vscode/
+.workbuddy/
