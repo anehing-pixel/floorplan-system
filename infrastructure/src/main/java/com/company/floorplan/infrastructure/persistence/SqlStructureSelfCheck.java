@@ -158,6 +158,23 @@ public class SqlStructureSelfCheck implements ApplicationRunner {
         CHECKED.put("wms_reconcile_diffs", Arrays.asList(
                 "biz_date", "warehouse_custodian_code", "vin", "diff_type", "severity", "our_snapshot",
                 "wms_snapshot", "status", "actor"));
+        // ---- USED R3 估值 / 分档 LTV（V55 / V57）----
+        CHECKED.put("vehicle_valuations", Arrays.asList(
+                "valuation_key", "vin", "purpose", "auction_won_price", "appraised_value", "market_price",
+                "manual_value", "prudent_value", "prudent_rule", "primary_source", "auction_lot_id",
+                "market_snapshot_id", "appraisal_provider", "appraisal_no", "report_path", "report_digest",
+                "valuation_date", "valid_until", "status", "overridden_by", "co_signed_by",
+                "source_message_id", "created_by", "updated_by", "updated_at", "version"));
+        CHECKED.put("valuation_inputs", Arrays.asList(
+                "valuation_id", "source", "value", "ref", "provider", "as_of", "weight", "rank"));
+        CHECKED.put("ltv_policies", Arrays.asList(
+                "policy_code", "version", "policy_name", "status", "effective_from", "effective_to",
+                "default_ratio", "created_by", "approved_by", "approved_at", "updated_at"));
+        CHECKED.put("ltv_policy_bands", Arrays.asList(
+                "policy_id", "priority", "age_band_min_months", "age_band_max_months",
+                "mileage_band_min_km", "mileage_band_max_km", "repair_history_in", "grade_min", "grade_max",
+                "inspection_remaining_min", "model_heat", "dealer_grade_in", "max_ratio", "rate_addon_bps",
+                "breach_threshold", "note"));
     }
 
     public SqlStructureSelfCheck(JdbcTemplate jdbc) {

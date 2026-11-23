@@ -12,8 +12,9 @@ import java.time.LocalDate;
  * 分文件能让「哪些字段是 USED 带来的」在 review 时一眼看出来。</p>
  *
  * <p><b>约定沿用 LEGACY</b>（AGENTS.md §10）：金额一律整数日元，日期 {@code yyyy-MM-dd}；
- * 操作人不从请求体读——审计操作人只认 {@code AuditActor}（令牌身份优先），
- * 请求体里出现 {@code operator} 一律忽略并记入响应的 {@code details.ignored_fields[]}。</p>
+ * 操作人不从请求体读——审计操作人只认 {@code AuditActor}（令牌身份优先）。
+ * 本类的 DTO <b>一律不声明 {@code operator} 字段</b>，所以请求体里出现的 {@code operator}
+ * 由 Jackson 直接丢弃（不是「收下后忽略」）；库里落的人永远是令牌那个人。</p>
  */
 public final class UsedRequests {
 
@@ -215,5 +216,141 @@ public final class UsedRequests {
     public static class CertificateRebindRequest extends CertificateRequest {
         /** 第二签认人（必填，且不同于当前操作人）。 */
         public String coSignedBy;
+    }
+
+    // ---- USED R3 多源审慎估值 / LTV 政策（D08 §3–§4、D07 §7.2）----
+
+    /**
+     * 估值录入（UC-R3-1，{@code POST /api/valuations}）。
+     *
+     * <p><b>没有 {@code prudentRule} 字段，这是有意的</b>：审慎算法读自配置键
+     * {@code valuation.default-prudent-rule}（D08 §3.2）。让调用方挑算法等于
+     * 让每一笔业务自己决定自己的放款基准有多高，而「WEIGHTED 还是 MIN」的差
+     * 通常就是一两百万日元的可借额。</p>
+     *
+     * <p><b>金额用包装类型</b>：{@code value} 缺失（{@code null}）与显式 0 是两种事实
+     * （V55 头注），基本类型会把前者静默变成后者，而 {@code MIN_OF_SOURCES} 拿到一个 0
+     * 就把这台车的基准判成零。</p>
+     */
+    public static class ValuationRequest {
+        /** 車台番号（必填）。 */
+        public String vin;
+        /** 用途（必填）：ADVANCE_BASE / PERIODIC_RECHECK / DISPOSAL_PRICING / MONITORING。 */
+        public String purpose;
+        /** 输入源清单（必填，至少一条）；禁止 {@code INTERNAL_DEGRADED}（D07 §7.2 / U-12）。 */
+        public java.util.List<SourceLine> sources;
+        /** 估值日；省略取当天。 */
+        public LocalDate valuationDate;
+        /** 有效截止日；省略时按参数 {@code valuation.valid-days} 推导，参数缺失则拒绝。 */
+        public LocalDate validUntil;
+        /** 第二签认人；{@code sources} 含 {@code MANUAL_OVERRIDE} 时必填且必须不同于操作人。 */
+        public String coSignedBy;
+        /** 溯源落札批次行（R4 未建，可空）。 */
+        public Long auctionLotId;
+        /** 溯源行情快照（V56）。 */
+        public Long marketSnapshotId;
+        public String appraisalProvider;
+        public String appraisalNo;
+        public String reportPath;
+        public String reportDigest;
+        /**
+         * 业务键 {@code VAL-{vin}-{yyyyMMdd}-{seq}}；省略则由服务端推导。
+         * <p>调用方自带这个键就得到幂等重放：同键重推返回已有结论、不写第二行。</p>
+         */
+        public String valuationKey;
+
+        /** 一条输入源（＝库内 {@code valuation_inputs} 一行）。 */
+        public static class SourceLine {
+            /** 来源：AUCTION_WON_PRICE / THIRD_PARTY_APPRAISAL / MARKET_MATRIX / MANUAL_OVERRIDE。 */
+            public String source;
+            /** 该源报价（整数日元，必填；0 要显式写 0）。 */
+            public Long value;
+            /** 源侧引用号（落札票号 / 查定书号 / 行情批次号）。 */
+            public String ref;
+            /** 机构或供应商；除人工覆盖外必填（{@code uk_val_input} 的组成键）。 */
+            public String provider;
+            /** 报价口径日；省略取估值日。 */
+            public LocalDate asOf;
+            /** 权重，仅 WEIGHTED 用；MIN 规则留空。 */
+            public BigDecimal weight;
+            /** 同源多行的次序。 */
+            public Integer rank;
+        }
+    }
+
+    /**
+     * 估值人工覆盖（UC-R3-3）。
+     *
+     * <p>{@code reason} 会同时进 {@code valuation_inputs.ref} 与 {@code audit_events}，
+     * 所以长度受 ref 列宽约束（128）；下限 10 字符是 D08 §3.4 的要求——
+     * 「重新看一下」这种理由等于没写。</p>
+     */
+    public static class ValuationOverrideRequest {
+        /** 人工值（整数日元，必填；上限＝可用自动源最大值 × 参数倍率）。 */
+        public Long manualValue;
+        /** 覆盖理由（必填，10〜118 字符）。 */
+        public String reason;
+        /** 第二签认人（必填，且不同于操作人）。 */
+        public String coSignedBy;
+    }
+
+    /** 估值人工置失效（UC-R3-4）。 */
+    public static class ValuationExpireRequest {
+        /** 失效理由（必填）：查定机构撤回报告、行情源被判定污染等。 */
+        public String reason;
+    }
+
+    /**
+     * LTV 政策起草（{@code POST /api/ltv-policies}）。
+     *
+     * <p><b>不含带集合</b>：D07 §7.2 把「建一版」与「配带」分成两个端点（{@code PUT /bands}），
+     * 合在一起写会让审计看不出哪一次是真正的定案。版本同理不接受传入，
+     * 服务端按 {@code max(version)+1} 推导。</p>
+     */
+    public static class LtvPolicyRequest {
+        /** 政策码（必填，如 USED-MAIN；同码多版）。 */
+        public String policyCode;
+        /** 政策名（必填）。 */
+        public String policyName;
+        /** 生效起日（必填）。 */
+        public LocalDate effectiveFrom;
+        /** 生效止日；省略＝无限期。 */
+        public LocalDate effectiveTo;
+        /** 兜底成数（可空）；给了就必须严格小于所有带的 {@code max_ratio}（L3）。 */
+        public BigDecimal defaultRatio;
+    }
+
+    /**
+     * 一条分档带（{@code PUT /api/ltv-policies/{id}/bands} 的元素，全量替换）。
+     *
+     * <p><b>维度留空＝该维不设限</b>（V57 列注释），不是「该维为 0」；
+     * 但 {@code maxRatio} 留空是错误而非不设限——没有上限的档就是无上限放款，
+     * 所以它必填且 {@code 0 < r <= 1}（L4）。</p>
+     */
+    public static class LtvBandRequest {
+        /** 命中顺序，小者优先（必填，&gt; 0，同政策内不得重复）。 */
+        public Integer priority;
+        public Integer ageBandMinMonths;
+        /** 車龄带上限（不含）。 */
+        public Integer ageBandMaxMonths;
+        public Integer mileageBandMinKm;
+        public Integer mileageBandMaxKm;
+        /** 修復歴集合（CSV，如 {@code NONE,MINOR}）。 */
+        public String repairHistoryIn;
+        public BigDecimal gradeMin;
+        public BigDecimal gradeMax;
+        /** 車検残存下限（月）；V57 只有下界一列。 */
+        public Integer inspectionRemainingMin;
+        /** 车型热度单值（V57 是单值列，非集合）。 */
+        public String modelHeat;
+        /** 车商等级集合（CSV）。 */
+        public String dealerGradeIn;
+        /** 该档上限成数（必填）。 */
+        public BigDecimal maxRatio;
+        /** 利率加点（基点）。 */
+        public Integer rateAddonBps;
+        /** 该档突破预警线（0〜100 的百分比数值）。 */
+        public BigDecimal breachThreshold;
+        public String note;
     }
 }

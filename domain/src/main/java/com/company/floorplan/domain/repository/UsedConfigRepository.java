@@ -53,9 +53,25 @@ public interface UsedConfigRepository {
         });
     }
 
+    /**
+     * 取比率/阈值型参数（{@code value_type='DECIMAL'}）为 {@link java.math.BigDecimal}。
+     *
+     * <p>不用 {@code double}：本仓所有比例都参与金额乘法（{@code FLOOR(prudent × ratio)}），
+     * 二进制浮点会让同一个数在不同机器上落到上限的另一侧。值脏（非数字）时同样回 empty，
+     * 由调用方 fail-closed。</p>
+     */
+    default Optional<java.math.BigDecimal> findDecimal(String paramKey) {
+        return findActiveValue(paramKey).flatMap(v -> {
+            try {
+                return Optional.of(new java.math.BigDecimal(v.trim()));
+            } catch (NumberFormatException ex) {
+                return Optional.empty();
+            }
+        });
+    }
+
     /** 参数台账（后台列表用）：按状态筛，状态为 null 表示全部。 */
     java.util.List<ConfigParam> list(String status);
-
     /**
      * 参数行视图。
      *

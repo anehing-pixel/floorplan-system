@@ -366,6 +366,11 @@ public enum UserRole {
     /**
      * 判断该角色是否拥有指定权限点。
      *
+     * <p><b>鉴权真正走的是 {@link com.company.floorplan.domain.service.RoleSeparationPolicy#effectivePermissions}
+     * （令牌里签发的 {@code perms} 清单），不是本方法</b>——所以隐式读层必须同时并进那一条，
+     * 否则「读点在 {@code can()} 里放行、在令牌里缺席」，带 {@code @RequirePermission} 的查询端点
+     * 会对所有角色回 403（USED R3 冒烟实测：{@code GET /api/valuations/active} 全岗 403）。</p>
+     *
      * @param permission 权限点
      * @return true 表示拥有
      */
@@ -375,6 +380,16 @@ public enum UserRole {
         // 因此读点在此登记、在此统一放行；写点仍必须逐角色显式授予。
         return permission != null
                 && (permissions.contains(permission) || READ_TIER.contains(permission));
+    }
+
+    /**
+     * 隐式读层清单（对外只读）。
+     *
+     * <p>存在的唯一理由是让签发令牌的那条路（{@code effectivePermissions}）与本枚举的
+     * {@link #can(Permission)} 用同一份口径。写点<b>不</b>在这里，因此并进令牌不会扩大任何写能力。</p>
+     */
+    public static Set<Permission> implicitReadPermissions() {
+        return READ_TIER;
     }
 
     /** 隐式读层：登录即可读，与既有查询接口行为一致。 */

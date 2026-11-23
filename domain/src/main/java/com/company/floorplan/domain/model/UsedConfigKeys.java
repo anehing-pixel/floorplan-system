@@ -46,12 +46,41 @@ public final class UsedConfigKeys {
      */
     public static final String MILEAGE_DIFF_THRESHOLD_KM = "floorplan.used.mileage-diff-threshold-km";
 
+    /**
+     * R3.1 估值有效期（天）：{@code valid_until = valuation_date + 本值}。
+     *
+     * <p>值 45 来自 D01 §3.11 采纳默认值与 D06 §16，标 {@code [待定源 D-05]}。
+     * 外置的必要性不只是「收紧口径不该发版」：D08 §3.3 把有效期判成<b>日粒度</b>（DATE 列），
+     * 业务一旦签字改成 30 日，存量 ACTIVE 估值行的 {@code valid_until} 不会重算，
+     * 只有闸门按库里这个数读，才不会出现「文档改了口径、闸门还在用 45」。</p>
+     */
+    public static final String VALUATION_VALID_DAYS = "floorplan.used.valuation.valid-days";
+
+    /**
+     * R3.4 人工覆盖上浮上限（倍率，1.15 = 不得超过可用自动源最大值的 115%）。
+     *
+     * <p>D08 §3.4 的定值，无待定源标记。判定在 {@code PrudentValueCalculator.overrideCeiling}，
+     * 本键只出数——Java 里不硬编码 1.15，否则改这个数要发版，而它是风控可调的口径。</p>
+     */
+    public static final String VALUATION_MANUAL_OVERRIDE_MAX_UPLIFT =
+            "floorplan.used.valuation.manual-override-max-uplift";
+
+    /**
+     * R3.1 审慎值默认规则（{@code MIN_OF_SOURCES} / {@code WEIGHTED}）。
+     *
+     * <p>D08 §3.2 定 {@code MIN_OF_SOURCES} 为默认，{@code WEIGHTED} 只能由政策显式改写
+     * （权重是政策行为，不是逐次录入行为）。请求未带 {@code prudentRule} 时读本键。</p>
+     */
+    public static final String VALUATION_DEFAULT_PRUDENT_RULE =
+            "floorplan.used.valuation.default-prudent-rule";
+
     private UsedConfigKeys() {
     }
 
     /** 当前已接线的键清单（冒烟与自检用：种了没人读 / 读了没种，都能从这里对出来）。 */
     public static List<String> wired() {
         return List.of(COMPLIANCE_VALID_DAYS, LICENSE_EXPIRY_ALERT_DAYS,
-                DEALER_RATING_TWO_PERSON_REQUIRED, MILEAGE_DIFF_THRESHOLD_KM);
+                DEALER_RATING_TWO_PERSON_REQUIRED, MILEAGE_DIFF_THRESHOLD_KM,
+                VALUATION_VALID_DAYS, VALUATION_MANUAL_OVERRIDE_MAX_UPLIFT, VALUATION_DEFAULT_PRUDENT_RULE);
     }
 }
