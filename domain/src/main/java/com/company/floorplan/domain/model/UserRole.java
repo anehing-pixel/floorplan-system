@@ -54,7 +54,31 @@ public enum UserRole {
      * 且系统初始化与批量建账场景需要管理员参与，故保留该权限。</p>
      */
     SYSTEM_ADMIN("系统管理员", RoleDomain.PLATFORM,
+<<<<<<< Updated upstream
             set(CONFIG_MAINTAIN, JOB_TRIGGER, DEALER_MAINTAIN, SUPPLIER_MAINTAIN, CREDIT_MANAGE)),
+=======
+            set(CONFIG_MAINTAIN, JOB_TRIGGER, DEALER_MAINTAIN, SUPPLIER_MAINTAIN, CREDIT_MANAGE,
+                    // USED R1：許可／会员／合规三类档案都挂在经销商主数据下，
+                    // 本仓现网只有本角色持 DEALER_MAINTAIN，故先落在此处（岗位缺口见下方注释）。
+                    DEALER_QUALIFICATION_MAINTAIN, DEALER_COMPLIANCE_CHECK,
+                    DEALER_SCORE_SET, DEALER_ADMISSION_MANAGE,
+                    // USED 收尾轮：读权限点与 R2/R5 读写点。管理员仍是"唯一全读"的那个岗，
+                    // 但 USED_VEHICLE_MAINTAIN 之外没有给它任何资金/放款单据写权（类注释的红线不变）。
+                    DEALER_READ, USED_VEHICLE_MAINTAIN, USED_VEHICLE_READ,
+                    CERTIFICATE_RECORD, CERT_READ, USED_COLLATERAL_READ,
+                    // W-U2：政策与拍场"维护"给管理员，"批准"不给（D10 D-5 要求两岗换人）。
+                    // 同一角色禁持 LTV_POLICY_APPROVE——批准权只在 RISK_ADVISORY_OFFICER。
+                    LTV_POLICY_MANAGE, AUCTION_HOUSE_MANAGE,
+                    // W-U3 集成运维（D10 §3 的 ADMIN 列 ●，`:126`）。
+                    // 【D-12 的落法】PARTNER_KEY_ROTATE 刻意不给本岗：密钥轮换与 partner 停用
+                    //（在 PARTNER_CONFIG_MANAGE 下）同人 = 一人可换钥可停人（D10 §4 `:155`）。
+                    // 本仓对成对权限点分离的既有做法就是「同一角色不同时持有这两点」
+                    //（D-4 录入↔覆盖、D-5 维护↔批准都是这么落的，见 W-U2 那段注释），
+                    // RoleSeparationPolicy.INCOMPATIBLE 登记的是**角色对**而不是权限点对，
+                    // 不为 D-12 另造一套框架；运行期换人校验仍缺，已记实现说明缺口。
+                    PARTNER_CONFIG_MANAGE, INTEGRATION_MONITOR, INTEGRATION_RETRY_TRIGGER,
+                    INTEGRATION_AUDIT_READ), CUSTODIAN_MAINTAIN, DEALER_MAINTAIN, SUPPLIER_MAINTAIN),
+>>>>>>> Stashed changes
 
     /**
      * 授信审查岗：准入与评级。
