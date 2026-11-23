@@ -150,9 +150,6 @@ public enum Permission {
     /* ---- 评级域 ---- */
 
     /** 经销商风险评级人工调整（评级唯一写入口）。 */
-<<<<<<< Updated upstream
-    RISK_GRADE_ADJUST("风险评级调整");
-=======
     RISK_GRADE_ADJUST("风险评级调整"),
 
     /* ---- USED 域 · 车商资质（R1；权限点定源 D00 §11，端点映射定源 D07 §7.1） ---- */
@@ -302,7 +299,7 @@ public enum Permission {
     INTEGRATION_RETRY_TRIGGER("集成消息与任务人工重投"),
 
     /** 集成审计读取：按 traceId/partner 拉 {@code call_logs} 留痕（R12.2 的取数入口）。 */
-    INTEGRATION_AUDIT_READ("集成调用留痕读取");
+    INTEGRATION_AUDIT_READ("集成调用留痕读取"),
     /**
      * 車検証质押生效——放款前置闸门（R5.1）。
      * <p>D10 §2 标 H 但<b>不要求二人</b>：其风险已被上游"实体交付证据"封住，
@@ -377,7 +374,6 @@ public enum Permission {
      * dispatcher 路径能推进。这是"内部不开放"的代码表达，不是漏配。</p>
      */
     RELEASE_SETTLE("结清推进（仅回执链内部触发）");
->>>>>>> Stashed changes
 
     private final String label;
 
