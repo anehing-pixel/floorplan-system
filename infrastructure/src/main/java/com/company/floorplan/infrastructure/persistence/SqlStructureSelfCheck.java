@@ -13,7 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /**
- * 启动期 SQL 结构自检：核对关键 INSERT 语句的列名都真实存在于表中。
+ * 启动期 SQL 结构自检：核对关键 INSERT / UPDATE 语句引用的列名都真实存在于表中。
  *
  * <p><b>为什么需要它</b>：手写长 INSERT 时，最容易犯的错不是占位符个数
  * （那个还能被 JDBC 在运行时报"栏位索引超过许可范围"），
@@ -100,6 +100,33 @@ public class SqlStructureSelfCheck implements ApplicationRunner {
                 "advance_no", "vin", "credit_line_id", "amount", "paid_at", "status", "payment_ref",
                 "idempotency_key", "purchase_order_id", "payee_supplier_id", "payee_supplier_type",
                 "payee_account_snapshot", "applicant", "reviewer", "reviewed_at", "disburser"));
+        // ---- USED 域（二手车库存垫资）R1 车商资质三表 + 参数表 ----
+        // 登记规则：列名按各 Jdbc*Repository 的 INSERT 原样抄一遍。
+        // 这里是「代码列名 ↔ 库内列名」唯一的启动期对照表，新增 USED 仓储就同步加一行，
+        // 不要等冒烟撞出 500 才发现某列写错（AGENTS.md §5 交付判据是冒烟全绿，不是编译通过）。
+        CHECKED.put("dealer_licenses", Arrays.asList(
+                "dealer_id", "license_type", "license_no", "competent_authority",
+                "issued_on", "expires_on", "status", "evidence_path", "evidence_digest",
+                "verified_by", "verified_at", "created_by", "updated_by"));
+        CHECKED.put("dealer_auction_memberships", Arrays.asList(
+                "dealer_id", "auction_house_code", "member_no", "member_grade",
+                "joined_on", "expires_on", "status", "evidence_path", "created_by", "updated_by"));
+        CHECKED.put("dealer_compliance_checks", Arrays.asList(
+                "dealer_id", "check_type", "checked_on", "valid_until", "result", "source",
+                "request_no", "evidence_path", "note", "checked_by", "co_signed_by",
+                "created_by", "updated_by"));
+        CHECKED.put("used_config_params", Arrays.asList(
+                "param_key", "param_value", "value_type", "unit", "status",
+                "effective_on", "source_ref", "approved_by", "note", "created_by", "updated_by"));
+        // dealers 是 LEGACY 表，USED R1 只在 UPDATE 里碰它下面这几个列。
+        // 为什么要单列出来：R1 首跑时 UPDATE dealers 写了 updated_by，而这张表从 V1 起就没有该列，
+        // 表现是「登记许可 500」而不是启动期报错——UPDATE/SELECT 的列名不在任何 INSERT 清单里，
+        // 自检就查不到。把 USED 引用到的 dealers 列登记进来，同类错误改在启动期暴露。
+        // 代价是下面会打一行「未被 INSERT 使用的列」INFO（LEGACY 主数据列多，属预期噪音）。
+        CHECKED.put("dealers", Arrays.asList(
+                "id", "admission_state", "operating_score", "stock_quality_score",
+                "score_set_by", "score_co_signed_by", "scores_confirmed_at", "scores_run_key",
+                "updated_at"));
     }
 
     public SqlStructureSelfCheck(JdbcTemplate jdbc) {
@@ -140,11 +167,19 @@ public class SqlStructureSelfCheck implements ApplicationRunner {
         }
     }
 
-    /** 查表实际列名。 */
+    /**
+     * 查表实际列名。
+     *
+     * <p>必须带 {@code table_schema = current_schema()}：同一个库现在有 {@code public} 与
+     * {@code floorplan_legacy_*} 两套同名表，只按 table_name 过滤会把两边的列并起来，
+     * 于是「本 schema 没有这列」被旧 schema 的同名列掩盖成自检通过。
+     * 并行期的隔离 schema 同理——查的必须是自己实际 search_path 上那张表。</p>
+     */
     private Set<String> actualColumns(String table) {
         try {
             return new LinkedHashSet<>(jdbc.queryForList(
-                    "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+                    "SELECT column_name FROM information_schema.columns "
+                            + "WHERE table_schema = current_schema() AND table_name = ?",
                     String.class, table));
         } catch (Exception ex) {
             return Set.of();

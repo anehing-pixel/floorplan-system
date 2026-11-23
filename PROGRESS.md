@@ -9,7 +9,7 @@
 > 那段过程记录要查就查 git 历史（`git log --oneline -- PROGRESS.md docs/`，删除前的最后一份是 `d3ec429`）。
 > 本文件只保留仍然成立的事实与待办。
 
-最后更新：2026-11-23 11:40（GMT+8） · **USED 改造基线已重建可信**：domain 三件套里提交进仓库的 stash 冲突标记已解，
+最后更新：2026-11-23 12:25（GMT+8） · **USED R1 车商资质切片贯通（见 §2）**；此前的domain 三件套里提交进仓库的 stash 冲突标记已解，
 迁移集补齐到 V1–V74，`floorplan` 库改成从迁移链干净重建（56 版、现位于 v74），
 旧库保留为 `floorplan_legacy_20261123` + 整库备份。开发分支 `used-floorplan-dev`。
 
@@ -24,10 +24,11 @@
 2. **事件链路只通了一根线**：`LOAN_CREATED`（放款确认 → 建借据）端到端已通，
    `PAYMENT_MATCHED` / `COLLATERAL_CHANGED` 两个生产者**仍零调用方** ⟹ 「回款解押」「权属变更」靠人工搬数据。
    见 §3 的开放项，别把冒烟的绿色数字读成闭环。
-3. **USED（二手车库存垫资）当前只有库结构与字典层**：V40–V74 已落库（资质/车辆/車検証/担保多源/估值/LTV/
+3. **USED（二手车库存垫资）已从「只有库结构与字典层」推进到「R1 贯通」**：V40–V74 已落库（资质/车辆/車検証/担保多源/估值/LTV/
    拍卖/库龄/监管仓/放车放证/登记委托/集成五段）、`Permission` 69 点与 `UserRole` 14 岗已含 USED 权限点、
    错误码段（QUAL_/CERT_/VALU_/LTV_/AUC_/REGI_/WMS_/RELS_/PTNR_）已定源。
-   **业务编排层与外部接入层在重写中**，规格源 = `docs/二手车库存垫资改造-06/-07/-08/-09`。
+   **R1 车商资质（准入闸门 G-A1〜G-A4）已有业务层与端点并过网关冒烟**；R2 起的车辆/車検証、估值分档、落札、
+   放款闸门、WMS 账实、放车放证、回款回补与外部接入层仍在重写中，规格源 = `docs/二手车库存垫资改造-06/-07/-08/-09`。
 
 ---
 
@@ -39,7 +40,7 @@
 | 分支 | `master`（主干）· `used-floorplan-dev`（USED 改造，2026-11-23 从 `d3ec429` 切出） |
 | 数据库 | Docker 容器 `floorplan-db2`，端口 **5434**（5432 被占用），库/用户/密码均 `floorplan`；宿主无 `psql`，用 `docker exec floorplan-db2 psql -h 127.0.0.1 -p 5434 -U floorplan -d floorplan` |
 | 库的来源 | **2026-11-23 从仓库迁移链干净重建**：`public` = 56 版 Flyway，`now at version v74`，90 张表。重建前的库改名 `floorplan_legacy_20261123`（内含并行期 agent 直打 public 留下的漂移：history 记到 V27 而 `V27__release_payment_ref.sql` 只存在于未合并的 `agent/w1-release`；另有六个 agent 隔离 schema）。整库备份 `backups/pre-used-rebuild-20261123-102807.sql.gz` |
-| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`（V75–V79 未用，留给处置与报表）；核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
+| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`：**V75–V77 已被 R1 资质切片占用**（V75 种 3 个配置键、V76 合规二人签认列+CHECK、V77 dealers 双维评分四列+CHECK），**V78–V79 留给处置与报表**。⚠️ 号段只能往 head 之上取：库里 head=V74 且 Flyway 未开 `out-of-order`，低号（含 D04 §2 预留的 V42–V44）会让启动校验抛 `Detected resolved migration not applied to database` 整栈起不来，那几个号从此是永久空号。核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
 | 编译 | Windows JDK 17 + Maven 3.9.16 |
 | 启动坑 | 启动一律 `env -u SERVER__PORT`（否则覆盖各服务端口）；`run-microservices.sh` 已处理 |
 | 进程坑 | 后台 JVM 随 shell 回收 → 启动 + 测试 + 清理必须在**同一条命令**内 |
@@ -58,6 +59,8 @@
 | 角色授予 | USED 写点已入岗：設質/登记发起 → `COLLATERAL_OFFICER`，确认/撤销/快照认定 → `POST_LENDING_MANAGER`，建单/放证/代录 → `SETTLEMENT_OFFICER`，下发 → `FUNDING_CASHIER`，主数据 → `SYSTEM_ADMIN`。D-2/D-6/D-7/D-8 四对 SOD 在角色层不闭环；`RELEASE_SETTLE` 不授任何角色 | 同上；14 个角色 `set()` 内无重复元素（重名会让 `Set.of` 在类初始化就抛） |
 | 错误码并集 | 补入 `REGI_001/002`、`WMS_001/002/003`、`RELS_001/002/003/004/006` | `ErrorCode.java` |
 | 迁移集 | V40–V64 + V70–V74 从 `used/serial-20261123` 取入，与 master 原有 V65–V69 合成 USED 全量结构。**V65–V69 此前从未在任何库上执行过** | 空库启动 → `Successfully applied 56 migrations ... now at version v74`；`SqlStructureSelfCheck` 13 张表列名一致 |
+| **USED R1 业务切片（2026-11-23 12:20 落地）** | 车商资质准入打通到端：`DealerAdmissionPolicy`（D03 §2.1 五规则按序判定，无白名单入参）＋ `DealerQualificationRepository`/`UsedConfigRepository` 两套接口与 JDBC 实现 ＋ `DealerQualificationApplicationService`/`DealerRatingApplicationService` ＋ 8 个端点 `/api/dealer-qualifications/**`（路径裁决见控制器类注释：`/api/dealers/**` 已被网关让给 credit-service，故另起前缀由 core 兜底）＋ V75–V77 三版迁移。二人红线（合规签认、双维评分）同时落在服务判定与库内 CHECK 两处 | `mvn -B package` 全绿；**经网关** `SMOKE_BASE=http://127.0.0.1:18080 python smoke_used.py` → 43 条 `[PASS]` / 0 FAIL / EXIT 0（含 401/403 分档、四类合规 UNKNOWN 不折叠、同人自证 403、换发降级、配置窗口改值即变、直写库被 CHECK 拒） |
+| 自检口径修正 | `SqlStructureSelfCheck` 原来只查 INSERT 列、且不带 schema 过滤。R1 首跑时 `UPDATE dealers ... SET updated_by=?` 撞 500（该表从 V1 起就没这列）暴露两个洞：① UPDATE 引用的列不在任何 INSERT 清单里 ⟹ 查不到；② 同库有 `floorplan_legacy_20261123` 同名表，只按 `table_name` 过滤会把两套列并起来 ⟹ 假通过 | 已加 `table_schema = current_schema()` 与 `dealers` 条目；18 张表启动期一致 |
 
 **架构裁决（本轮定，写进代码注释）**：不逐字搬任一并行分支的业务层，结构取 serial 版、
 application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路都没按 D07 契约写完且 master 上
@@ -143,7 +146,7 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 | R8 | 拍卖落札接入与结算分摊 | 表已落（V60–V63），**业务层待写** |
 | R6 | WMS 在库快照与账实比对 | 表已落（V65/V66），**业务层待写** |
 | R7 | 放车放证闭环（指令/下发/回执/结清/额度回补）| 表已落（V67/V68），**业务层待写**；红线 1/2 的落点 |
-| R9–R10 | 违约处置变现、报表 | 号段 V75–V79 预留，**本次不做**（P0 主链外）|
+| R9–R10 | 违约处置变现、报表 | 号段 V78–V79 预留（V75–V77 已被 R1 占用），**本次不做**（P0 主链外）|
 | R11 | 外部合作方接入与集成层（五件套）| 表已落（V70–V74），`external-api` **只有骨架** |
 | R12–R14 | 留痕审计、告警工单、灰度上线 | 部分表在 V74；**本次不做工单/灰度** |
 

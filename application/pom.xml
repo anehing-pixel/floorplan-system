@@ -27,6 +27,12 @@
       <groupId>org.springframework</groupId>
       <artifactId>spring-tx</artifactId>
     </dependency>
+    <!-- 结构化日志：USED 波次要求关键状态迁移打业务主键（AGENTS §10），本模块此前零日志。
+         版本由 spring-boot-dependencies 管理，不写死。 -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
     <!-- 登录认证：JWT 签发/验签（api 编译期可见，impl/jackson 仅运行期加载） -->
     <dependency>
       <groupId>io.jsonwebtoken</groupId>
