@@ -1,7 +1,7 @@
 # 接口契约：事件与 Feign（wave0b-baseline 冻结）
 
 > **这份文档是 W1/W2 全部 agent 的编码依据。** W0 已把它描述的实现落地并冒烟验证：
-> 33 条断言全绿（`scripts/smoke_w0.py`，2026-11-22 实测）。
+> 33 条断言全绿（2026-11-22 实测）（`scripts/smoke_w0.py` 已随多 agent 套件删除，机制断言待并入 `smoke-test.py`，见 `PROGRESS.md §5.4`）。
 >
 > **变更规矩**：本文任何字段/键名/状态语义的改动，都要 (1) 改 `common` 里的契约代码；
 > (2) 同步更新本文；(3) 通知全部并行 agent 并在 commit 里写明。
@@ -299,7 +299,7 @@ HTTP 状态码 **404**（不是 200 + `data=null`）。字段两条实测确认�
 `LoanSnapshotDto` 只声明 7 个字段：`id, vin, advanceId, dealerId, status, principal, dueDate`。
 **这是投影，不是全量**：`currentDpd`、`principalOutstanding` 等响应里有但 DTO 里没有，
 调用方**不要依赖未声明字段**（实现方哪天裁掉不会通知你）。需要更多字段 → 改 DTO + 本文 + 通知全体。
-`smoke_w0.py` 第 5 步会用真实响应逐字段校验这 7 个字段的存在与取值，改一边忘另一边会红。
+W0 机制冒烟第 5 步曾用真实响应逐字段校验这 7 个字段的存在与取值，改一边忘另一边会红。（脚本已删，本次改造需在 USED 冒烟里重建这条逐字段断言）
 
 **调用方语义约定**（W1-BANK 已按此写单测）：
 - 404 → `Optional.empty()`（"这个 VIN 没有未结清借据"是合法业务事实）；
@@ -318,7 +318,7 @@ HTTP 状态码 **404**（不是 200 + `data=null`）。字段两条实测确认�
   `{"code":"SYS_001","message":"系统内部错误：No static resource api/credit-lines/34/available."}`
   —— 该路径在 credit-service 上没有控制器，落到了静态资源兜底。
   所以 W1-CREDIT 必须实现它（并加 `@RequirePermission` 读权限），或删除这条契约。
-  `smoke_w0.py` 对此**只打印不断言**（断言"现在必须是 500"会在 W1 实现后反过来变红，两种都是假信号）。
+  W0 机制冒烟对此**只打印不断言**（断言"现在必须是 500"会在 W1 实现后反过来变红，两种都是假信号）。
 
 ---
 
