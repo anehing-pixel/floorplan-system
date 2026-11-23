@@ -49,7 +49,19 @@ public class SqlStructureSelfCheck implements ApplicationRunner {
                 "settle_due_date", "settled_at", "aging_days", "turnover_days", "status",
                 "security_type", "security_status", "overdue_days", "risk_level",
                 "oot_suspected", "last_audit_date", "audit_mismatch_count", "version",
-                "purchase_order_id"));
+                "purchase_order_id",
+                // USED R2 在 UPDATE 里用到的 V50 列。为什么要并进这条而不是单开一张「vehicle_units_used」：
+                // 自检是拿本清单和 information_schema 比，同一张表开两条会互相看不见缺失。
+                // 时间戳按本仓既有做法显式写：vehicle_units / dealers 都有 created_at/updated_at
+                // （NOT NULL DEFAULT now()，实查 2026-11-23）但**没有触发器**维护 updated_at，
+                // 不写就会留下「改过数据、时间戳还是建账那一刻」。
+                // R1 撞过的 500 是另一件事：dealers **没有 updated_by**（V1 起就没这列），
+                // 别把它记成「没有更新时间戳」——那会把人引向不敢写 updated_at 的反方向。
+                "registration_plate", "first_registered_on", "inspection_expiry_date",
+                "inspection_remaining_months", "mileage_source", "mileage_unit", "mileage_captured_on",
+                "repair_history", "repair_history_desc", "accident_history_flag", "auction_grade",
+                "auction_lot_id", "inspection_certificate_id", "warehouse_custodian_code",
+                "bin_location", "sale_channel", "updated_at"));
         CHECKED.put("collateral_ledger", Arrays.asList(
                 "vin", "dealer_id", "financed", "financed_at", "advance_no", "sold", "sold_at",
                 "sold_flagged_by", "repaid", "repaid_at", "repaid_amount", "released", "released_at",
@@ -127,6 +139,25 @@ public class SqlStructureSelfCheck implements ApplicationRunner {
                 "id", "admission_state", "operating_score", "stock_quality_score",
                 "score_set_by", "score_co_signed_by", "scores_confirmed_at", "scores_run_key",
                 "updated_at"));
+        // ---- USED R2 车辆主数据 / 車検証 / 车况票 / 账实差异 ----
+        CHECKED.put("inspection_certificates", Arrays.asList(
+                "cert_key", "certificate_no", "vin", "registration_plate", "owner_name", "owner_address",
+                "user_name", "user_address", "first_registered_on", "inspection_expiry_date", "issue_date",
+                "security_type", "mortgage_flag", "encumbrance_status", "holder_custodian_code", "holder_type",
+                "custody_location", "status", "predecessor_id", "pledged_at", "released_at", "lost_at",
+                "release_order_no", "evidence_path", "evidence_digest", "updated_at", "version"));
+        CHECKED.put("certificate_custody_events", Arrays.asList(
+                "certificate_id", "event_type", "from_status", "to_status", "encumbrance_type", "check_source",
+                "actor_type", "actor", "occurred_at", "evidence_path", "reason", "trace_id"));
+        CHECKED.put("vehicle_condition_reports", Arrays.asList(
+                "vin", "report_no", "report_type", "inspected_on", "inspector", "structure_condition",
+                "repair_history", "accident_history", "modification_flag", "interior_condition",
+                "exterior_condition", "odometer_km", "inspection_expiry_date", "recycle_ticket_flag",
+                "compulsory_insurance_expiry", "automobile_tax_status", "photo_paths", "attachment_path",
+                "attachment_digest", "created_by"));
+        CHECKED.put("wms_reconcile_diffs", Arrays.asList(
+                "biz_date", "warehouse_custodian_code", "vin", "diff_type", "severity", "our_snapshot",
+                "wms_snapshot", "status", "actor"));
     }
 
     public SqlStructureSelfCheck(JdbcTemplate jdbc) {

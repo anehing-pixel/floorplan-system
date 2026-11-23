@@ -32,11 +32,26 @@ public final class UsedConfigKeys {
     public static final String DEALER_RATING_TWO_PERSON_REQUIRED =
             "floorplan.used.reporting.dealer-rating-two-person-required";
 
+    /**
+     * R2.3 里程勾稽阈值（公里）：观测值与主数据之差超过它就开一条 {@code ODOMETER_DIFF} 差异。
+     *
+     * <p>值来自 D06 §2.5「配置」行原文（{@code mileage-diff-threshold-km=1000}），<b>没有待定源标记</b>，
+     * 所以这条不是「等业务签字的默认值」，而是设计已给的定值；采纳 1000 km 的理由是日本二手车市场
+     * 把 1,000 km 以内当作「运输/整备里程」的常规容差，超过它才可能是回表。
+     * 外置成配置键仍然必要：收紧口径不该发版，而且键留在库里冒烟才能证伪「这个数来自代码」。</p>
+     *
+     * <p>⚠️ V78 的 {@code source_ref} 里写着 {@code [待定源 D-10]} 是误标（D01 §5 到 D-09 为止，
+     * D-10 在 D10 §5 是「计算书编制↔签认」那对 SOD）。迁移已落库不可改（checksum），
+     * 回正语句挂在下一次 USED 迁移里，登记见 {@code PROGRESS.md §4.1}。</p>
+     */
+    public static final String MILEAGE_DIFF_THRESHOLD_KM = "floorplan.used.mileage-diff-threshold-km";
+
     private UsedConfigKeys() {
     }
 
     /** 当前已接线的键清单（冒烟与自检用：种了没人读 / 读了没种，都能从这里对出来）。 */
     public static List<String> wired() {
-        return List.of(COMPLIANCE_VALID_DAYS, LICENSE_EXPIRY_ALERT_DAYS, DEALER_RATING_TWO_PERSON_REQUIRED);
+        return List.of(COMPLIANCE_VALID_DAYS, LICENSE_EXPIRY_ALERT_DAYS,
+                DEALER_RATING_TWO_PERSON_REQUIRED, MILEAGE_DIFF_THRESHOLD_KM);
     }
 }

@@ -9,7 +9,8 @@
 > 那段过程记录要查就查 git 历史（`git log --oneline -- PROGRESS.md docs/`，删除前的最后一份是 `d3ec429`）。
 > 本文件只保留仍然成立的事实与待办。
 
-最后更新：2026-11-23 12:25（GMT+8） · **USED R1 车商资质切片贯通（见 §2）**；此前的domain 三件套里提交进仓库的 stash 冲突标记已解，
+最后更新：2026-11-23 13:25（GMT+8） · **USED R2 车辆主数据／車検証切片贯通（见 §2），R1 之后第二个贯通的业务切片**；
+此前提交进仓库的 domain 三件套里那份 stash 冲突标记已解，
 迁移集补齐到 V1–V74，`floorplan` 库改成从迁移链干净重建（56 版、现位于 v74），
 旧库保留为 `floorplan_legacy_20261123` + 整库备份。开发分支 `used-floorplan-dev`。
 
@@ -24,10 +25,11 @@
 2. **事件链路只通了一根线**：`LOAN_CREATED`（放款确认 → 建借据）端到端已通，
    `PAYMENT_MATCHED` / `COLLATERAL_CHANGED` 两个生产者**仍零调用方** ⟹ 「回款解押」「权属变更」靠人工搬数据。
    见 §3 的开放项，别把冒烟的绿色数字读成闭环。
-3. **USED（二手车库存垫资）已从「只有库结构与字典层」推进到「R1 贯通」**：V40–V74 已落库（资质/车辆/車検証/担保多源/估值/LTV/
+3. **USED（二手车库存垫资）已从「只有库结构与字典层」推进到「R1 + R2 贯通」**：V40–V74 已落库（资质/车辆/車検証/担保多源/估值/LTV/
    拍卖/库龄/监管仓/放车放证/登记委托/集成五段）、`Permission` 69 点与 `UserRole` 14 岗已含 USED 权限点、
    错误码段（QUAL_/CERT_/VALU_/LTV_/AUC_/REGI_/WMS_/RELS_/PTNR_）已定源。
-   **R1 车商资质（准入闸门 G-A1〜G-A4）已有业务层与端点并过网关冒烟**；R2 起的车辆/車検証、估值分档、落札、
+   **R1 车商资质（准入闸门 G-A1〜G-A4）与 R2 车辆主数据／车况票／里程／車検証收证换发**均已有业务层与端点并过网关冒烟；
+   余下估值分档、落札、
    放款闸门、WMS 账实、放车放证、回款回补与外部接入层仍在重写中，规格源 = `docs/二手车库存垫资改造-06/-07/-08/-09`。
 
 ---
@@ -39,14 +41,14 @@
 | 仓库根 | `C:/Users/Administrator/Documents/GitHub/floorplan-system` |
 | 分支 | `master`（主干）· `used-floorplan-dev`（USED 改造，2026-11-23 从 `d3ec429` 切出） |
 | 数据库 | Docker 容器 `floorplan-db2`，端口 **5434**（5432 被占用），库/用户/密码均 `floorplan`；宿主无 `psql`，用 `docker exec floorplan-db2 psql -h 127.0.0.1 -p 5434 -U floorplan -d floorplan` |
-| 库的来源 | **2026-11-23 从仓库迁移链干净重建**：`public` = 56 版 Flyway，`now at version v74`，90 张表。重建前的库改名 `floorplan_legacy_20261123`（内含并行期 agent 直打 public 留下的漂移：history 记到 V27 而 `V27__release_payment_ref.sql` 只存在于未合并的 `agent/w1-release`；另有六个 agent 隔离 schema）。整库备份 `backups/pre-used-rebuild-20261123-102807.sql.gz` |
-| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`：**V75–V77 已被 R1 资质切片占用**（V75 种 3 个配置键、V76 合规二人签认列+CHECK、V77 dealers 双维评分四列+CHECK），**V78–V79 留给处置与报表**。⚠️ 号段只能往 head 之上取：库里 head=V74 且 Flyway 未开 `out-of-order`，低号（含 D04 §2 预留的 V42–V44）会让启动校验抛 `Detected resolved migration not applied to database` 整栈起不来，那几个号从此是永久空号。核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
+| 库的来源 | **2026-11-23 从仓库迁移链干净重建**：`public` 重建那一刻 = 56 版 Flyway、位于 v74，90 张表（此后 R1/R2 又落了 V75–V78，现位于 v78，见下一行）。重建前的库改名 `floorplan_legacy_20261123`（内含并行期 agent 直打 public 留下的漂移：history 记到 V27 而 `V27__release_payment_ref.sql` 只存在于未合并的 `agent/w1-release`；另有六个 agent 隔离 schema）。整库备份 `backups/pre-used-rebuild-20261123-102807.sql.gz` |
+| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`：**V75–V77 已被 R1 资质切片占用**（V75 种 3 个配置键、V76 合规二人签认列+CHECK、V77 dealers 双维评分四列+CHECK），**V78 已被 R2 占用**（种里程差异阈值 `floorplan.used.mileage-diff-threshold-km`），**V79 留给处置与报表**。库里现位于 **v78 / 60 版**（下一可用号 V79，取号前先 `select max(version) …` 复核，别信本文摘要）。⚠️ 号段只能往 head 之上取：库里 head=V74 且 Flyway 未开 `out-of-order`，低号（含 D04 §2 预留的 V42–V44）会让启动校验抛 `Detected resolved migration not applied to database` 整栈起不来，那几个号从此是永久空号。核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
 | 编译 | Windows JDK 17 + Maven 3.9.16 |
 | 启动坑 | 启动一律 `env -u SERVER__PORT`（否则覆盖各服务端口）；`run-microservices.sh` 已处理 |
 | 进程坑 | 后台 JVM 随 shell 回收 → 启动 + 测试 + 清理必须在**同一条命令**内 |
 | 注册中心 | 本地不启 Nacos，`fail-fast=false`，注册失败仅告警 |
 | 验证金标准 | `PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke` → EXIT 0 且 FAIL=0（断言数随开发增长，**不写死数字**）。两条实测陷阱：① 本机 Git Bash 没有 `python3`，不带 `PYTHON=python` 会 EXIT 127、服务起了但冒烟一行没跑；② stdout 一重定向/接管道，Windows 上 python 回落 cp936，`smoke-test.py` 里 53 行含 GBK 编不出的带圈数字 ⟹ 只打 51 条 PASS、后 160 条没跑、EXIT 1 而屏幕半屏绿。`run-microservices.sh:40/:50` 已注入两个默认值兜底，**不经本脚本直接跑 `python smoke-test.py > x.txt` 仍要自己带 `PYTHONIOENCODING`** |
-| 取证陷阱 | 不要把 mvn 输出接管道给 `tail`：管道退出码是 `tail` 的，实测 BUILD FAILURE 而 `$?` = 0。要么 `> file 2>&1` 后 `grep -E "BUILD|ERROR" file`，要么自己 `$?` |
+| 取证陷阱 | 不要把 mvn 输出接管道给 `tail`：管道退出码是 `tail` 的，实测 BUILD FAILURE 而 `$?` = 0。要么 `> file 2>&1` 后 `grep -E "BUILD\|ERROR" file`，要么自己 `$?` |
 
 ---
 
@@ -60,11 +62,34 @@
 | 错误码并集 | 补入 `REGI_001/002`、`WMS_001/002/003`、`RELS_001/002/003/004/006` | `ErrorCode.java` |
 | 迁移集 | V40–V64 + V70–V74 从 `used/serial-20261123` 取入，与 master 原有 V65–V69 合成 USED 全量结构。**V65–V69 此前从未在任何库上执行过** | 空库启动 → `Successfully applied 56 migrations ... now at version v74`；`SqlStructureSelfCheck` 13 张表列名一致 |
 | **USED R1 业务切片（2026-11-23 12:20 落地）** | 车商资质准入打通到端：`DealerAdmissionPolicy`（D03 §2.1 五规则按序判定，无白名单入参）＋ `DealerQualificationRepository`/`UsedConfigRepository` 两套接口与 JDBC 实现 ＋ `DealerQualificationApplicationService`/`DealerRatingApplicationService` ＋ 8 个端点 `/api/dealer-qualifications/**`（路径裁决见控制器类注释：`/api/dealers/**` 已被网关让给 credit-service，故另起前缀由 core 兜底）＋ V75–V77 三版迁移。二人红线（合规签认、双维评分）同时落在服务判定与库内 CHECK 两处 | `mvn -B package` 全绿；**经网关** `SMOKE_BASE=http://127.0.0.1:18080 python smoke_used.py` → 43 条 `[PASS]` / 0 FAIL / EXIT 0（含 401/403 分档、四类合规 UNKNOWN 不折叠、同人自证 403、换发降级、配置窗口改值即变、直写库被 CHECK 拒） |
-| 自检口径修正 | `SqlStructureSelfCheck` 原来只查 INSERT 列、且不带 schema 过滤。R1 首跑时 `UPDATE dealers ... SET updated_by=?` 撞 500（该表从 V1 起就没这列）暴露两个洞：① UPDATE 引用的列不在任何 INSERT 清单里 ⟹ 查不到；② 同库有 `floorplan_legacy_20261123` 同名表，只按 `table_name` 过滤会把两套列并起来 ⟹ 假通过 | 已加 `table_schema = current_schema()` 与 `dealers` 条目；18 张表启动期一致 |
+| **USED R2 业务切片（2026-11-23 13:20 落地）** | 车辆主数据／車検証打通到端：`MileageSource`/`RepairHistory`/`EncumbranceType`/`CertificateStatus` 等 13 个 domain 模型＋`MileageResolutionPolicy`（来源可信序＋采集时点＋取严，纯函数）＋`CertificateStateMachine`＋`EncumbrancePolicy`＋`UsedVehicleMasterRepository`/`JdbcUsedVehicleMasterRepository`（V50/V51/V52/V53/V66 五张表，只写 USED 列，不动 LEGACY 业务列）＋`UsedVehicleMasterApplicationService` 6 个用例＋`/api/used-vehicles/**` 6 个端点＋V78 阈值种子。四个坑本轮各自修掉：① 非法枚举词由用例翻成 400（原先 IllegalArgumentException 冒成 500 SYS_001）；② 收证先判「同証書番号」再判「在场证」，顺序反了幂等重放永远回 409；③ 换发必须先让旧证 `REISSUED` 再插新证，否则撞 `uk_cert_active_vin`；④ 控制器 `toDraft` 必须传**报文** vin，传路径 vin 等于把 G-D1 那条不一致校验永久短路 | `mvn -B package` 全绿、`mvn -B -pl domain,application -am test` 49/49；**经网关** `SMOKE_BASE=http://127.0.0.1:18080 python smoke_used.py` → 101 条 `[PASS]` / 0 FAIL / EXIT 0（含 UNKNOWN 里程「建账放行、放款阻断」、阈值从库里现读（改成 0 立刻开单）、票先于建账入账、二人换发留下 AMENDED/REISSUED/RECEIVED 流水、ADMIN 无换发审批位） |
+| 自检口径修正 | `SqlStructureSelfCheck` 原来只查 INSERT 列、且不带 schema 过滤。R1 首跑时 `UPDATE dealers ... SET updated_by=?` 撞 500（该表从 V1 起就没这列）暴露两个洞：① UPDATE 引用的列不在任何 INSERT 清单里 ⟹ 查不到；② 同库有 `floorplan_legacy_20261123` 同名表，只按 `table_name` 过滤会把两套列并起来 ⟹ 假通过 | 已加 `table_schema = current_schema()` 与 `dealers` 条目；启动期 **22 张表**列名一致（R2 再补 4 张 USED 表条目，并把 `vehicle_units` 清单加进 `updated_at`） |
 
 **架构裁决（本轮定，写进代码注释）**：不逐字搬任一并行分支的业务层，结构取 serial 版、
 application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路都没按 D07 契约写完且 master 上
 混着半截；serial 分支虽绿但本身是各分支的拼装，未经验证。
+
+**实现与设计稿的偏差登记（R2 轮，逐条都是实查后的事实，不是「以后再补」的托词）**：
+
+- 里程来源字典按**库内 CHECK** 落，不照抄 D06 §2.4 的名字：D06 那份清单里的 `REGISTRY`（陸運局滞后登记）
+  在 V50 取值域里没有对应值，实现归入 `DEALER_DECLARED`；`WMS_SNAPSHOT` 与 `MANUAL` 同为「自己数出来的」，
+  归入 `OWN_AUDIT`。对应关系写在 `MileageSource` 类注释里，优先级序（实物 &gt; 自盘 &gt; 票面 &gt; 申报 &gt; 未知）
+  与 §2.4 一致。
+- **修復歴取严不建差异行**：`wms_reconcile_diffs.diff_type` 的 CHECK 里没有 `MASTER_DATA_DIFF` /
+  `REPAIR_HISTORY_DIFF` 槽位（V66 只给了 `ODOMETER_DIFF` 等实物差异），所以票面取严的结果只进 `audit_events`。
+  要开单就得新增一版放宽 CHECK——不在 P0 主链，登记为缺口而不是偷偷写进别的 diff_type。
+- `vehicle_units` 没有 `idempotency_key` 列 ⟹ 重复建账不做「静默返回既有行」，回 409 `VEHICLE_003`
+  并在 `details` 里带 D06 §2.5 那个键名 `VEH:{vin}`。补列的必要性（第二次请求是不是同一份数据无法判断）
+  属待裁决项，随 R4 一起提。
+- `AUC_006`（VIN 不在落札集，D06 §2.5 点名）在 `ErrorCode` 里**还不存在**，随 R4 落札切片补，
+  本轮不预先造一个没有抛点的错误码。
+- UC-R2-4 导入模板（`IMP:{batch_id}:{row_no}`）与 `syncFromAuctionLot` / `syncFromWmsInbound` 未实现，归 R4/R6。
+  因此 R2 现在的观测入口只有两条：HTTP 推票与手动重算——**别把「策略支持五源」读成「五源都会来」**。
+- `floorplan.used.enabled`（D00 P-3 的配置闸门）全仓零引用，USED 端点当前无条件可达；
+  实际生效的只有 `vehicle_type='USED'` 那道数据闸门。灰度回退属 R14，本次范围外（§5.3 那行口径已按实修正）。
+- `floorplan.used.master-data-diff-alert-enabled`（D06 §2.5 第二项）**没种**：代码里没有读方
+  （主数据差异告警未接线），按 `UsedConfigKeys` 自己的原则「只登记真的有读方的键」留空，
+  接上告警那条线时再随迁移种值。
 
 ---
 
@@ -110,6 +135,25 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 清单在实现过程中逐条登记（每项：编号 / 主题 / 采纳值 / 配置键 / 落点 / 影响面），
 完成 P0 主链后在本节汇总，作为交付物之一。
 
+| 编号 | 主题 | 采纳值 | 配置键（种在哪一版） | 代码落点 | 签字后要改什么 |
+|---|---|---|---|---|---|
+| D-02 | 反社／合规结论有效期 | 180 天 | `floorplan.used.compliance-valid-days`（V75） | `DealerAdmissionPolicy` 规则 3 | 只改 `used_config_params.param_value`，代码不动 |
+| — | 許可／会員到期预警窗口 | 30 天（D06 §16 已定值，不属待签字） | `floorplan.used.license-expiry-alert-days`（V75） | `DealerAdmissionPolicy` 规则 4 | 同上；列在这里是为了和「种了没人读」的键区分开 |
+| 红线 | 双维评分二人签认 | `true`，且读到 `false` 仍按 `true` 执行并打 ERROR | `floorplan.used.reporting.dealer-rating-two-person-required`（V75） | `DealerRatingApplicationService` | **不改**：这条登记是为了「有人试图关闭红线」在库里留下可读痕迹，不是提供关闭能力 |
+| 无编号（D06 §2.5 直接给值，未标待定源） | 里程勾稽阈值 | 1000 km（日本二手车市把 1,000 km 以内当作「运输／整备里程」的常规容差） | `floorplan.used.mileage-diff-threshold-km`（V78） | `MileageResolutionPolicy` ＋ `UsedVehicleMasterApplicationService.applyMileage` | 改值只改「超没超阈值 ⟹ 开不开 `ODOMETER_DIFF`」，不改采信哪个来源；冒烟已实测改成 0 立刻开单，证明这个数运行时从库里读 |
+| D-11 | 里程差异是否阻断放款 | 只在「无任何可用观测」（`UNDETERMINED`）时阻断；超阈值只开差异、不阻断 | 无键（属策略，不属参数） | `MileageResolutionPolicy.Decision.blocksAdvance` | 若签字要求「超阈值也压放款」，改 `Decision` 的判定而不是加开关 |
+
+> 只登记**代码里真的有读方**的键（`UsedConfigKeys.wired()` 与这张表逐条对得上）。
+> D06 §16 全表 28 个键里其余的（估值容差、LTV 档位、账龄阶梯…）随 R3 起的各自切片进这张表，
+> 现在写成常量只会让人以为那些口径已经落地。
+>
+> **两处编号要更正，别照着抄**：① 上一行 D-11 不是 D01 §5 清单里的编号（那份到 D-09 为止，
+> 且 D10 §5 已把「D-10」用作「计算书编制↔签认」那对 SOD），这里只是本地占位，签字时按实际编号走；
+> ② 里程阈值那行 V78 的 `source_ref` 里写着 `[待定源 D-10]`，是本轮采纳默认值时误加的标号——
+> D06 §2.5 给的是定值、没标待定源。**已落库的迁移不可改**（checksum），
+> 这条文案留到下一次 USED 迁移里一句 `UPDATE used_config_params SET source_ref=… WHERE param_key='floorplan.used.mileage-diff-threshold-km'` 回正。
+> 代码侧（`UsedConfigKeys` / `MileageResolutionPolicy`）的注释本轮已同步改成「D06 §2.5 定值」。
+
 ---
 
 ## 5. 未开发需求全量清单（2026-11-22 全仓实查，USED 部分 2026-11-23 补）
@@ -139,14 +183,14 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 
 | 编号 | 需求（D06 的 R 系列） | 当前实查状态 |
 |---|---|---|
-| R1 | 车商资质／許可／反社核查／双维评分／准入闸门 | 表已落（V45/V46/V47），**业务层待写** |
-| R2 | USED 车辆主数据 + 车况票 + 里程观测 | 表已落（V50/V51），**业务层待写** |
+| R1 | 车商资质／許可／反社核查／双维评分／准入闸门 | **已贯通**（V75–V77 + 8 端点 + `DealerAdmissionPolicy`，网关冒烟覆盖） |
+| R2 | USED 车辆主数据 + 车况票 + 里程观测 | **已贯通**（2026-11-23 13:20：`UsedVehicleMasterApplicationService` 6 用例 + `/api/used-vehicles/**` 6 端点 + V78 阈值种子 + 里程取严策略；車検証收证/换发链在本切片） |
 | R5 | 車検証与担保多源投影、设质/交还/灭失/补发、登记委托 | 表已落（V52/V53/V54/V69），枚举与状态机部分存在，**业务层待写** |
 | R3/R4 | 多源审慎估值 + LTV 分档定价 | 表已落（V55–V59），**业务层待写** |
 | R8 | 拍卖落札接入与结算分摊 | 表已落（V60–V63），**业务层待写** |
 | R6 | WMS 在库快照与账实比对 | 表已落（V65/V66），**业务层待写** |
 | R7 | 放车放证闭环（指令/下发/回执/结清/额度回补）| 表已落（V67/V68），**业务层待写**；红线 1/2 的落点 |
-| R9–R10 | 违约处置变现、报表 | 号段 V78–V79 预留（V75–V77 已被 R1 占用），**本次不做**（P0 主链外）|
+| R9–R10 | 违约处置变现、报表 | 号段 **V79** 预留（V75–V77 已被 R1 占用、V78 已被 R2 阈值种子占用），**本次不做**（P0 主链外）|
 | R11 | 外部合作方接入与集成层（五件套）| 表已落（V70–V74），`external-api` **只有骨架** |
 | R12–R14 | 留痕审计、告警工单、灰度上线 | 部分表在 V74；**本次不做工单/灰度** |
 
@@ -157,7 +201,7 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 | `floorplan.core.guarantee-gate.enabled` | `AdvanceApplicationService` `@Value(...:false)` | `enforceGuaranteeGate` 直接 return，连权属服务都不查；**Q27 判定路径改造未完全落地，开启即全量拒付，不擅自打开** |
 | `floorplan.credit.strict-sod` | `CreditApplicationService` `:false` | 单人自动审批入口放行、不校验复核人≠发起人。**生产必须 true** |
 | `floorplan.collateral.authoritative-source.enabled` | `DefaultAuthoritativeSourceStrategy` `:false` | 三源对账诊断返回 skipped；不影响门禁（门禁直读 V10）|
-| `floorplan.used.enabled` | USED 总开关 | 关 = 不启用 USED 域任何新链路（P-3 灰度要求）|
+| `floorplan.used.enabled` | USED 总开关（D00 P-3）| **不是「默认关闭」而是根本没接线**：全仓 Java 零引用，USED 端点无条件可达。灰度回退属 R14，本次范围外；口径见 §2 偏差登记 |
 | `floorplan.bank-fetch.source` / `lock.provider` / `s3.bucket` | `web/application.yml` | demo 流水源 / 内存锁 / 空桶名 → 走本地实现。**文件存储按用户要求继续用本地**，不引入 S3/MinIO |
 
 ### 5.4 已实现但零/低端到端覆盖
