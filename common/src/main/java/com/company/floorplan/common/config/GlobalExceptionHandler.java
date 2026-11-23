@@ -8,8 +8,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * 全局异常处理（精简版，全服务共用）：业务异常映射错误码，未知异常归 SYS_001。
@@ -50,6 +53,24 @@ public class GlobalExceptionHandler {
         ApiResponse<Void> body = ApiResponse.fail(
                 ErrorCode.VALID_001.getCode(), ex.getMessage(), traceId, null);
         return ResponseEntity.status(HttpStatus.valueOf(ErrorCode.VALID_001.getHttpStatus())).body(body);
+    }
+
+    /**
+     * Spring MVC 入参绑定异常（缺必填参数、类型不匹配、请求体不可解析）：客户端传参错误，
+     * 归 400 VALID_001，不落到 {@code handleUnknown} 误报成 500 SYS_001。
+     */
+    @ExceptionHandler({MissingServletRequestParameterException.class,
+            MethodArgumentTypeMismatchException.class,
+            HttpMessageNotReadableException.class})
+    public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex, HttpServletRequest request) {
+        String traceId = String.valueOf(request.getAttribute("traceId"));
+        if ("null".equals(traceId)) {
+            traceId = java.util.UUID.randomUUID().toString();
+        }
+        log.warn("请求参数错误 traceId={} msg={}", traceId, ex.getMessage());
+        ApiResponse<Void> body = ApiResponse.fail(
+                ErrorCode.VALID_001.getCode(), "请求参数错误：" + ex.getMessage(), traceId, null);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     @ExceptionHandler(Exception.class)

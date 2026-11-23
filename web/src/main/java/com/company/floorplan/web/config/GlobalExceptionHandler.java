@@ -8,8 +8,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /** 全局异常处理：领域/业务异常映射为错误码，未知异常归为 SYS_001。 */
@@ -50,6 +53,22 @@ public class GlobalExceptionHandler {
         ApiResponse<Void> body = ApiResponse.fail(
                 ErrorCode.NOT_FOUND_001.getCode(), "资源不存在", traceIdOf(request), null);
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    /**
+     * Spring MVC 入参绑定异常（缺必填查询参数、参数类型不匹配、请求体不可解析）：
+     * 属于客户端传错参数，归 400 VALID_001，不落到 {@code handleUnknown} 误报成 500 SYS_001。
+     * 例：{@code GET /api/vehicles} 未带必填的 {@code dealerId}。
+     */
+    @ExceptionHandler({MissingServletRequestParameterException.class,
+            MethodArgumentTypeMismatchException.class,
+            HttpMessageNotReadableException.class})
+    public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex, HttpServletRequest request) {
+        String traceId = traceIdOf(request);
+        log.warn("请求参数错误 traceId={} msg={}", traceId, ex.getMessage());
+        ApiResponse<Void> body = ApiResponse.fail(
+                ErrorCode.VALID_001.getCode(), "请求参数错误：" + ex.getMessage(), traceId, null);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     @ExceptionHandler(Exception.class)

@@ -10,6 +10,9 @@ target/
 __pycache__/
 *.pyc
 
+# 浏览器端到端测试截图/报告（browser-test.py 的运行产物）
+browser-test-results/
+
 # IDE
 .idea/
 *.iml
