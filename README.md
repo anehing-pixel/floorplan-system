@@ -3,7 +3,7 @@
 一个**可直接启动并跑通业务闭环**的 Java 实现，对应《库存融资核心系统-项目设计文档.md》的结构设计。
 定位：**金融公司内部系统 · 新车渠道 · B2B 循环授信**，Rails → Java 等价重写的技术骨架。
 
-现已是 **DDD 四层 + Spring Cloud 微服务**架构：网关统一入口，核心账务留在单体守住事务红线，外围按限界上下文拆成独立服务，走网关的冒烟测试**全绿（当前 200+ 项断言）**。
+现已是 **DDD 四层 + Spring Cloud 微服务**架构：网关统一入口，核心账务留在单体守住事务红线，外围按限界上下文拆成独立服务，走网关的冒烟测试**全绿**（断言数随开发增长，以 `run-microservices.sh smoke` 的 FAIL=0 为准；另有 USED、浏览器、Redis 锁三套专项冒烟）。
 
 > 🤖 **在本仓库写代码前先读 [`AGENTS.md`](AGENTS.md)**：环境坑、构建与验收判据、迁移号段、
 > 共享文件禁区、已裁决的业务口径红线、反模式清单都在里面。
@@ -15,7 +15,7 @@
 
 ## 1. 架构：DDD 四层 + Spring Cloud 微服务
 
-### 1.1 模块结构（Maven 多模块，共 14 个）
+### 1.1 模块结构（Maven 多模块，共 15 个，+ 父 POM = 16 个构建单元）
 
 ```
 floorplan-system/
@@ -35,8 +35,9 @@ floorplan-system/
 └── recon-service/    对账服务 :8088 —— 银企对拍与差异
 ```
 
-> ⚠️ 后四个服务（loan / collateral-reg / release / recon）在 Wave 0 建了模块与启动类，
-> 能力迁移尚未完成，当前业务仍主要走 `web`。详见 `PROGRESS.md §8`。
+> ⚠️ `loan` / `collateral-reg` / `release` / `recon` 均已有独立端点与冒烟断言，但能力迁移尚未全部完成：
+> 账本写入仍主要走 `web`，`release-service` 的回款事件消费未接，`external-api` 仍是零 Controller 骨架。
+> 详见 `PROGRESS.md §8` 与《生产级差距清单》。
 
 依赖方向：`web(各服务 controller) → application → domain ← infrastructure`。
 **`domain` 不含任何 Spring 注解**——领域层不被框架污染，这一硬约束在拆分后依然成立。
@@ -66,11 +67,12 @@ public class AuthServiceApplication { ... }
 - 网关（WebFlux）按路径前缀路由，**精确规则在前、兜底 `/api/**` 在后**，首个匹配即命中：
   - `/api/vehicles/*/lien-check` → risk（必须抢在 `/api/vehicles/**` 前）
   - `/api/jobs/bank-fetch` → bank（必须抢在 jobs 其他端点前）
+  - `/api/dealers/*/bank-accounts` → core（必须抢在 `/api/dealers/**` 的 credit 宽路由前）
   - `/api/dealers|credit-lines|rating-configs|annual-reviews/**` → credit
   - `/api/inventory|alerts|disposals|collateral/**` → risk
-  - `/api/auth/**` → auth；其余 `/api/**` → floorplan-core
+  - `/api/payments/**` → bank；`/api/auth/**` → auth；其余 `/api/**` → floorplan-core
 - URI 写成双模 `${ROUTE_AUTH:lb://auth-service}`：生产走 Nacos 服务发现 + 负载均衡；本地无 Nacos 时用 `ROUTE_*=http://127.0.0.1:<port>` 覆盖成直连。
-- JWT 密钥全服务一致（`floorplan.auth.secret`），auth 签发的 token 四个服务都能验。**网关本阶段不验签**，只透传 `X-Request-Id`；鉴权下沉在各服务，服务脱离网关直连也不裸奔（零信任）。
+- JWT 密钥全服务一致（`floorplan.auth.secret`），auth 签发的 token 各服务都能验；`users.token_version` 支持退出登录后旧令牌立即失效。**网关本阶段不验签**，只透传 `X-Request-Id`；鉴权下沉在各服务，服务脱离网关直连也不裸奔（零信任）。
 
 ---
 
@@ -111,28 +113,30 @@ mvn -B -DskipTests clean package
 
 产物：各模块 `target/floorplan-*-1.0.0-SNAPSHOT.jar`。
 
-### 3.3 一键跑通（推荐）：启动 6 个服务 + 走网关冒烟 + 自动清理
+### 3.3 一键跑通（推荐）：启动 10 个进程 + 走网关冒烟 + 自动清理
 
 ```bash
-bash run-microservices.sh smoke
+PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke
 ```
 
-这条命令在一个生命周期内完成：启动 web / auth / bank / credit / risk / gateway 六个服务 → 等待全部就绪 → 让冒烟测试打网关 `18080` → 跑完自动清理所有进程。成功标志：`冒烟退出码: 0`、`全部通过 ✅`。
+这条命令在一个生命周期内完成：启动 web / auth / bank / credit / risk / loan / collateral-reg / release / recon / gateway 十个进程 → 等待全部就绪 → 跑主干冒烟 + 事件链路冒烟，都打网关 `18080` → 跑完自动清理所有进程。成功标志：`冒烟退出码: 0`、`全部通过 ✅`、`FAIL=0`。
 
 单独控制：
 
 ```bash
-bash run-microservices.sh start   # 只启动，保持运行（网关 http://127.0.0.1:18080）
-bash run-microservices.sh stop    # 停止全部服务
+bash run-microservices.sh start        # 只启动，保持运行（网关 http://127.0.0.1:18080）
+bash run-microservices.sh stop         # 停止全部服务
+bash run-microservices.sh redis-smoke  # Redis 分布式锁专项（需 Docker；先 bash run-redis.sh）
 ```
 
 手动走网关跑冒烟（配合 `start` 使用）：
 
 ```bash
-SMOKE_BASE=http://127.0.0.1:18080 python3 smoke-test.py
+SMOKE_BASE=http://127.0.0.1:18080 PYTHONIOENCODING=utf-8 python smoke-test.py
 ```
 
 > `smoke-test.py` 的 `BASE` 默认 `http://localhost:8080`（直连单体），设 `SMOKE_BASE` 可切到网关。
+> 本机 Git Bash 只有 `python`，没有 `python3`；且 stdout 重定向时必须带 `PYTHONIOENCODING=utf-8`，否则含带圈数字的脚本会崩栈。
 
 **单体模式**（不启动微服务，只跑 web）：`bash run-local.sh` 或 `bash run-docker.sh`，冒烟仍打 8080。适合只验证核心账务。
 
@@ -178,13 +182,13 @@ SMOKE_BASE=http://127.0.0.1:18080 python3 smoke-test.py
 
 ## 6. 冒烟测试覆盖
 
-`smoke-test.py` 共 **182 项断言**，按业务域分组：
+`run-microservices.sh smoke` 串起两套冒烟，断言数随开发增长（**不要把数字写死，交付判据是 EXIT 0 且 FAIL=0**）：
 
-1. **七环节闭环**：建账金额 = 发票 × 比例、额度占用/回补、状态流转、担保解除、幂等重放
-2. **流程缺口 P0/P1**（⑧~⑱）：重复融资拦截、库龄递减、厂家回购、部分还款、保险理赔、展期、结清证明、额度年审、结算宽限期/OOT、违约处置闭环、评级动态配置、季度归档
-3. **权限与角色矩阵**（⑲~㉒）：401 认证失败 vs 403 授权失败严格区分、职责分离（申请人≠支付人≠银行）、审计操作人不可伪造、经销商 CRUD 护栏、名下车辆聚合视图、一人多岗权限并集、一车一笔垫款（作废→重申请→赎回→二次融资）
+1. **`smoke-test.py`（主干）**：七环节闭环、流程缺口 P0/P1（⑧~㉑）、权限与角色矩阵、外围服务网关可达性、8 条对拍规则、安全基线（㉖ JWT 撤销 + 权限回查）、经销商银行账户网关路由。
+2. **`smoke_payment_matched.py`（事件链路）**：`LOAN_CREATED` 发布/消费、`PAYMENT_MATCHED` 生产去重、credit 额度回补、core 解押、部分回款不解押、人工绑定、消费游标租约。
+3. **专项套件**：`smoke_used.py`（USED R1–R3）、`browser-test.py`（Playwright 页面路径）、`smoke_redis_lock.py`（`lock.provider=redis` + 并发触发）；分别用 `bash run-microservices.sh redis-smoke` 或对应脚本执行。
 
-走网关执行即验证**跨服务切流 + 统一鉴权 + 真实数据库全链路**。
+走网关执行即验证**跨服务切流 + 统一鉴权 + 真实数据库全链路**；断言写在根目录 `smoke_*.py`，新增能力必须同步补断言并收进统一命令链。
 
 ---
 
@@ -197,8 +201,12 @@ SMOKE_BASE=http://127.0.0.1:18080 python3 smoke-test.py
 3. **批处理已接定时调度**（2026-11-24：Spring `@Scheduled` + `DistributedLock`；默认关闭，
    prod profile 强制启用；见 `docs/作业定时调度与多实例锁.md`）。仍未引入 Quartz 动态 cron。
 4. **本地不启 Nacos**：网关用环境变量把 `lb://` 覆盖成 http 直连；生产起 Nacos 后去掉覆盖即可走服务发现。
-5. **共享单一数据库**：服务已拆但数据未分库，跨服务一致性暂由共享库 + 本地事务保证。
+5. **共享单一数据库**：服务已拆但数据未分库，跨服务一致性暂由共享库 + 本地事务保证；新代码禁止跨域直写。
 6. **计息未处理期间本金变化**：部分还款场景的本金分段计息未展开。
+7. **事件链路只通两条**：`LOAN_CREATED` 与 `PAYMENT_MATCHED` 已端到端；`COLLATERAL_CHANGED` 零生产者，release-service 的指令域消费未接。
+8. **两消费方部分状态**：credit 回补与 core 解押是同一事件的两个独立事务，`LEDGER_GAP` 巡检未实现；「银行匹配 vs 直接还款」尚未共用 `settle_seq`。
+9. **工单与前端**：`work_orders` 零 Java；前端 8 个模块缺页面，后端端点实际被调用约 1/4。
+10. **生产工程能力**：无 actuator/链路追踪、无 CI/压测/灰度、Redis 单实例、无密钥轮换/MFA、`external-api` 仍是骨架。
 
 ---
 
@@ -214,6 +222,9 @@ SMOKE_BASE=http://127.0.0.1:18080 python3 smoke-test.py
 | `floorplan.aging.reduce-ratio` | 0.10 | 每期偿还比例 |
 | `floorplan.payment.simulate-failure` | false | 模拟付款失败 |
 | `floorplan.auth.secret` | 环境变量注入 | JWT 签名密钥（生产必配，勿用默认值） |
+| `floorplan.jobs.enabled` | false | 定时作业总开关；prod profile 启动检查强制 true |
+| `floorplan.jobs.*.cron` | 见 `docs/作业定时调度与多实例锁.md` | 9 个作业的 cron，Asia/Tokyo |
+| `lock.provider` | memory | `memory`（本地）/ `redis`（生产）；prod 检查拒绝 memory |
 
 数据库连接：`jdbc:postgresql://localhost:5434/floorplan`（各服务一致）。
 

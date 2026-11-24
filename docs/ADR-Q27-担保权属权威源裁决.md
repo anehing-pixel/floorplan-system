@@ -19,7 +19,7 @@
 
 迁移 `V10__collateral_ledger.sql`。业务上真正在写数据的就是这组，④「设定担保」走
 `SalesApplicationService.setSecurity()` → `CollateralLedgerApplicationService.registerCollateralBatch()`
-→ `JdbcCollateralRegistrationBatchRepository.save()/addItem()`，smoke 182 项跑的就是这条链路。
+→ `JdbcCollateralRegistrationBatchRepository.save()/addItem()`，冒烟（FAIL=0）跑的就是这条链路。
 
 | 表 | 粒度 | 装什么 | 谁写 |
 |---|---|---|---|

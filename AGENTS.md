@@ -36,7 +36,8 @@
 但**权属变更 `COLLATERAL_CHANGED` 仍零调用方**、**工单表没有 Java 类**；
 回款匹配的解押已由 core（`floorplan-core`）消费同一事件落地（2026-11-24），
 但 release-service 的指令域消费与「银行匹配 vs 直接还款」的共用 `settle_seq` 幂等仍未接。
-USED 域目前**只有库结构与字典层**（V40–V74 + 状态机枚举），业务编排层在重写中。
+USED 域已贯通 **R1 车商资质、R2 车辆主数据/車検証、R3 估值与 LTV**（V75–V79），
+R4–R14（落札、放款闸门、WMS 账实、放车放证、回款回补、外部接入）仍在重写中。
 不要假设「表建了就是功能有了」。
 
 `ai-service/` 是 Python deep-agent 模板骨架，**不在本期范围**，不要改它。
@@ -97,7 +98,7 @@ external-api (DMZ, 18090)  ──► 只连 integration schema，不连 public
 | 项 | 值 |
 |---|---|
 | 仓库根 | `C:/Users/Administrator/Documents/GitHub/floorplan-system` |
-| 主分支 | `master`；USED 改造在 `used-floorplan-dev` |
+| 主分支 | `master`（USED R1–R3 已落在 master；无长期开发分支） |
 | 数据库 | `jdbc:postgresql://localhost:5434/floorplan`（**5434**，5432 被占用；库/用户/密码均 `floorplan`） |
 | 容器 | `docker exec floorplan-db2 psql -h 127.0.0.1 -p 5434 -U floorplan -d floorplan`（容器内没有 `psql` 于宿主 PATH） |
 | 编译 | Windows JDK 17 + Maven 3.9.16 |
@@ -177,7 +178,7 @@ bash run-local.sh                 # 只起 web 单体
 
 ### 6.1 已落库迁移永不修改
 
-`V1`–`V74` 已在重建后的 `public` 上落库（`flyway_schema_history` 56 行，现位于 v74）。
+`V1`–`V83` 已在重建后的 `public` 上落库（`flyway_schema_history` 65 行，现位于 v83）。
 **改这些文件 = Flyway checksum 校验失败 = 全服务启不动。** 要改结构就新增一版。
 同理：不要建空迁移文件——Flyway 会把它当成一次真实迁移执行。
 
@@ -186,8 +187,8 @@ bash run-local.sh                 # 只起 web 单体
 | 号段 | 用途 | 状态 |
 |---|---|---|
 | `V1`–`V26` | 核心链路（新车）基线 | 已落库 |
-| **`V40`–`V74`** | **二手车 USED 域**：V40–V54 资质/车辆/証書/担保，V55–V64 估值/LTV/拍卖/库龄，V65–V69 监管仓/放车放证/登记委托，V70–V74 集成层 | 已落库 |
-| `V75`–`V79` | USED 域预留（D04 §2 留给处置与报表） | 未用 |
+| **`V40`–`V79`** | **二手车 USED 域**：V40–V54 资质/车辆/証書/担保，V55–V64 估值/LTV/拍卖/库龄，V65–V69 监管仓/放车放证/登记委托，V70–V74 集成层，V75–V79 R1–R3（资质/里程阈值/估值配置） | 已落库 |
+| `V80`–`V83` | 回款回补 L2、core 解押 L2、JWT 版本、消费游标租约 | 已落库；下一可用 **V84** |
 | `V32`–`V39` | 有意留的空隙 | 别占 |
 
 **核心侧下一可用号 = `V27`**（V27 出库指令撤销字段、V28 客户支付确认凭证、V29 工单 SLA、
@@ -271,7 +272,9 @@ V30 经销商画像快照、V31 `dpd_stage_rules` 这几个用途还没实现；
    回款匹配的**解押已接 core**：`floorplan-core` 消费同一事件，`settled=true` 时释放车辆/担保台账并生成抹消待办。
    **仍未接**：release-service 指令域消费；「银行匹配 vs 直接还款」共用 `settle_seq` 的双重释放防线。
    「调度器和表都在」不等于「闭环已通」，「两根线通了」也不等于「事件驱动层落地了」。
-3. **回款匹配后不解押不回补** — `ReleaseOrchestrator` 解押只记日志，`availableAfter = before`。
+3. **回款链的部分状态与双路径幂等未闭环** — credit 回补与 core 解押是同一 `PAYMENT_MATCHED` 的两个独立事务，
+   `LEDGER_GAP` 巡检未实现；「银行匹配 vs 直接还款」尚未共用 `settle_seq`；release-service 指令域消费未接。
+   `ReleaseOrchestrator` 的假回补已移除（2026-11-24）。
 4. **工单体系 0 Java** — `work_orders` / `work_order_actions` 表齐全，零实体零 Service。
    门禁拒付说「生成 HIGH 工单」，实际只写 `risk_alerts`。
 5. **前端 8 个模块 0 页面** — 垫款申请/复核、还款核销、出库指令、对账、借据贷后、违约处置、

@@ -9,7 +9,8 @@
 > 那段过程记录要查就查 git 历史（`git log --oneline -- PROGRESS.md docs/`，删除前的最后一份是 `d3ec429`）。
 > 本文件只保留仍然成立的事实与待办。
 
-最后更新：2026-11-24（GMT+8） · **作业定时调度 + Redis 锁实例落地：web/bank/loan 共 9 个已接作业的 cron/配置键/分布式锁，prod 强制启用；`run-redis.sh` + `redis-smoke` 7/7；读接口授权矩阵已签字实施，主干/事件 290、USED 209、浏览器 37 全绿**；
+最后更新：2026-11-24（GMT+8） · **文档同步：架构图/业务流程图/简历/面试解析/微服务问题与解决（零代码改动）**；
+此前：**作业定时调度 + Redis 锁实例落地：web/bank/loan 共 9 个已接作业的 cron/配置键/分布式锁，prod 强制启用；`run-redis.sh` + `redis-smoke` 7/7；读接口授权矩阵已签字实施，主干/事件 290、USED 209、浏览器 37 全绿**；
 此前：生产就绪：弱密钥/多实例配置启动期 fail-fast（prod profile）+ EventDispatcher 消费者游标租约（V83）；
 此前：安全基线落地：JWT 可撤销（V82 token_version + 退出登录）、每次请求权限回查、未知异常不再回传内部信息；单测 + 冒烟 ㉖ 覆盖；
 此前：网关路由吞噬修复：`/api/dealers/*/bank-accounts` 精确路由 + `GatewayRouteOrderTest` + 经网关冒烟断言；
@@ -26,11 +27,11 @@
 
 ## 0. 现状三句话
 
-> **服务拓扑与「目标态 vs 现状」的差**见《库存融资核心系统-目标微服务架构设计.md》**§0 当前实况**（2026-11-23 实查）：
+> **服务拓扑与「目标态 vs 现状」的差**见《库存融资核心系统-目标微服务架构设计.md》**§0 当前实况**（2026-11-24 实查）：
 > 11 个可部署进程 = 1 网关 + 9 业务服务 + 1 DMZ 接入面，另有 4 个共享库模块（domain/application/infrastructure/common）；
-> 物理拆库未开始（仍共用 `public` schema）；Feign 与 outbox 机制已落地但只通一条异步链路。
+> 物理拆库未开始（仍共用 `public` schema）；Feign 与 outbox 机制已落地，**两条异步链路端到端跑通**。
 
-1. **核心（新车）链路可运行**：16 个构建单元编译全绿、主干冒烟 211 条 `[PASS]` / 0 FAIL、
+1. **核心（新车）链路可运行**：16 个构建单元编译全绿、主干+事件冒烟 **290** 条 `[PASS]` / 0 FAIL（2026-11-24 快照，断言数随开发增长）、
    10 服务启停正常（`run-microservices.sh` 一键起的 10 个进程，不含 DMZ 的 `external-api`）、
    `work_orders` 之外的业务表齐全。历史技术债（B-2 处置解冻、B-3 处置期不回补、
    collateral-reg 全端点 500、`/api/payments/**` 被 core 兜底 404、四个新服务漏装 `AuthApplicationService`、
@@ -41,12 +42,11 @@
    `vehicle_units.security_status=RELEASED`、`collateral_ledger.released=true`、登记批次抹消 `REQUESTED`。
    `COLLATERAL_CHANGED` 仍零调用方。**仍未接**：release-service 的指令域消费；
    与直接还款路径共用 `settle_seq` 的双重释放防线（USED R8 §8.1）。见 §3 的开放项。
-3. **USED（二手车库存垫资）已从「只有库结构与字典层」推进到「R1 + R2 贯通」**：V40–V74 已落库（资质/车辆/車検証/担保多源/估值/LTV/
-   拍卖/库龄/监管仓/放车放证/登记委托/集成五段）、`Permission` 69 点与 `UserRole` 14 岗已含 USED 权限点、
+3. **USED（二手车库存垫资）已从「只有库结构与字典层」推进到「R1 + R2 + R3 贯通」**：V40–V79 已落库（资质/车辆/車検証/担保多源/估值/LTV/
+   拍卖/库龄/监管仓/放车放证/登记委托/集成五段）、`Permission` 82 点与 `UserRole` 14 岗已含 USED 权限点、
    错误码段（QUAL_/CERT_/VALU_/LTV_/AUC_/REGI_/WMS_/RELS_/PTNR_）已定源。
-   **R1 车商资质（准入闸门 G-A1〜G-A4）与 R2 车辆主数据／车况票／里程／車検証收证换发**均已有业务层与端点并过网关冒烟；
-   余下估值分档、落札、
-   放款闸门、WMS 账实、放车放证、回款回补与外部接入层仍在重写中，规格源 = `docs/二手车库存垫资改造-06/-07/-08/-09`。
+   **R1 车商资质（准入闸门 G-A1〜G-A4）、R2 车辆主数据／车况票／里程／車検証收证换发、R3 估值与 LTV 分档**均已有业务层与端点并过网关冒烟；
+   余下落札、放款闸门、WMS 账实、放车放证、回款回补与外部接入层仍在重写中，规格源 = `docs/二手车库存垫资改造-06/-07/-08/-09`。
 
 ---
 
@@ -73,7 +73,7 @@
 | 项 | 内容 | 证据 |
 |---|---|---|
 | 冲突标记清理 | `domain` 的 `Permission.java` / `UserRole.java` 里有提交进 master 的 `<<<<<<< Updated upstream` 三处，整个 reactor 编不过 | `20fafa6`；`grep -cE "^(<<<<<<<\|=======\|>>>>>>>)"` = 0 |
-| 权限点并集 | 69 个权限点（含 19 个 USED R5.6/R6/R7 写点）；`READ_TIER` 隐式读层照 serial 版 | `Permission.java` / `UserRole.java` |
+| 权限点并集 | 69 个权限点（当时；读矩阵实施后为 82，见本节「读接口授权矩阵」行；含 19 个 USED R5.6/R6/R7 写点）；`READ_TIER` 隐式读层当时照 serial 版，后已删除 | `Permission.java` / `UserRole.java` |
 | 角色授予 | USED 写点已入岗：設質/登记发起 → `COLLATERAL_OFFICER`，确认/撤销/快照认定 → `POST_LENDING_MANAGER`，建单/放证/代录 → `SETTLEMENT_OFFICER`，下发 → `FUNDING_CASHIER`，主数据 → `SYSTEM_ADMIN`。D-2/D-6/D-7/D-8 四对 SOD 在角色层不闭环；`RELEASE_SETTLE` 不授任何角色 | 同上；14 个角色 `set()` 内无重复元素（重名会让 `Set.of` 在类初始化就抛） |
 | 错误码并集 | 补入 `REGI_001/002`、`WMS_001/002/003`、`RELS_001/002/003/004/006` | `ErrorCode.java` |
 | 迁移集 | V40–V64 + V70–V74 从 `used/serial-20261123` 取入，与 master 原有 V65–V69 合成 USED 全量结构。**V65–V69 此前从未在任何库上执行过** | 空库启动 → `Successfully applied 56 migrations ... now at version v74`；`SqlStructureSelfCheck` 13 张表列名一致 |
@@ -84,6 +84,7 @@
 | **浏览器端到端测试（2026-11-23 17:40 落地）** | 新增 `browser-test.py`（Playwright + 本机 Chrome，经网关 18080）：登录页错误密码/正确登录/令牌写入、11 个视图逐个真实渲染、新增/编辑经销商弹窗、名下车辆/车辆详情抽屉、全局刷新、admin vs operator 写按钮权限差、退出登录、浏览器内 fetch 冒烟；全程收集 console.error/pageerror/失败请求并落截图到 `browser-test-results/`（已 gitignore） | `PYTHONIOENCODING=utf-8 python browser-test.py` → **37 PASS / 0 FAIL / EXIT 0**，截图 18 张；主干 `smoke-test.py` 211 PASS / 0 FAIL、USED `smoke_used.py` 209 PASS / 0 FAIL |
 | **修复：参数绑定异常误报 500（浏览器测试揪出）** | `GET /api/vehicles`、`/api/credit-lines` 缺必填 `dealerId` 时抛 `MissingServletRequestParameterException`，web 与 common 的 `GlobalExceptionHandler` 都只兜底到 `handleUnknown` ⟹ 500 SYS_001。这属客户端传参错误，应是 400 | web/common 两处 `GlobalExceptionHandler` 新增 `handleBadRequest`，接 `MissingServletRequestParameterException`/`MethodArgumentTypeMismatchException`/`HttpMessageNotReadableException` → 400 VALID_001（`ErrorCode.VALID_001` 既有，400）。浏览器测试加两条断言钉住：缺参 `/api/vehicles` 与 `/api/credit-lines` 均返回 400 VALID_001（不再 500）；`mvn -B -DskipTests package` 全绿 |
 | **作业定时调度 + Redis 锁实例（2026-11-24 落地）** | web `ScheduledCoreJobs` 接 7 个日终作业（计息/库龄推进/递减计划/结算窗口/处置开单/年审扫描/季度归档），bank `BankFetchScheduler`、loan `DpdRefreshScheduler`；全部先取 `DistributedLock`（key=`lock:job:<名>:<bizDate>`，TTL 30 分钟，抢不到跳过、锁服务不可用 fail-closed）。`floorplan.jobs.enabled` 默认 false（本地不跑 cron），**prod profile 启动检查强制 true**；`lock.provider` 本地 memory、生产 redis（prod 检查拒绝 memory）。新增 `run-redis.sh`（floorplan-redis 容器）与 `run-microservices.sh redis-smoke`（7 条断言：`lockProvider=redis` + 并发触发无 500）。**仍未接**：`RISK_SCAN`/`TERM_CHECK`/`DEALER_METRIC_SCAN`/`RECON_FILE_GEN`/`SUBSIDY_SETTLE`（无 ApplicationService，不造空壳）、USED J1–J4、Quartz 动态 cron | `mvn -B package` 全绿（`ProductionReadinessCheckTest` 11 条、`ScheduledCoreJobsTest` 3 条）；主干+事件 290 PASS/0 FAIL；`redis-smoke` **7 PASS / 0 FAIL**；`FLOORPLAN_JOBS_ENABLED=true` 启动三服务无 bean/cron 错误；文档 `docs/作业定时调度与多实例锁.md` |
+| **文档更新：架构图 / 业务流程图 / 简历与面试材料（2026-11-24）** | 重写《目标微服务架构设计》§0 与 §1：11 进程 Mermaid 部署图、模块依赖图、`LOAN_CREATED` / `PAYMENT_MATCHED` 时序图、V83/65 迁移与两条事件链现状；《业务流程文档》新增 §6.5 现状闭环图 + 三张时序/调度图；新增《微服务落地问题与解决》14 类问题（现象/根因/解法/验证/面试讲法）；重写《简历-项目经历》《简历-一页版》；《面试解析》加 2026-11-24 现状校准与 Q17–Q20；同步索引/README。**零代码改动** | `git diff --stat`；文档内 Mermaid 可渲染；数字口径与 `PROGRESS.md` 一致 |
 | **读接口授权矩阵（2026-11-24 签字并实施）** | Q-R1~R8 签字：B 功能矩阵、13 个细粒度读点、PII 不授、ADMIN/READONLY 全业务读点、○ 按 —、数据范围 C 下期、读点仅作令牌展示且鉴权每次回查。代码：`Permission` 新增 13 读点；`UserRole.READ_MATRIX`（写点/读点物理分离，`READ_TIER` 删除，`isWriter()` 只认写点）；`RoleSeparationPolicy.effectivePermissions` 并集写+读；21 个 Controller 的 GET 加 `@RequirePermission`（唯一豁免 `/api/attachments/local-download` 预签名 URL）。实施修订 3 条（冒烟/浏览器实测）：`BUSINESS_OPERATOR` +`CREDIT_READ`/`RISK_READ`，`PURCHASE_OPERATOR`/`PURCHASE_REVIEWER` +`LTV_POLICY_READ`。文档 `docs/读接口授权矩阵.md`（原草案已升格）。**未做**：数据范围 C（OWN_DEALER/OWN_PARTNER）、PII 二人授权流程 | `mvn -B package` 全绿；`run-microservices.sh smoke` **290 PASS / 0 FAIL**；USED 冒烟 **209/209**；浏览器 **37/37**；GET 审计仅 1 个豁免 |
 | **生产就绪：密钥 fail-fast + 多实例游标租约（2026-11-24 落地）** | **启动期检查**：common 新增 `ProductionReadinessCheck`（Spring Boot 自动配置导入，十服务 + web 一次覆盖）。激活 `prod`/`production` profile 或 `floorplan.security.strict-secrets=true` 时，以下任一命中即**拒绝启动**：JWT 密钥为开发默认/不足 32 字节、webhook 密钥为开发默认、DB 密码为 `floorplan`/`floorplan_dmz`、`lock.provider` 非 redis、`bank-fetch.source=demo`；本地无 profile 只 WARN。**多实例游标**：V83 给 `consumer_offsets` 加 `lease_owner/lease_until`；`EventDispatcher` 每轮原子认领/续租（2 分钟），未抢到直接跳过；`@PreDestroy` 优雅停机立即释放租约，重启无需等待；接管语义 at-least-once，由 `event_consumptions` + 业务唯一键兜底。**未做**：作业定时调度（仍手动 `POST /api/jobs/*`）、读接口授权矩阵（与现有「读接口不设权限点」定源冲突，待裁决）、Redis 锁实例落地、密钥轮换 | `mvn -B package` 全绿（`ProductionReadinessCheckTest` 8 条）；`run-microservices.sh smoke` EXIT 0：主干 219 + 事件 **71** = **290 PASS / 0 FAIL**（含 3 条 `lease_owner` 生效断言） |
 | **安全基线（2026-11-24 落地）** | **JWT 可撤销**：V82 `users.token_version`；登录写入 `ver` 声明，`AuthApplicationService.verify()` 每次请求回查（签名/过期 → 用户启用 → 版本 → 角色）；auth-service 新增 `POST /api/auth/logout` 把版本 +1，旧令牌立即 401。**权限回查**：每次请求从 `user_roles` 现算角色与有效权限，拦截器不再信任令牌 `perms/roles` 快照；删角色后旧令牌立即 403；禁用账号旧令牌立即失效。**异常脱敏**：common/web 两处 `handleUnknown` 只回 `SYS_001` 固定文案 + traceId，完整栈进服务端日志。单测 6 条（application 4 + common/web 各 1），冒烟 ㉖ 7 条。**未做**：读接口租户级授权矩阵（需业务裁决）、refresh/jti/kid/aud、JWT/DB/webhook 密钥强校验与轮换、MFA/失败锁定/登录审计 | `mvn -B package` 全绿；`run-microservices.sh smoke` EXIT 0：主干 **219** + 事件 68 = **287 PASS / 0 FAIL**（㉖：删除 user_roles 后同令牌 403、logout 后旧令牌 401、重新登录成功） |
