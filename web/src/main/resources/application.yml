@@ -27,9 +27,11 @@ spring:
     name: floorplan-core
   datasource:
     # 端口说明：WSL 本机 PostgreSQL 18 占用 5432，故本项目容器使用 5434
-    url: jdbc:postgresql://localhost:5434/floorplan
-    username: floorplan
-    password: floorplan
+    # 2026-11-24：与其余服务统一为环境变量注入（生产必须覆盖密码；
+    # ProductionReadinessCheck 在 prod profile 下检测到默认值会拒绝启动）。
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/floorplan}
+    username: ${SPRING_DATASOURCE_USERNAME:floorplan}
+    password: ${SPRING_DATASOURCE_PASSWORD:floorplan}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10

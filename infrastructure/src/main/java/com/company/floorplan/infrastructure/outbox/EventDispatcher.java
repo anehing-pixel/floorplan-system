@@ -2,6 +2,7 @@ package com.company.floorplan.infrastructure.outbox;
 
 import com.company.floorplan.common.event.DomainEvent;
 import com.company.floorplan.common.event.EventConsumer;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -9,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 
+import java.net.InetAddress;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -42,9 +45,16 @@ import java.util.stream.Collectors;
  *   <li>DEAD 的人工重放不在本期范围，留接缝给 W3 收口。</li>
  * </ol>
  *
- * <p><b>多实例限制（如实说明）</b>：游标按 {@code consumer} 一行，两个进程若用同一个 consumer 名
- * 会互相覆盖游标，导致漏读或重复读。本地冒烟与当前部署都是单实例，故不在本期加分布式锁；
- * 多实例部署前必须改成 {@code FOR UPDATE SKIP LOCKED} 或按实例名分片，已记入实现说明的遗留项。</p>
+ * <p><b>多实例安全（2026-11-24，V83）</b>：游标仍按 {@code consumer} 一行，但加了**租约**
+ * （{@code lease_owner/lease_until}）。每轮轮询先用
+ * {@code INSERT ... ON CONFLICT DO UPDATE ... WHERE 无主 / 自己持有 / 已过期} 原子认领；
+ * 认领失败说明另一副本正在处理该消费者，本轮直接跳过。这样两个同名消费者不会同时读同一游标，
+ * 也不会互相覆盖 {@code last_event_id}。</p>
+ *
+ * <p><b>租约长度与崩溃语义</b>：租约 2 分钟，持有者每轮（1s）续租；进程崩溃后最多 2 分钟
+ * 由其他实例接管。接管是 at-least-once：从同一 {@code last_event_id} 重读，重复消费由
+ * {@code event_consumptions(event_id, consumer)} 与消费方业务唯一键兜住。优雅停机时
+ * {@link #releaseLeases()} 把租约立即置为过期，重启无需等待。</p>
  */
 public class EventDispatcher {
 
@@ -59,10 +69,21 @@ public class EventDispatcher {
     /** last_error 落库长度上限：异常栈可能很长，表里是 TEXT 但日志和排障都不需要全文，截断避免撑爆行。 */
     private static final int MAX_ERROR_LEN = 500;
 
+    /** 租约长度：远大于单批 100 条本地事件的正常处理时间；崩溃后最多等这么久由其他实例接管。 */
+    private static final int LEASE_MINUTES = 2;
+
     private final NamedParameterJdbcTemplate jdbc;
 
     /** 本服务装配到的消费者。为空说明这个服务不消费任何事件，调度任务直接空转返回。 */
     private final List<EventConsumer> consumers;
+
+    /**
+     * 本进程实例 ID：hostname-pid-uuid。
+     *
+     * <p>用 hostname+pid 让库里一眼能看出"哪个副本/哪个进程"持有租约；
+     * 末尾 uuid 防止同机同 PID 复用（容器重启 PID 可能相同）造成误认。</p>
+     */
+    private final String instanceId = newInstanceId();
 
     /**
      * 用 {@link ObjectProvider} 而不是直接注入 {@code List<EventConsumer>}：
@@ -86,6 +107,13 @@ public class EventDispatcher {
         }
         for (EventConsumer consumer : consumers) {
             try {
+                // 多实例：先原子认领/续租；同一 consumer 同一时刻只允许一个实例 drain。
+                // 认领失败不是错误——另一个副本正在处理，本轮跳过即可。
+                if (!acquireLease(consumer.name())) {
+                    log.debug("未抢到消费者租约，跳过本轮 consumer={} instance={}",
+                            consumer.name(), instanceId);
+                    continue;
+                }
                 drain(consumer);
             } catch (Exception e) {
                 // DB 抖动 / 迁移未执行（表还不存在）在这里兜住。
@@ -93,6 +121,67 @@ public class EventDispatcher {
                 log.warn("事件消费轮询异常 consumer={} err={}", consumer.name(), e.toString());
             }
         }
+    }
+
+    /**
+     * 原子认领或续租一个消费者的处理权（V83）。
+     *
+     * <p>SQL 的 {@code ON CONFLICT ... DO UPDATE ... WHERE} 是单条原子语句：
+     * <ul>
+     *   <li>行不存在：插入并持锁；</li>
+     *   <li>自己持有：续租（每轮 poll 都会走到）；</li>
+     *   <li>别人持有且未过期：WHERE 不成立，更新 0 行 → 本轮跳过；</li>
+     *   <li>别人持有但已过期 / lease_until 为空：接管。</li>
+     * </ul>
+     * 不能用"先查后更新"：两个实例同时查到"无主"会同时认领，游标照样互相覆盖。</p>
+     */
+    private boolean acquireLease(String consumer) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("consumer", consumer);
+        p.put("owner", instanceId);
+        String sql = "INSERT INTO consumer_offsets (consumer, last_event_id, lease_owner, lease_until) "
+                + "VALUES (:consumer, 0, :owner, now() + interval '" + LEASE_MINUTES + " minutes') "
+                + "ON CONFLICT (consumer) DO UPDATE SET "
+                + " lease_owner = EXCLUDED.lease_owner, "
+                + " lease_until = EXCLUDED.lease_until "
+                + "WHERE consumer_offsets.lease_owner IS NULL "
+                + "   OR consumer_offsets.lease_owner = :owner "
+                + "   OR consumer_offsets.lease_until IS NULL "
+                + "   OR consumer_offsets.lease_until < now()";
+        return jdbc.update(sql, p) > 0;
+    }
+
+    /**
+     * 优雅停机时立即释放本实例持有的所有租约。
+     *
+     * <p>不释放的话，进程重启后新实例要等租约自然过期（最多 2 分钟）才能接管；
+     * 冒烟/滚动发布都会被这段无谓等待拖慢。释放失败只告警：租约到期仍会自然接管。</p>
+     */
+    @PreDestroy
+    public void releaseLeases() {
+        try {
+            int rows = jdbc.update(
+                    "UPDATE consumer_offsets SET lease_until = now() WHERE lease_owner = :owner",
+                    Map.of("owner", instanceId));
+            if (rows > 0) {
+                log.info("释放事件消费者租约 instance={} rows={}", instanceId, rows);
+            }
+        } catch (Exception e) {
+            log.warn("释放事件消费者租约失败（等待自然过期接管）instance={} err={}",
+                    instanceId, e.toString());
+        }
+    }
+
+    /** hostname-pid-uuid：库里能看出是哪个副本/进程，uuid 防容器重启 PID 复用误认。 */
+    private static String newInstanceId() {
+        String host;
+        try {
+            host = InetAddress.getLocalHost().getHostName();
+        } catch (Exception e) {
+            host = "unknown-host";
+        }
+        return host + "-" + ProcessHandle.current().pid() + "-"
+                + UUID.randomUUID().toString().substring(0, 8);
     }
 
     /**
