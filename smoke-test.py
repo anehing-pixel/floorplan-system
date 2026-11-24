@@ -1289,8 +1289,10 @@ def main():
     st, res = call("POST", "/api/auth/login", {"username": sec_user, "password": sec_pwd})
     sec_token = (res.get("data") or {}).get("token")
     ok(st == 200 and bool(sec_token), "安全冒烟用户登录 -> %s" % st)
-    st, res = call("GET", "/api/credit-lines/%d" % credit_line_id, token=sec_token)
-    ok(st == 200, "持有效令牌读额度 -> %s" % st)
+    # PURCHASE_REVIEWER 的读矩阵含 VEHICLE_READ、不含 CREDIT_READ（2026-11-24 签字），
+    # 所以这里用车辆详情验证"令牌有效"，不要用额度详情。
+    st, res = call("GET", "/api/vehicles/%s" % VIN, token=sec_token)
+    ok(st == 200, "持有效令牌读车辆详情 -> %s" % st)
 
     # 权限回查：令牌原样不动，只删 user_roles；同一令牌必须立即失去权限。
     # 先确认移除前能过 VEHICLE_VERIFY 门禁（不是 403 即可，body 是否合法不影响门禁）。
@@ -1312,7 +1314,7 @@ def main():
     st, res = call("POST", "/api/auth/logout", {}, token=sec_token)
     ok(st == 200 and (res.get("data") or {}).get("revoked") is True,
        "退出登录 -> %s（token_version +1）" % st)
-    st, res = call("GET", "/api/credit-lines/%d" % credit_line_id, token=sec_token)
+    st, res = call("GET", "/api/vehicles/%s" % VIN, token=sec_token)
     ok(st == 401 and res.get("code") == "AUTH_001",
        "退出登录后旧令牌立即 401（可撤销，不等 8 小时过期）-> %s/%s" % (st, res.get("code")))
     st, res = call("POST", "/api/auth/login", {"username": sec_user, "password": sec_pwd})
