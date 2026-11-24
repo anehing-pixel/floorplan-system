@@ -1,5 +1,6 @@
 package com.company.floorplan.domain.model;
 
+import java.util.Map;
 import java.util.Set;
 
 import com.company.floorplan.domain.model.Permission;
@@ -59,10 +60,10 @@ public enum UserRole {
                     // 本仓现网只有本角色持 DEALER_MAINTAIN，故先落在此处（岗位缺口见下方注释）。
                     DEALER_QUALIFICATION_MAINTAIN, DEALER_COMPLIANCE_CHECK,
                     DEALER_SCORE_SET, DEALER_ADMISSION_MANAGE,
-                    // USED 收尾轮：读权限点与 R2/R5 读写点。管理员仍是"唯一全读"的那个岗，
-                    // 但 USED_VEHICLE_MAINTAIN 之外没有给它任何资金/放款单据写权（类注释的红线不变）。
-                    DEALER_READ, USED_VEHICLE_MAINTAIN, USED_VEHICLE_READ,
-                    CERTIFICATE_RECORD, CERT_READ, USED_COLLATERAL_READ,
+                    // USED R2/R5 写点。读点（DEALER_READ/USED_VEHICLE_READ/CERT_READ/
+                    // USED_COLLATERAL_READ/INTEGRATION_*）已移入 readPermissions() 的读矩阵，
+                    // 不再混在写权限集里（避免 isWriter() 把只读岗判成写岗）。
+                    USED_VEHICLE_MAINTAIN, CERTIFICATE_RECORD,
                     // W-U2：政策与拍场"维护"给管理员，"批准"不给（D10 D-5 要求两岗换人）。
                     // 同一角色禁持 LTV_POLICY_APPROVE——批准权只在 RISK_ADVISORY_OFFICER。
                     LTV_POLICY_MANAGE, AUCTION_HOUSE_MANAGE,
@@ -73,8 +74,7 @@ public enum UserRole {
                     //（D-4 录入↔覆盖、D-5 维护↔批准都是这么落的，见 W-U2 那段注释），
                     // RoleSeparationPolicy.INCOMPATIBLE 登记的是**角色对**而不是权限点对，
                     // 不为 D-12 另造一套框架；运行期换人校验仍缺，已记实现说明缺口。
-                    PARTNER_CONFIG_MANAGE, INTEGRATION_MONITOR, INTEGRATION_RETRY_TRIGGER,
-                    INTEGRATION_AUDIT_READ,
+                    PARTNER_CONFIG_MANAGE, INTEGRATION_RETRY_TRIGGER,
                     // USED 监管方主数据：custodians 的通道能力维护是主数据动作，
                     // 本仓只有本岗持主数据写权（DEALER_MAINTAIN／SUPPLIER_MAINTAIN 同族），
                     // 故落此处。它不构成放车链闭环——下发与撤销都不在本岗。
@@ -97,12 +97,10 @@ public enum UserRole {
      */
     CREDIT_REVIEWER("授信审查岗", RoleDomain.CREDIT,
             set(CREDIT_MANAGE, ANNUAL_REVIEW, RISK_GRADE_ADJUST,
-                    DEALER_QUALIFICATION_MAINTAIN, DEALER_SCORE_SET, DEALER_ADMISSION_MANAGE,
-                    // USED 读侧：DEALER_READ 是 D07 §7.1 三行 GET 的定源点名；
-                    // USED_VEHICLE_READ／USED_COLLATERAL_READ 给本岗是为了让授信判定看得到
-                    // 车辆与担保的输入事实（只读，不构成写侧兼岗）。授予理由见
-                    // Permission.DEALER_READ 注释。本岗仍不给 DEALER_COMPLIANCE_CHECK（P-7）。
-                    DEALER_READ, USED_VEHICLE_READ, USED_COLLATERAL_READ)),
+                    DEALER_QUALIFICATION_MAINTAIN, DEALER_SCORE_SET, DEALER_ADMISSION_MANAGE
+                    // 读点（DEALER_READ/USED_VEHICLE_READ/USED_COLLATERAL_READ 等）见
+                    // readPermissions() 的读矩阵；本岗仍不持 DEALER_COMPLIANCE_CHECK（P-7）。
+                    )),
 
     /**
      * 采购数据录入岗（人工导入）。
@@ -116,7 +114,7 @@ public enum UserRole {
             set(PURCHASE_IMPORT, ATTACHMENT_UPLOAD, BANK_ACCOUNT_MAINTAIN,
                     // USED R2 建账与属性录入属"把已发生的事实搬进系统"，与本岗既有定位一致；
                     // 里程/修復歴的取严判定不在本岗手上（走车况票与观测接口，由服务层判来源优先级）。
-                    USED_VEHICLE_MAINTAIN, USED_VEHICLE_READ,
+                    USED_VEHICLE_MAINTAIN,
                     // W-U2：估值录入 = 只录事实源（落札价/评估价/行情价），与"人工覆盖"分岗（D10 D-4）。
                     // 本岗刻意不持 VALUATION_OVERRIDE（覆盖在 RISK_ADVISORY_OFFICER），也不持
                     // LTV_POLICY_MANAGE/APPROVE——两个都不给录入侧，闭环在本岗上组不出来。
@@ -134,10 +132,10 @@ public enum UserRole {
      * <p><b>与录入岗不相容</b>：录入的人不能审自己的单。</p>
      */
     PURCHASE_REVIEWER("采购审核岗", RoleDomain.PURCHASE,
-            set(VEHICLE_VERIFY, INVENTORY_AUDIT, ATTACHMENT_UPLOAD, BANK_ACCOUNT_CONTROL,
-                    // 只给读：审核岗要核車検証与车况票事实，但建账写入留给录入岗，
-                    // 否则"自己建账自己审核"在本岗内部就成立了（同 P-7 的分离意图）。
-                    USED_VEHICLE_READ, CERT_READ)),
+            set(VEHICLE_VERIFY, INVENTORY_AUDIT, ATTACHMENT_UPLOAD, BANK_ACCOUNT_CONTROL
+                    // 读点（USED_VEHICLE_READ/CERT_READ）见 readPermissions() 的读矩阵；
+                    // 建账写入仍留给录入岗，避免"自己建账自己审核"（P-7）。
+                    )),
 
     /**
      * 业务经办岗（垫款申请人）。
@@ -183,9 +181,9 @@ public enum UserRole {
      */
     COLLATERAL_OFFICER("担保管理岗", RoleDomain.POST_LENDING,
             set(SECURITY_MAINTAIN, COLLATERAL_MAINTAIN,
-                    // R5 收证登记（只到"收讫"，不含设质/交还/灭失，那些归 W-U4）；
-                    // USED_COLLATERAL_READ 是纯只读投影（ADR-Q27：权威源不可被本包改写）。
-                    CERTIFICATE_RECORD, CERT_READ, USED_COLLATERAL_READ,
+                    // R5 收证登记（只到"收讫"，不含设质/交还/灭失，那些归 W-U4）。
+                    // 读点（CERT_READ/USED_COLLATERAL_READ/INTEGRATION_*）见 readPermissions()。
+                    CERTIFICATE_RECORD,
                     // W-U3 集成运维（D10 §3 `:125` 的 SECURITY_MAINTAIN 行 ●）。
                     // 【角色映射裁决】D10 §3 用的是矩阵自己的角色名，本仓没有同名 UserRole；
                     // 该行标注为「既有高危角色」，而本仓唯一持 SECURITY_MAINTAIN 权限点的岗
@@ -196,8 +194,7 @@ public enum UserRole {
                     // 两组权限点在角色层面就不闭环。
                     // 【D10 §3 同行的另一条】"✘ 不得代填 partner 回执"本岗天然满足：
                     // RELEASE_RECEIPT_MANUAL 不在本岗权限集里。
-                    PARTNER_KEY_ROTATE, INTEGRATION_MONITOR, INTEGRATION_RETRY_TRIGGER,
-                    INTEGRATION_AUDIT_READ,
+                    PARTNER_KEY_ROTATE, INTEGRATION_RETRY_TRIGGER,
                     // ---- USED R5.6 担保与登记侧写权（本轮补授） ----
                     // 設質生效是放款前置闸门，与本岗既有的 CERTIFICATE_RECORD（收证）同属
                     // 担保管理动作；<b>交还</b> CERTIFICATE_RELEASE 刻意不给本岗（SOD 对 D-6：
@@ -216,13 +213,8 @@ public enum UserRole {
      */
     POST_LENDING_MANAGER("贷后管理岗", RoleDomain.POST_LENDING,
             set(RISK_HANDLE, INVENTORY_AUDIT, COLLATERAL_RELEASE_RULE,
-                    // 贷后监管要看车辆 USED 属性、証書状态与担保多源事实（全读，无写）。
-                    USED_VEHICLE_READ, CERT_READ, USED_COLLATERAL_READ,
-                    // W-U3：D10 §3 `:121` 的 WAREHOUSE_RECON 账实内勤在集成运维组是 ○（仅只读），
-                    // 映射到本岗的理由是「仓与对账组 ● + 差异盯办」正对应本岗的 INVENTORY_AUDIT/RISK_HANDLE。
-                    // ○ 的落法＝只给 INTEGRATION_MONITOR（看链路健康），
-                    // 不给 INTEGRATION_RETRY_TRIGGER（重投会让对方二次收到指令）。
-                    INTEGRATION_MONITOR,
+                    // 贷后监管的车辆/証書/担保读点，以及 W-U3 的 INTEGRATION_MONITOR，
+                    // 都见 readPermissions() 的读矩阵（不混入写权限集）。
                     // ---- USED R5.6/R6/R7 的「确认与盯办」侧（本轮补授） ----
                     // 三条都是对别人发起动作的独立确认位，与发起岗刻意分家：
                     //   REGISTRATION_CONFIRM ↔ REGISTRATION_APPLY（SOD 对 D-2）
@@ -255,14 +247,12 @@ public enum UserRole {
             set(VEHICLE_SOLD, REPAYMENT_EXECUTE, PAYOFF_ISSUE, SECURITY_MAINTAIN,
                     // W-U2：结算岗对拍卖结算单做分摊守恒复核（AUC_005 的处置人）
                     SETTLEMENT_RECONCILE,
-                    // W-U3：D10 §3 `:122` 的 RELEASE_OFFICER 放车放证内勤 → 本岗（唯一持
-                    // VEHICLE_SOLD/PAYOFF_ISSUE 的放车放证侧岗位）。集成运维组是 ○（仅只读），
-                    // 因此只给 INTEGRATION_MONITOR 看指令下发回执有没有回来，
+                    // W-U3：D10 §3 `:122` 的 RELEASE_OFFICER 放车放证内勤 → 本岗。
+                    // 集成运维组是 ○（仅只读）：INTEGRATION_MONITOR 见 readPermissions()，
                     // 不给 redeliver/replay——放车岗自己重投自己等的回执等于自证到账。
                     // 本岗虽也持 SECURITY_MAINTAIN 权限点，但<b>不</b>并入 D10 的 SECURITY_MAINTAIN
                     // 高危角色那一行（那一行只映射 COLLATERAL_OFFICER，理由见该处注释），
                     // 所以拿不到 PARTNER_KEY_ROTATE。
-                    INTEGRATION_MONITOR,
                     // ---- USED R7 放车放证主链（本轮补授） ----
                     // 本岗 = D10 §3 的 RELEASE_OFFICER（放车放证内勤）：建单、放证、
                     // 降级代录三件都在它手上，但<b>结清推进 RELEASE_SETTLE 不授任何角色</b>
@@ -312,7 +302,7 @@ public enum UserRole {
      * ⚠ 残留风险已登记实现说明：{@code JwtAuthInterceptor#parseRoles} 把旧令牌
      * {@code role=USER} 映射到本岗，所以<b>历史 USER 令牌</b>会一并拿到留痕读取权。</p>
      */
-    READONLY_USER("通用只读岗", RoleDomain.PLATFORM, set(INTEGRATION_AUDIT_READ));
+    READONLY_USER("通用只读岗", RoleDomain.PLATFORM, set());
 
     /** 角色所属业务域。 */
     public enum RoleDomain {
@@ -364,48 +354,96 @@ public enum UserRole {
     }
 
     /**
-     * 判断该角色是否拥有指定权限点。
+     * 全业务读点（13 个核心读点 + 10 个 USED/对账/放车读点）。
      *
-     * <p><b>鉴权真正走的是 {@link com.company.floorplan.domain.service.RoleSeparationPolicy#effectivePermissions}
-     * （令牌里签发的 {@code perms} 清单），不是本方法</b>——所以隐式读层必须同时并进那一条，
-     * 否则「读点在 {@code can()} 里放行、在令牌里缺席」，带 {@code @RequirePermission} 的查询端点
-     * 会对所有角色回 403（USED R3 冒烟实测：{@code GET /api/valuations/active} 全岗 403）。</p>
-     *
-     * @param permission 权限点
-     * @return true 表示拥有
+     * <p>按 2026-11-24 读矩阵签字：`SYSTEM_ADMIN` 与 `READONLY_USER` 给全部业务读点；
+     * <b>不含</b> `PII_READ_FULL` 与 `INTEGRATION_MONITOR`/`INTEGRATION_AUDIT_READ`
+     * （集成读点按 D10 §3 逐角色显式授予，避免"只读岗默认拿到接入面情报"）。</p>
      */
-    public boolean can(Permission permission) {
-        // 读权限点走隐式层：D07 §7.2·§7.4 给读接口点了名，但本仓库口径一直是「查询不设权限点」
-        // （见 Permission 类注释），逐角色铺读权限的矩阵属 D10 未签字部分，不猜。
-        // 因此读点在此登记、在此统一放行；写点仍必须逐角色显式授予。
-        return permission != null
-                && (permissions.contains(permission) || READ_TIER.contains(permission));
-    }
-
-    /**
-     * 隐式读层清单（对外只读）。
-     *
-     * <p>存在的唯一理由是让签发令牌的那条路（{@code effectivePermissions}）与本枚举的
-     * {@link #can(Permission)} 用同一份口径。写点<b>不</b>在这里，因此并进令牌不会扩大任何写能力。</p>
-     */
-    public static Set<Permission> implicitReadPermissions() {
-        return READ_TIER;
-    }
-
-    /** 隐式读层：登录即可读，与既有查询接口行为一致。 */
-    private static final Set<Permission> READ_TIER = set(
+    private static final Set<Permission> ALL_BUSINESS_READS = set(
+            // 核心域 13 点
+            CREDIT_READ, VEHICLE_READ, ADVANCE_READ, LOAN_READ, REPAYMENT_READ, PAYMENT_READ,
+            COLLATERAL_READ, RISK_READ, DISPOSAL_READ, SUPPLIER_READ, BANK_ACCOUNT_READ,
+            ATTACHMENT_READ, JOB_READ,
+            // USED / 对账 / 放车既有读点
+            DEALER_READ, USED_VEHICLE_READ, CERT_READ, USED_COLLATERAL_READ,
             VALUATION_READ, LTV_POLICY_READ, AUCTION_HOUSE_READ, AUCTION_LOT_READ,
-            // USED R6/R7 的两个纯读点同层：放车放证查询（含证据链视图）与账实差异查询
-            // 都不改任何状态，按本仓「查询不设权限点」的口径统一放行；
-            // 差异的<b>认定</b>与<b>忽略</b>仍是显式写点（RECON_ACK／RECON_IGNORE，分属两岗）。
             RELEASE_READ, RECON_READ);
 
     /**
-     * 该角色是否允许执行写操作（持有至少一个权限点）。
+     * 读权限矩阵（2026-11-24 签字，方案 B 功能矩阵；数据范围 C 下期）。
      *
-     * <p>用于前端"是否显示操作按钮"的粗判，以及管理员账号的自我保护提示。</p>
+     * <p><b>与写权限分开</b>：`permissions` 只放写点，本表只放读点。
+     * `isWriter()` 因此不会被读点污染；`can()` 与 `effectivePermissions()` 两边都查。
+     * 矩阵里的 `○`（仅本方数据）在 C 落地前按 `—` 执行——签字结论 Q-R6，
+     * 避免"看起来收紧了、实际没有数据隔离"。</p>
      *
-     * @return true 表示可写
+     * <p><b>调整本表前先改 `docs/读接口授权矩阵-草案.md` 并重新签字</b>；
+     * 新增读端点时必须同步给对应角色授权，否则会退回 403。</p>
+     */
+    private static final Map<UserRole, Set<Permission>> READ_MATRIX = Map.ofEntries(
+            Map.entry(SYSTEM_ADMIN, ALL_BUSINESS_READS),
+            Map.entry(CREDIT_REVIEWER, set(
+                    CREDIT_READ, VEHICLE_READ, LOAN_READ, RECON_READ,
+                    DEALER_READ, USED_VEHICLE_READ, USED_COLLATERAL_READ, CERT_READ,
+                    VALUATION_READ, LTV_POLICY_READ, AUCTION_HOUSE_READ, AUCTION_LOT_READ)),
+            // 采购录入岗要按当前 LTV 政策带试算后再录估值（USED 冒烟实测 2026-11-24）
+            Map.entry(PURCHASE_OPERATOR, set(
+                    VEHICLE_READ, ADVANCE_READ, SUPPLIER_READ, ATTACHMENT_READ,
+                    USED_VEHICLE_READ, AUCTION_HOUSE_READ, AUCTION_LOT_READ,
+                    VALUATION_READ, LTV_POLICY_READ)),
+            Map.entry(PURCHASE_REVIEWER, set(
+                    VEHICLE_READ, ADVANCE_READ, SUPPLIER_READ, ATTACHMENT_READ,
+                    USED_VEHICLE_READ, CERT_READ, AUCTION_HOUSE_READ, AUCTION_LOT_READ,
+                    VALUATION_READ, LTV_POLICY_READ)),
+            // 例外：经办岗发起垫款前要读经销商主数据（冒烟实测 2026-11-24）；
+            // 草案矩阵此处原为 ○（仅本方数据），C 未落地按 —，会挡掉真实工作流，
+            // 故按最小必要补 CREDIT_READ。签字后的矩阵需把这一格改成 ●。
+            // 例外 2：经办岗工作台要读预警列表（浏览器端到端实测 2026-11-24）。
+            Map.entry(BUSINESS_OPERATOR, set(
+                    VEHICLE_READ, ADVANCE_READ, LOAN_READ, CREDIT_READ, RISK_READ)),
+            Map.entry(FUNDING_REVIEWER, set(ADVANCE_READ, LOAN_READ, PAYMENT_READ)),
+            Map.entry(FUNDING_CASHIER, set(ADVANCE_READ, PAYMENT_READ)),
+            Map.entry(COLLATERAL_OFFICER, set(
+                    VEHICLE_READ, COLLATERAL_READ, ATTACHMENT_READ, RELEASE_READ,
+                    CERT_READ, USED_COLLATERAL_READ, USED_VEHICLE_READ,
+                    INTEGRATION_MONITOR, INTEGRATION_AUDIT_READ)),
+            Map.entry(POST_LENDING_MANAGER, set(
+                    VEHICLE_READ, LOAN_READ, COLLATERAL_READ, RECON_READ, RELEASE_READ,
+                    USED_VEHICLE_READ, CERT_READ, USED_COLLATERAL_READ, INTEGRATION_MONITOR)),
+            Map.entry(COLLECTION_OFFICER, set(
+                    VEHICLE_READ, LOAN_READ, REPAYMENT_READ, COLLATERAL_READ, RISK_READ)),
+            Map.entry(SETTLEMENT_OFFICER, set(
+                    VEHICLE_READ, LOAN_READ, REPAYMENT_READ, PAYMENT_READ,
+                    RECON_READ, RELEASE_READ, INTEGRATION_MONITOR)),
+            Map.entry(DISPOSAL_OFFICER, set(
+                    VEHICLE_READ, LOAN_READ, COLLATERAL_READ, RISK_READ,
+                    DISPOSAL_READ, ATTACHMENT_READ)),
+            Map.entry(RISK_ADVISORY_OFFICER, set(
+                    CREDIT_READ, VEHICLE_READ, LOAN_READ, RISK_READ, RECON_READ,
+                    VALUATION_READ, LTV_POLICY_READ, USED_VEHICLE_READ)),
+            Map.entry(READONLY_USER, ALL_BUSINESS_READS));
+
+    /** 该角色拥有的读点（读矩阵）。 */
+    public Set<Permission> readPermissions() {
+        return READ_MATRIX.getOrDefault(this, Set.of());
+    }
+
+    /**
+     * 判断该角色是否拥有指定权限点（写点或读点）。
+     *
+     * <p>鉴权真正走 {@link com.company.floorplan.domain.service.RoleSeparationPolicy#effectivePermissions}
+     * （写点 + 读矩阵的并集），本方法只是同一口径的便捷入口。</p>
+     */
+    public boolean can(Permission permission) {
+        return permission != null
+                && (permissions.contains(permission) || readPermissions().contains(permission));
+    }
+
+    /**
+     * 该角色是否允许执行写操作（持有至少一个写权限点）。
+     *
+     * <p>写点与读点已分离，读点不会再让只读岗被误判为写岗。</p>
      */
     public boolean isWriter() {
         return !permissions.isEmpty();

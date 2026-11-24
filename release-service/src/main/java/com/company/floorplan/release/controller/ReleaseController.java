@@ -91,6 +91,7 @@ public class ReleaseController {
 
     /** 查指令 + 释放项明细 + 状态历史。 */
     @GetMapping("/{id}")
+    @RequirePermission(Permission.RELEASE_READ)
     public ApiResponse<ReleaseDetail> get(@PathVariable long id) {
         return ApiResponse.ok(service.get(id), traceId());
     }

@@ -34,32 +34,38 @@ public class CollateralController {
     }
 
     @GetMapping("/ledger")
+    @RequirePermission(Permission.COLLATERAL_READ)
     public ApiResponse<List<Map<String, Object>>> ledger(
             @RequestParam(required = false) Long dealerId) {
         return ApiResponse.ok(service.listLedger(dealerId), UUID.randomUUID().toString());
     }
 
     @GetMapping("/ledger/{vin}")
+    @RequirePermission(Permission.COLLATERAL_READ)
     public ApiResponse<Map<String, Object>> detail(@PathVariable String vin) {
         return ApiResponse.ok(service.detail(vin), UUID.randomUUID().toString());
     }
 
     @GetMapping("/ledger/sold-unpaid")
+    @RequirePermission(Permission.COLLATERAL_READ)
     public ApiResponse<List<Map<String, Object>>> soldUnpaid() {
         return ApiResponse.ok(service.listSoldUnpaid(), UUID.randomUUID().toString());
     }
 
     @GetMapping("/registration-batches/expiring")
+    @RequirePermission(Permission.COLLATERAL_READ)
     public ApiResponse<List<Map<String, Object>>> expiring() {
         return ApiResponse.ok(service.listExpiringRegistrations(), UUID.randomUUID().toString());
     }
 
     @GetMapping("/registration-batches/cancellation-pending")
+    @RequirePermission(Permission.COLLATERAL_READ)
     public ApiResponse<List<Map<String, Object>>> cancellationPending() {
         return ApiResponse.ok(service.listCancellationPending(), UUID.randomUUID().toString());
     }
 
     @GetMapping("/evidence-gaps")
+    @RequirePermission(Permission.COLLATERAL_READ)
     public ApiResponse<List<Map<String, Object>>> evidenceGaps() {
         return ApiResponse.ok(service.listEvidenceGaps(), UUID.randomUUID().toString());
     }
@@ -86,6 +92,7 @@ public class CollateralController {
     }
 
     @GetMapping("/registration-batches")
+    @RequirePermission(Permission.COLLATERAL_READ)
     public ApiResponse<List<Map<String, Object>>> batches() {
         return ApiResponse.ok(service.listBatches(), UUID.randomUUID().toString());
     }

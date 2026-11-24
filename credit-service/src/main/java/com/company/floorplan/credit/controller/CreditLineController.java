@@ -73,6 +73,7 @@ public class CreditLineController {
     }
 
     @GetMapping("/{id}")
+    @RequirePermission(Permission.CREDIT_READ)
     public ApiResponse<Map<String, Object>> summary(@PathVariable Long id) {
         return ApiResponse.ok(service.summary(id), UUID.randomUUID().toString());
     }
@@ -85,12 +86,13 @@ public class CreditLineController {
      * 只读取额度线，不参与占用/回补——那两条都在各自用例的行锁事务里。</p>
      */
     @GetMapping("/{id}/available")
-    @RequirePermission(Permission.CREDIT_MANAGE)
+    @RequirePermission(Permission.CREDIT_READ)
     public ApiResponse<Long> available(@PathVariable Long id) {
         return ApiResponse.ok(service.available(id), UUID.randomUUID().toString());
     }
 
     @GetMapping
+    @RequirePermission(Permission.CREDIT_READ)
     public ApiResponse<List<CreditLine>> listByDealer(@RequestParam Long dealerId) {
         return ApiResponse.ok(service.listByDealer(dealerId), UUID.randomUUID().toString());
     }

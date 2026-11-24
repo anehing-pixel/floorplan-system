@@ -11,9 +11,11 @@ import java.util.Set;
  * 现在是：<b>接口声明需要哪个权限点 → 角色声明自己拥有哪些权限点</b>，
  * 新增接口时只动接口一侧，角色侧只在新增岗位时才动。</p>
  *
- * <p><b>只覆盖写操作，查询不设权限点</b>：读接口对所有已登录用户开放
- * （风控岗要能看全量台账、催收岗要能看车辆档案）。这是本项目的一贯口径——
- * {@code RequireAdmin} 当初拦的就是"写"，不是"看"。</p>
+ * <p><b>读点与写点分开（2026-11-24 读矩阵签字）</b>：写点逐角色授予；
+ * 读点由 {@link UserRole#readPermissions()} 的读矩阵逐角色授予，绝不混入角色的写权限集，
+ * 因此 {@code isWriter()} 不会被读点污染。数据范围（OWN_DEALER/OWN_PARTNER）
+ * 尚未落地——读点当前只回答"能不能读这个域"，不回答"能读谁的数据"。
+ * 详见 {@code docs/读接口授权矩阵-草案.md} 与签字结论 Q-R1~Q-R8。</p>
  *
  * <p><b>命名约定</b>：{@code 域名_动作}，动作取自业务动词（导入/审核/发起/复核/支付/登记/盘点/催收/处置/回补）。
  * 同一动作在两个域名下含义不同就分开成两个权限点，避免"看起来一样其实不是"。</p>
@@ -187,6 +189,29 @@ public enum Permission {
      */
     DEALER_ADMISSION_MANAGE("车商准入态重算"),
 
+    /* ---- 核心域读点（2026-11-24 读接口授权矩阵签字：方案 B 功能矩阵；数据范围 C 下期）----
+     *
+     * <p>这 13 个点只用于<b>读</b>接口。它们不进任何角色的写权限集，
+     * 由 {@link UserRole#readPermissions()} 的读矩阵逐角色授予；
+     * {@code isWriter()} 因此不会被读点污染。</p>
+     *
+     * <p>数据范围（OWN_DEALER/OWN_PARTNER）不在本批：签字结论是"○ 在 C 落地前按 — 执行"，
+     * 即这些点只回答"能不能读这个域"，不回答"能读谁的数据"。</p>
+     */
+    CREDIT_READ("经销商/额度/评级配置读取"),
+    VEHICLE_READ("车辆台账与名下车辆聚合读取"),
+    ADVANCE_READ("垫款申请/放款/支付状态与采购单读取"),
+    LOAN_READ("借据/DPD/贷后画像读取"),
+    REPAYMENT_READ("还款核销/库龄递减/结清证明读取"),
+    PAYMENT_READ("银行流水/回款匹配/解押回补凭证读取"),
+    COLLATERAL_READ("核心担保物台账/登记批次/证据缺口读取"),
+    RISK_READ("预警/权属核对/风险规则读取"),
+    DISPOSAL_READ("违约处置案件读取"),
+    SUPPLIER_READ("供应商主数据与上游账户读取"),
+    BANK_ACCOUNT_READ("经销商/供应商收款账户列表读取（只返掩码）"),
+    ATTACHMENT_READ("附件列表与下载授权申请读取"),
+    JOB_READ("作业状态查询读取（不含触发权）"),
+
     /* ---- USED 域 · 本轮（串行收尾轮）新增：读权限点 + R2/R5 读写点 ---- */
 
     /**
@@ -239,9 +264,8 @@ public enum Permission {
     USED_COLLATERAL_READ("担保多源投影只读"),
 
     /* ---- W-U2 多源审慎估值 / LTV 政策 / 拍卖接入（点名照 D07 §7.2·§7.4 与 D10 §2）---- */
-    // 读接口在 D07 里也点了名（VALUATION_READ 等），但本仓库一贯口径是「查询不设权限点」，
-    // 逐角色铺读权限属 D10 未签字部分。因此读点在此登记但由 UserRole#can 的隐式读层放行，
-    // 写点（RECORD/OVERRIDE/MANAGE/APPROVE/IMPORT/RECONCILE）必须逐角色显式授予——
+    // 读点（VALUATION_READ 等）由 UserRole#readPermissions() 的读矩阵逐角色授予；
+    // 写点（RECORD/OVERRIDE/MANAGE/APPROVE/IMPORT/RECONCILE）仍逐角色显式授予——
     // D-4（录入↔覆盖）与 D-5（维护↔批准）两组换人分离就靠"同一角色不同时持有这两点"落地。
     VALUATION_READ("估值查询"),
     VALUATION_RECORD("估值录入（仅事实源）"),
@@ -262,11 +286,11 @@ public enum Permission {
      * 能改 partner 档案的人不该自动拥有"换一把能验通对方报文的密钥"的能力，
      * 后者等价于给对方身份发证（D02 §5.6 / INV-4）。</p>
      *
-     * <p><b>角色授予落在 {@link UserRole}</b>（串行第 3 棒补齐，D10 §3「集成运维组」列）。
-     * 本域五点<b>全部不</b>进 {@code UserRole.READ_TIER} 隐式读层：
+     * <p><b>角色授予落在 {@link UserRole}</b>（D10 §3「集成运维组」列）。
      * {@code INTEGRATION_MONITOR} / {@code INTEGRATION_AUDIT_READ} 虽然只是读，
      * 但读的是"谁在调我们、调了什么路径"，属接入面情报而不是业务台账，
-     * 因此按 D10 §3 逐角色显式授予（●=全部、○=只给监控读点）。</p>
+     * 因此<b>不</b>并入 {@code ALL_BUSINESS_READS}，按 D10 §3 在
+     * {@code UserRole.READ_MATRIX} 里逐角色显式授予（●=全部、○=只给监控读点）。</p>
      */
 
     /**

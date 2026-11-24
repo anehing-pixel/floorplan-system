@@ -55,6 +55,7 @@ public class ReconController {
      * @param status  闭环状态（可选：OPEN/CONFIRMED/IGNORED/RESOLVED）
      */
     @GetMapping("/diffs")
+    @RequirePermission(Permission.RECON_READ)
     public ApiResponse<List<ReconDiff>> diffs(
             @RequestParam(required = false) String batchNo,
             @RequestParam(required = false) String status) {

@@ -34,6 +34,7 @@ public class RatingConfigController {
     }
 
     @GetMapping
+    @RequirePermission(Permission.CREDIT_READ)
     public ApiResponse<List<RatingConfig>> list() {
         return ApiResponse.ok(service.list(), UUID.randomUUID().toString());
     }

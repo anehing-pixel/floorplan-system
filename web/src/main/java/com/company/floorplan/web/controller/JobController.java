@@ -98,8 +98,9 @@ public class JobController {
      * 其余作业（计息/库龄/年审等核心账务）仍留在此处受本地事务与行锁保护。
      */
 
-    /** 作业执行状态查询。 */
+    /** 作业执行状态查询。 —— 权限：作业状态读（触发仍是 JOB_TRIGGER 写点）。 */
     @GetMapping("/status")
+    @RequirePermission(Permission.JOB_READ)
     public ApiResponse<Map<String, Object>> status(@RequestParam String jobName,
                                                   @RequestParam(required = false) String bizDate) {
         LocalDate date = bizDate == null || bizDate.isBlank() ? LocalDate.now() : LocalDate.parse(bizDate);

@@ -60,12 +60,14 @@ public class CollateralRegController {
      * 不包 ApiResponse——契约返回类型就是 RegistrationVO。
      */
     @GetMapping("/registration")
+    @RequirePermission(Permission.USED_COLLATERAL_READ)
     public CollateralClient.RegistrationVO getRegistration(@RequestParam("vin") String vin) {
         return toVo(service.getCurrent(vin));
     }
 
     /** 权属流水（运营/审计用，非契约端点）。 */
     @GetMapping("/registration/history")
+    @RequirePermission(Permission.USED_COLLATERAL_READ)
     public ApiResponse<List<RegistrationItem>> history(@RequestParam("vin") String vin) {
         return ApiResponse.ok(service.getHistory(vin), UUID.randomUUID().toString());
     }

@@ -51,17 +51,20 @@ public class DealerController {
     }
 
     @GetMapping("/{id}")
+    @RequirePermission(Permission.CREDIT_READ)
     public ApiResponse<Dealer> get(@PathVariable Long id) {
         return ApiResponse.ok(service.getDealer(id), UUID.randomUUID().toString());
     }
 
     @GetMapping
+    @RequirePermission(Permission.CREDIT_READ)
     public ApiResponse<List<Dealer>> list() {
         return ApiResponse.ok(service.listDealers(), UUID.randomUUID().toString());
     }
 
     /** 经销商名下车辆清单（聚合视图，一次返回档案 + 车辆 + 汇总统计）。 */
     @GetMapping("/{id}/vehicles")
+    @RequirePermission(Permission.VEHICLE_READ)
     public ApiResponse<Map<String, Object>> vehicles(@PathVariable Long id) {
         return ApiResponse.ok(service.dealerVehicleOverview(id), UUID.randomUUID().toString());
     }

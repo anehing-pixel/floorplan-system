@@ -63,6 +63,7 @@ public class PaymentMatchController {
 
     /** 查询匹配结论（可按状态过滤）。 */
     @GetMapping("/matches")
+    @RequirePermission(Permission.PAYMENT_READ)
     public ApiResponse<List<PaymentMatch>> query(@RequestParam(required = false) String status) {
         MatchStatus parsed = status == null || status.isBlank() ? null : MatchStatus.valueOf(status.toUpperCase());
         return ApiResponse.ok(service.query(parsed), traceId());
@@ -70,6 +71,7 @@ public class PaymentMatchController {
 
     /** 挂起待人工的清单（贷后工作台直接消费）。 */
     @GetMapping("/unmatched")
+    @RequirePermission(Permission.PAYMENT_READ)
     public ApiResponse<List<PaymentMatch>> unmatched() {
         return ApiResponse.ok(service.unmatched(), traceId());
     }
@@ -100,6 +102,7 @@ public class PaymentMatchController {
 
     /** 查一次匹配对应的解押与回补凭证。 */
     @GetMapping("/matches/{matchId}/release")
+    @RequirePermission(Permission.PAYMENT_READ)
     public ApiResponse<Map<String, Object>> releaseOf(@PathVariable long matchId) {
         return ApiResponse.ok(Map.of(
                 "lienRelease", service.releaseOf(matchId).orElse(null),

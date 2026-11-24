@@ -88,27 +88,26 @@ public final class RoleSeparationPolicy {
     /**
      * 解析有效权限点集合（所有角色权限的并集 ＋ 隐式读层）。
      *
-     * <p><b>为什么必须并上 {@link UserRole#implicitReadPermissions()}</b>：这一份集合就是登录时
-     * 签进令牌 {@code perms} 的内容，也是 {@code JwtAuthInterceptor} 比对
-     * {@code @RequirePermission} 时唯一读的清单。而 {@link UserRole#can(Permission)} 里那条
-     * 「读点隐式放行」从未参与过鉴权链路，两边不同口径的后果是带读权限点注解的查询端点对
-     * <b>所有</b>角色回 403（USED R3 冒烟实测：{@code GET /api/valuations/active?vin=} 三岗全 403，
-     * 而写端点一路正常——最容易误判成「估值端点没实现」）。
-     * 不改成「给每个角色手铺读点」：逐角色读矩阵属 D10 未签字部分（AGENTS §0 铁律 3），
-     * 而且读点铺进 {@code permissions} 会让「该角色是否写岗」的 {@code isWriter()} 判定失真。
-     * 读层里没有写点，因此并进令牌不会扩大任何写能力，也不与任何 SOD 对撞。</p>
+     * <p><b>写点 + 读点的并集</b>（2026-11-24 读矩阵签字）：写点来自各角色
+     * {@link UserRole#getPermissions()}，读点来自 {@link UserRole#readPermissions()}
+     * 的逐角色矩阵。两者在 {@link UserRole} 里物理分开，{@code isWriter()} 只认写点。
+     * 这一份集合就是登录时签进令牌 {@code perms} 的内容；鉴权时拦截器还会按同一口径
+     * 每次请求回查（{@code AuthApplicationService.verify}），所以令牌里的快照不扩大权限。</p>
+     *
+     * <p>读矩阵里的 {@code ○}（仅本方数据）在数据范围 C 落地前按 {@code —} 执行，
+     * 见 {@code docs/读接口授权矩阵-草案.md} Q-R6。</p>
      *
      * @param roles 用户持有的角色集合
-     * @return 有效权限点集合；<b>无角色时返回空集合</b>（未获岗的账号连读层也不给）
+     * @return 有效权限点集合；<b>无角色时返回空集合</b>（未获岗的账号连读点也不给）
      */
     public static Set<Permission> effectivePermissions(Set<UserRole> roles) {
         if (roles == null || roles.isEmpty()) {
             return Set.of();
         }
         Set<Permission> effective = roles.stream()
-                .flatMap(r -> r.getPermissions().stream())
+                .flatMap(r -> java.util.stream.Stream.concat(
+                        r.getPermissions().stream(), r.readPermissions().stream()))
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-        effective.addAll(UserRole.implicitReadPermissions());
         return Set.copyOf(effective);
     }
 

@@ -100,6 +100,7 @@ public class AttachmentController {
      * 签发访问授权（短时效）。
      */
     @GetMapping("/{id}/url")
+    @RequirePermission(Permission.ATTACHMENT_READ)
     public ResponseEntity<ApiResponse<Map<String, Object>>> accessUrl(@PathVariable Long id,
                                                                       HttpServletRequest request) {
         Map<String, Object> result = service.accessUrl(id);
@@ -110,6 +111,7 @@ public class AttachmentController {
      * 列出某业务对象的附件。
      */
     @GetMapping
+    @RequirePermission(Permission.ATTACHMENT_READ)
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> list(
             @RequestParam("bizType") String bizType,
             @RequestParam("bizId") Long bizId,

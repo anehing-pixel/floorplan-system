@@ -50,8 +50,9 @@ public class SupplierController {
 
     /* ---------------- 上游 ---------------- */
 
-    /** 列出上游主数据。 */
+    /** 列出上游主数据。 —— 权限：供应商主数据读。 */
     @GetMapping("/suppliers")
+    @RequirePermission(Permission.SUPPLIER_READ)
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> listSuppliers(
             @RequestParam(value = "supplierType", required = false) String supplierType,
             HttpServletRequest request) {
@@ -128,8 +129,9 @@ public class SupplierController {
 
     /* ---------------- 收款账户 ---------------- */
 
-    /** 列出全部收款账户（只返掩码）。 */
+    /** 列出全部收款账户（只返掩码）。 —— 权限：账户列表读（比供应商主数据更窄）。 */
     @GetMapping("/bank-accounts")
+    @RequirePermission(Permission.BANK_ACCOUNT_READ)
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> listAccounts(HttpServletRequest request) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (BankAccount a : service.listAccounts()) {

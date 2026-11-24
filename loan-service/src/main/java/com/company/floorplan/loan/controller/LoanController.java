@@ -45,6 +45,7 @@ public class LoanController {
 
     /** 借据详情。 */
     @GetMapping("/loans/{id}")
+    @RequirePermission(Permission.LOAN_READ)
     public ResponseEntity<?> get(@PathVariable Long id) {
         Loan loan = service.getLoan(id);
         if (loan == null) {
@@ -58,6 +59,7 @@ public class LoanController {
      * 响应结构见 docs/接口契约-V16借据.md（字段已冻结，payment agent 按此编码）。
      */
     @GetMapping("/loans/by-vin/{vin}")
+    @RequirePermission(Permission.LOAN_READ)
     public ResponseEntity<?> getByVin(@PathVariable String vin) {
         Loan loan = service.getActiveLoanByVin(vin);
         if (loan == null) {
@@ -68,6 +70,7 @@ public class LoanController {
 
     /** 查询某笔借据截至 asOf 的 DPD（不写库）。 */
     @GetMapping("/loans/{id}/dpd")
+    @RequirePermission(Permission.LOAN_READ)
     public ResponseEntity<?> dpd(
             @PathVariable Long id,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
@@ -86,6 +89,7 @@ public class LoanController {
 
     /** 经销商贷后画像（只读投影，不参与流程判定）。 */
     @GetMapping("/dealer-profile/risk/{dealerId}")
+    @RequirePermission(Permission.LOAN_READ)
     public ResponseEntity<?> profile(@PathVariable Long dealerId) {
         DealerRiskProfile profile = service.getProfile(dealerId);
         if (profile == null) {

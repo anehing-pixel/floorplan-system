@@ -95,8 +95,9 @@ public class VehicleController {
                 .body(ApiResponse.ok(data, UUID.randomUUID().toString()));
     }
 
-    /** 单台台账查询。 */
+    /** 单台台账查询。 —— 权限：车辆台账读（2026-11-24 读矩阵）。 */
     @GetMapping("/{vin}")
+    @RequirePermission(Permission.VEHICLE_READ)
     public ApiResponse<Map<String, Object>> get(@PathVariable String vin) {
         VehicleUnit unit = vehicleUnitRepository.findByVin(vin)
                 .orElseThrow(() -> new com.company.floorplan.domain.exception.BusinessException(
@@ -131,6 +132,7 @@ public class VehicleController {
     }
 
     @GetMapping
+    @RequirePermission(Permission.VEHICLE_READ)
     public ApiResponse<List<VehicleUnit>> listByDealer(@RequestParam Long dealerId) {
         return ApiResponse.ok(vehicleUnitRepository.findByDealerId(dealerId), UUID.randomUUID().toString());
     }

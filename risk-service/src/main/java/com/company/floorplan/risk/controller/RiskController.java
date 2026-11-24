@@ -50,6 +50,7 @@ public class RiskController {
     }
 
     @GetMapping("/alerts")
+    @RequirePermission(Permission.RISK_READ)
     public ApiResponse<List<Alert>> alerts(@RequestParam(required = false) String type,
                                            @RequestParam(required = false) String status,
                                            @RequestParam(defaultValue = "50") int limit) {

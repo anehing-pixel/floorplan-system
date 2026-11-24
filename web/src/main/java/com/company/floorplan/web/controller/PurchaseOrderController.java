@@ -104,6 +104,7 @@ public class PurchaseOrderController {
      * 列出全部采购订单。
      */
     @GetMapping
+    @RequirePermission(Permission.ADVANCE_READ)
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> list(HttpServletRequest request) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (PurchaseOrder p : service.listAll()) {
@@ -140,6 +141,7 @@ public class PurchaseOrderController {
      * @param orderNo 采购订单号
      */
     @GetMapping("/{orderNo}")
+    @RequirePermission(Permission.ADVANCE_READ)
     public ResponseEntity<ApiResponse<Map<String, Object>>> getOne(@PathVariable String orderNo,
                                                                    HttpServletRequest request) {
         PurchaseOrder p = service.getByOrderNo(orderNo);
@@ -192,6 +194,7 @@ public class PurchaseOrderController {
      * @param orderNo 采购订单号
      */
     @GetMapping("/{orderNo}/validation")
+    @RequirePermission(Permission.ADVANCE_READ)
     public ResponseEntity<ApiResponse<Map<String, Object>>> validation(@PathVariable String orderNo,
                                                                         HttpServletRequest request) {
         Map<String, Object> result = service.validationPreview(orderNo);
