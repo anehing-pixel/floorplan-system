@@ -150,6 +150,26 @@ floorplan:
   lock:
     provider: ${LOCK_PROVIDER:memory}
 
+  # ---- 日终作业调度（2026-11-24）----
+  # enabled 默认 false：本地冒烟不让 cron 干扰测试数据；prod profile 启动检查强制 true。
+  # cron 时刻是默认值，均可由环境变量覆盖；精确时刻属 [待定源]，签字后只改配置不改代码。
+  jobs:
+    enabled: ${FLOORPLAN_JOBS_ENABLED:false}
+    interest:
+      cron: "${JOBS_INTEREST_CRON:0 50 23 * * *}"
+    aging:
+      cron: "${JOBS_AGING_CRON:0 0 1 * * *}"
+    aging-reduction:
+      cron: "${JOBS_AGING_REDUCTION_CRON:0 30 1 * * *}"
+    settlement-scan:
+      cron: "${JOBS_SETTLEMENT_SCAN_CRON:0 0 2 * * *}"
+    disposal:
+      cron: "${JOBS_DISPOSAL_CRON:0 30 2 * * *}"
+    annual-review-scan:
+      cron: "${JOBS_ANNUAL_REVIEW_SCAN_CRON:0 0 3 * * *}"
+    archive:
+      cron: "${JOBS_ARCHIVE_CRON:0 0 4 1 1,4,7,10 *}"
+
   # ---- 银行回款流水采集（BANK_FETCH）----
   # 每 15 分钟一次的高频作业。它不套 batch_runs 的按日幂等（那天当天第二次就跑不了），
   # 幂等落在行级：payment_transactions.uk_payment_txn (account_ref, transaction_id)。

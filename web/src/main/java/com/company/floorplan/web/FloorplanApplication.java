@@ -1,5 +1,7 @@
 package com.company.floorplan.web;
 
+import com.company.floorplan.infrastructure.lock.InMemoryDistributedLock;
+import com.company.floorplan.infrastructure.lock.RedisDistributedLock;
 import com.company.floorplan.infrastructure.outbox.EventDispatcher;
 import com.company.floorplan.infrastructure.outbox.JdbcOutboxPublisher;
 import com.company.floorplan.web.integration.OutboxLoanCreatedPublisher;
@@ -30,7 +32,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 // 其余 8 个服务只扫自身包，反过来必须靠 @Import 才拿得到。统一走 @Import 才能两边都只有一份。
 // W2-CORE 的 OutboxLoanCreatedPublisher 同属这一类：它是 application 端口 LoanCreatedPublisher
 // 在 web 侧的唯一实现（application 看不见 common，只有 web 同时看得见两边），照样只 @Import、不打 @Component。
-@Import({JdbcOutboxPublisher.class, EventDispatcher.class, OutboxLoanCreatedPublisher.class})
+@Import({JdbcOutboxPublisher.class, EventDispatcher.class, OutboxLoanCreatedPublisher.class,
+        // 2026-11-24：日终作业调度需要分布式锁（本地 memory / 生产 redis）。
+        // 两个实现都导入，由 floorplan.lock.provider 条件二选一（与 bank-service 同口径）。
+        InMemoryDistributedLock.class, RedisDistributedLock.class})
 // core 是 LOAN_CREATED 的生产方（W2-CORE 接），也是 COLLATERAL_CHANGED 的规划消费方，需要调度线程。
 @EnableScheduling
 public class FloorplanApplication {

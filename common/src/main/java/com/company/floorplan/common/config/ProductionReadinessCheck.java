@@ -95,6 +95,13 @@ public class ProductionReadinessCheck implements InitializingBean {
         if (bankSource != null && "demo".equalsIgnoreCase(bankSource)) {
             problems.add("floorplan.bank-fetch.source=demo（生产不得使用演示流水源）");
         }
+        // 2026-11-24：有调度器的服务（web/bank/loan）必须在生产启用；
+        // 否则"以为在跑"的日终计息/DPD/采集实际上永远不会发生。
+        String jobsEnabled = env.getProperty("floorplan.jobs.enabled");
+        if (jobsEnabled != null && !Boolean.parseBoolean(jobsEnabled)) {
+            problems.add("floorplan.jobs.enabled=false（生产必须启用定时调度；"
+                    + "否则日终计息/DPD/银行采集不会自动运行）");
+        }
 
         if (problems.isEmpty()) {
             log.info("生产就绪检查通过（strict={}）", strict);

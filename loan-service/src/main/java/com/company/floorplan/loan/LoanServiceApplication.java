@@ -4,6 +4,8 @@ import com.company.floorplan.application.service.AuthApplicationService;
 import com.company.floorplan.common.config.GlobalExceptionHandler;
 import com.company.floorplan.common.config.JwtAuthInterceptor;
 import com.company.floorplan.common.config.WebMvcConfig;
+import com.company.floorplan.infrastructure.lock.InMemoryDistributedLock;
+import com.company.floorplan.infrastructure.lock.RedisDistributedLock;
 import com.company.floorplan.infrastructure.persistence.JdbcAuthUserRepository;
 import com.company.floorplan.loan.repository.JdbcLoanRepository;
 import com.company.floorplan.loan.service.LoanApplicationService;
@@ -36,7 +38,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         LoanApplicationService.class,
         // W0-6 事件地基装配：发布端 + 消费轮询器（无消费者的服务 poll() 直接返回，不发 SQL）
         JdbcOutboxPublisher.class,
-        EventDispatcher.class
+        EventDispatcher.class,
+        // 2026-11-24：DPD 定时调度需要分布式锁（本地 memory / 生产 redis）
+        InMemoryDistributedLock.class,
+        RedisDistributedLock.class
 })
 @EnableScheduling
 @EnableDiscoveryClient

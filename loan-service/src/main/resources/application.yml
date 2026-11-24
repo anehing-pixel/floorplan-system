@@ -26,3 +26,12 @@ floorplan:
   auth:
     secret: ${FLOORPLAN_JWT_SECRET:dev-only-secret-key-change-me-in-production-0123456789}
     token-hours: ${FLOORPLAN_TOKEN_HOURS:8}
+  # ---- 分布式锁（DPD 定时调度用）----
+  lock:
+    provider: ${LOCK_PROVIDER:memory}
+  # ---- 定时调度（2026-11-24）----
+  # DPD 按自然日刷新（ADR-008），默认 00:30 JST；prod profile 启动检查强制 enabled=true。
+  jobs:
+    enabled: ${FLOORPLAN_JOBS_ENABLED:false}
+    dpd-refresh:
+      cron: "${JOBS_DPD_REFRESH_CRON:0 30 0 * * *}"

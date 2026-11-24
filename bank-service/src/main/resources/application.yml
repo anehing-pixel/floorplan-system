@@ -36,7 +36,14 @@ floorplan:
     token-hours: ${FLOORPLAN_TOKEN_HOURS:8}
   # ---- 分布式锁 ----
   lock:
-    provider: memory                 # 单实例演示用；多实例切 redis
+    provider: ${LOCK_PROVIDER:memory}   # 单实例演示用；多实例切 redis
+  # ---- 定时调度（2026-11-24）----
+  # enabled 默认 false；prod profile 启动检查强制 true。
+  # bank-fetch 默认每 15 分钟（银企直连高频场景）；文件场景可改成每日一次。
+  jobs:
+    enabled: ${FLOORPLAN_JOBS_ENABLED:false}
+    bank-fetch:
+      cron: "${JOBS_BANK_FETCH_CRON:0 */15 * * * *}"
   # ---- 银行回款流水采集 ----
   bank-fetch:
     # demo：返回固定样本，同一天多次拉取 id 稳定 → 幂等可被亲眼验证（第二次 inserted=0）

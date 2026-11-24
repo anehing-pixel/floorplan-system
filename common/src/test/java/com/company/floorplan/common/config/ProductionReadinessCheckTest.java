@@ -27,6 +27,7 @@ class ProductionReadinessCheckTest {
         env.setProperty("floorplan.attachments.s3.bucket", "prod-attachments-bucket");
         env.setProperty("floorplan.lock.provider", "redis");
         env.setProperty("floorplan.bank-fetch.source", "csv");
+        env.setProperty("floorplan.jobs.enabled", "true");
     }
 
     private static void check(MockEnvironment env) {
@@ -108,6 +109,17 @@ class ProductionReadinessCheckTest {
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> check(env));
         assertTrue(ex.getMessage().contains("floorplan.lock.provider"));
+    }
+
+    @Test
+    void prodProfile_withJobsDisabled_failsFast() {
+        MockEnvironment env = env();
+        env.setActiveProfiles("prod");
+        strong(env);
+        env.setProperty("floorplan.jobs.enabled", "false");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> check(env));
+        assertTrue(ex.getMessage().contains("floorplan.jobs.enabled"));
     }
 
     @Test
