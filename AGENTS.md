@@ -157,6 +157,7 @@ PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke
 # 其他
 bash run-microservices.sh start   # 前台保活，Ctrl+C 停
 bash run-microservices.sh stop    # 另开窗口停
+bash run-microservices.sh redis-smoke  # Redis 锁实例验证（需 Docker；先 bash run-redis.sh）
 bash run-local.sh                 # 只起 web 单体
 ```
 

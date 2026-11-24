@@ -194,7 +194,8 @@ SMOKE_BASE=http://127.0.0.1:18080 python3 smoke-test.py
 
 1. **持久化用 JdbcTemplate 而非 JPA**：原约定"简单实体用 JPA、复杂账务用 SQL"；本原型统一用 JdbcTemplate 减少映射层代码。
 2. **支付为模拟实现**：`MockPaymentGateway` 默认成功（`floorplan.payment.simulate-failure=true` 可模拟失败验证整体回滚）。真实通道按外部集成文档替换。
-3. **批处理为接口触发**（`POST /api/jobs/*`），未接 Quartz 定时。生产版接 Spring Batch + Quartz。
+3. **批处理已接定时调度**（2026-11-24：Spring `@Scheduled` + `DistributedLock`；默认关闭，
+   prod profile 强制启用；见 `docs/作业定时调度与多实例锁.md`）。仍未引入 Quartz 动态 cron。
 4. **本地不启 Nacos**：网关用环境变量把 `lb://` 覆盖成 http 直连；生产起 Nacos 后去掉覆盖即可走服务发现。
 5. **共享单一数据库**：服务已拆但数据未分库，跨服务一致性暂由共享库 + 本地事务保证。
 6. **计息未处理期间本金变化**：部分还款场景的本金分段计息未展开。
