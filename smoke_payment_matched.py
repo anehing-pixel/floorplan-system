@@ -364,6 +364,9 @@ def main():
        "A3 本期事件不带 dueDate -> loans.due_date IS NULL（未自造到期日）")
     ok(as_int("SELECT count(*) FROM repayment_plans WHERE loan_id=%d" % loan_id) == 0,
        "A3 缺到期日 -> 不生成还款计划（不是消费路径坏了）")
+    ok(one("SELECT lease_owner IS NOT NULL AND lease_until > now() FROM consumer_offsets "
+           "WHERE consumer='loan-service'") == "t",
+       "A3 EventDispatcher 多实例租约生效：loan-service 游标行有 lease_owner 且未过期")
 
     fake_advance = 9_300_000_000 + int(time.time())
     bad_event = insert_outbox("LOAN_CREATED", "PM-BAD-%s" % TAG, {
@@ -478,6 +481,12 @@ def main():
     ok(as_int("SELECT count(*) FROM audit_events WHERE action='RELEASE_SECURITY' "
               "AND after_snapshot LIKE '%%paymentRef=%s%%'" % tx_full) >= 1,
        "C1b 解押写审计（带 paymentRef，可追回银行流水）")
+    ok(one("SELECT lease_owner IS NOT NULL AND lease_until > now() FROM consumer_offsets "
+           "WHERE consumer='credit-service'") == "t",
+       "C1b EventDispatcher 租约：credit-service 游标行有 lease_owner")
+    ok(one("SELECT lease_owner IS NOT NULL AND lease_until > now() FROM consumer_offsets "
+           "WHERE consumer='floorplan-core'") == "t",
+       "C1b EventDispatcher 租约：floorplan-core 游标行有 lease_owner")
 
     # B5：发布端 NOT EXISTS 去重（PAYMENT_MATCHED 那一半）。
     # PROGRESS §3 明确：重复匹配会先被 uk_payment_match_txn 挡住，要单独钉发布端机制，
