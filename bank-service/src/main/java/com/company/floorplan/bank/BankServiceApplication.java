@@ -14,16 +14,18 @@ import com.company.floorplan.infrastructure.persistence.JdbcBankFetchBatchReposi
 import com.company.floorplan.infrastructure.persistence.JdbcBusinessCalendar;
 import com.company.floorplan.infrastructure.persistence.JdbcPaymentTransactionRepository;
 import com.company.floorplan.infrastructure.persistence.JdbcSupportRepository;
-import com.company.floorplan.bank.client.LoggingCreditLineClient;
-import com.company.floorplan.bank.client.LoggingLoanLookupClient;
+import com.company.floorplan.bank.client.FeignLoanLookupClient;
+import com.company.floorplan.bank.event.PaymentMatchedPublisher;
 import com.company.floorplan.bank.service.PaymentMatchApplicationService;
 import com.company.floorplan.bank.service.ReleaseOrchestrator;
-import com.company.floorplan.bank.store.InMemoryPaymentStore;
+import com.company.floorplan.bank.store.JdbcPaymentStore;
+import com.company.floorplan.common.contract.LoanQueryClient;
 import com.company.floorplan.infrastructure.outbox.EventDispatcher;
 import com.company.floorplan.infrastructure.outbox.JdbcOutboxPublisher;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -62,10 +64,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         JdbcAuthUserRepository.class,          // AuthApplicationService 的依赖
         // ---- PAYMENT 回款匹配（T2-3 后半段）----
         // 新 bean 显式 @Import，类本身不加 stereotype，避免被本包的组件扫描重复注册
-        LoggingLoanLookupClient.class,         // 借据查询存根（TODO: 换 Feign 实现）
-        LoggingCreditLineClient.class,         // 授信侧只读查询存根（TODO: 换 Feign 实现）
-        InMemoryPaymentStore.class,            // V17 三表的内存实现（TODO: 换 JDBC）
-        ReleaseOrchestrator.class,             // 解押 + 回补编排
+        FeignLoanLookupClient.class,           // 借据查询：冻结契约 LoanQueryClient（真实 Feign）
+        JdbcPaymentStore.class,                // V17 三表 JDBC 实现（匹配结论不再重启即丢）
+        PaymentMatchedPublisher.class,         // PAYMENT_MATCHED 的 outbox 发布器
+        ReleaseOrchestrator.class,             // 解押留痕 + 回补请求登记
         PaymentMatchApplicationService.class,  // 匹配应用服务
         // 数据源端口：两个候选都导入，条件二选一
         CsvBankStatementSource.class,
@@ -83,6 +85,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 })
 @EnableScheduling
 @EnableDiscoveryClient
+// 只注册回款匹配真正需要的借据契约；不要扫整个 common.contract 包——
+// CollateralClient 带 fallback，在 bank 里没有对应 bean，会被 Feign 装配阶段直接拒。
+@EnableFeignClients(clients = LoanQueryClient.class)
 public class BankServiceApplication {
 
     public static void main(String[] args) {

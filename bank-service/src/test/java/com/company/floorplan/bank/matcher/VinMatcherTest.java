@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VinMatcherTest {
 
     private static LoanSnapshot loan(long id, String vin, long outstanding, String status) {
-        return new LoanSnapshot(id, "LN-" + id, id + 100, vin, 42L, outstanding,
+        return new LoanSnapshot(id, "LN-" + id, id + 100, vin, 42L, 34L, outstanding,
                 LocalDate.of(2026, 12, 21), status, null, outstanding, 0L, 0L, 0L);
     }
 

@@ -73,6 +73,30 @@ public final class JsonPayloadReader {
     }
 
     /**
+     * 读布尔字段；字段不存在 / JSON null / 不是布尔值返回 null，不做"非空即真"的猜测。
+     *
+     * <p>{@code PAYMENT_MATCHED} 的 {@code settled} 决定消费方是否回补额度：
+     * 把字符串 {@code "false"} 误判成 {@code true} 会直接多放额度，所以这里不猜。</p>
+     */
+    public static Boolean readBoolean(String payload, String key) {
+        JsonNode v = tree(payload).get(key);
+        if (v == null || v.isNull()) {
+            return null;
+        }
+        if (v.isBoolean()) {
+            return v.asBoolean();
+        }
+        String text = v.asText();
+        if ("true".equalsIgnoreCase(text)) {
+            return Boolean.TRUE;
+        }
+        if ("false".equalsIgnoreCase(text)) {
+            return Boolean.FALSE;
+        }
+        return null;
+    }
+
+    /**
      * 校验 payload 必含 {@code vin} 与 {@code traceId} 且都非空白，不满足即抛异常。
      *
      * <p>这是 V21 与 {@code OutboxPublisher} 注释里已经约定的硬规则：缺 vin 消费端定位不到车辆，

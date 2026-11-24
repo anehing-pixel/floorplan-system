@@ -5,8 +5,9 @@ import java.time.Instant;
 /**
  * 额度回补流水（V17 credit_restores 一行的内存表达）。
  *
- * <p>额度写入仍在授信侧行锁事务内（CreditLineClient 契约只提供只读查询），
- * 本记录是回补动作的可审计凭证：哪笔流水、哪个经销商、回补多少、谁触发。</p>
+ * <p>额度写入在 credit-service 自己的行锁事务内（bank 不允许跨服务直写 credit_lines），
+ * 本记录是 bank 侧的「回补请求」凭证：哪笔流水、哪个额度线、回补多少、谁触发。
+ * 真实回补由 PAYMENT_MATCHED 的消费方完成，bank 侧不再写 availableBefore/availableAfter。</p>
  */
 public record CreditRestore(
         Long id,

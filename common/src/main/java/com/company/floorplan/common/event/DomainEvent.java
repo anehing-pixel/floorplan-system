@@ -19,7 +19,8 @@ import java.time.Instant;
  * @param eventId      {@code outbox_events.id}，全局单调递增，是消费游标与幂等键的主键
  * @param eventType    事件名，取值只用 {@link com.company.floorplan.common.contract.OutboxPublisher}
  *                     里的三个常量，不许自由命名（否则消费端的订阅集合对不上）
- * @param aggregateKey 聚合键（vin 或借据号），发布去重的维度，见 V21 注释
+ * @param aggregateKey 聚合键 =「这一次发生」的主键（advanceId / paymentRef），发布去重的维度；
+ *                     禁止用 vin（V21 注释里的旧措辞已作废），理由见 {@code OutboxPublisher#publish}
  * @param payload      JSON 文本，必含 {@code vin} 与 {@code traceId}（缺任一，发布端直接拒绝写入）
  * @param occurredAt   事件写入时间，取自库里的 {@code created_at}（TIMESTAMPTZ），业务判断以它为准
  */
@@ -41,5 +42,15 @@ public record DomainEvent(long eventId, String eventType, String aggregateKey,
     /** 从 payload 里取一个整数字段（金额、ID），非整数返回 null。 */
     public Long longField(String key) {
         return JsonPayloadReader.readLong(payload, key);
+    }
+
+    /**
+     * 从 payload 里取一个布尔字段。
+     *
+     * <p>取不到或形状不对返回 {@code null}，由调用方决定"缺字段"是失败还是跳过——
+     * {@code PAYMENT_MATCHED} 的 {@code settled} 缺失时必须走"失败/不回补"，不能默认成 true。</p>
+     */
+    public Boolean booleanField(String key) {
+        return JsonPayloadReader.readBoolean(payload, key);
     }
 }

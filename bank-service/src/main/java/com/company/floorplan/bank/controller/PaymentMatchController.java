@@ -48,7 +48,7 @@ public class PaymentMatchController {
     @PostMapping("/match")
     @RequirePermission(Permission.REPAYMENT_EXECUTE)
     public ApiResponse<MatchRunSummary> matchAll(HttpServletRequest http) {
-        return ApiResponse.ok(service.matchAll(AuditActor.resolve(http)), traceId());
+        return ApiResponse.ok(service.matchAll(AuditActor.resolve(http), traceId(http)), traceId());
     }
 
     /** 触发单笔流水匹配。 */
@@ -57,7 +57,8 @@ public class PaymentMatchController {
     public ApiResponse<MatchRunResult> matchOne(@PathVariable String transactionId,
                                                 @RequestParam String accountRef,
                                                 HttpServletRequest http) {
-        return ApiResponse.ok(service.matchOne(accountRef, transactionId, AuditActor.resolve(http)), traceId());
+        return ApiResponse.ok(service.matchOne(accountRef, transactionId,
+                AuditActor.resolve(http), traceId(http)), traceId());
     }
 
     /** 查询匹配结论（可按状态过滤）。 */
@@ -81,7 +82,7 @@ public class PaymentMatchController {
                                                  @RequestBody ManualMatchRequest body,
                                                  HttpServletRequest http) {
         PaymentMatch match = service.manualMatch(accountRef, transactionId,
-                body == null ? null : body.vin(), AuditActor.resolve(http));
+                body == null ? null : body.vin(), AuditActor.resolve(http), traceId(http));
         return ApiResponse.ok(match, traceId());
     }
 
@@ -107,5 +108,14 @@ public class PaymentMatchController {
 
     private static String traceId() {
         return UUID.randomUUID().toString();
+    }
+
+    /**
+     * 事件里的 traceId：优先沿用网关透传的 {@code X-Request-Id}，这样回款匹配事件能和
+     * 这次 HTTP 请求的日志、审计串成同一条链；没有请求头时才生成。
+     */
+    private static String traceId(HttpServletRequest http) {
+        String requestId = http == null ? null : http.getHeader("X-Request-Id");
+        return requestId == null || requestId.isBlank() ? traceId() : requestId;
     }
 }

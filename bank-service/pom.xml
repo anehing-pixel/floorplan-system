@@ -40,6 +40,14 @@
       <groupId>com.alibaba.cloud</groupId>
       <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
     </dependency>
+    <!-- 2026-11-24：回款匹配启用 @EnableFeignClients 调用 loan-service。
+         common 只声明 openfeign，FeignClientFactoryBean 解析 name="loan-service" 时
+         需要 LoadBalancerClient，否则启动即抛 "No Feign Client for loadBalancing defined"。
+         版本由 spring-cloud BOM 统一管理（与 web 的处理一致）。 -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+    </dependency>
     <!-- 单元测试：VIN 匹配边界、幂等、释放编排顺序；纯 JUnit，不需 Spring 上下文 -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

@@ -172,4 +172,18 @@ public class CreditApplicationService {
     public List<CreditLine> listByDealer(Long dealerId) {
         return creditLineRepository.findByDealerId(dealerId);
     }
+
+    /**
+     * 可用额度（冻结契约 {@code GET /api/credit-lines/{id}/available}）。
+     *
+     * <p>契约 §6.4 规定返回整数日元，负数截 0。这里是只读查询；真实回补/占用都在各自用例的行锁事务里，
+     * 不走这个端点。实现它是为了把 W0 留下的死契约接上（PROGRESS Q-EVT2 的二选一：
+     * 实现 {@code CreditLineQueryClient} 这条，删除另一条 BigDecimal 死契约）。</p>
+     */
+    @Transactional(readOnly = true)
+    public long available(Long creditLineId) {
+        CreditLine line = creditLineRepository.findById(creditLineId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_001, "额度不存在：" + creditLineId));
+        return Math.max(0L, line.available());
+    }
 }

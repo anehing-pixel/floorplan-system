@@ -10,7 +10,8 @@ package com.company.floorplan.common.contract;
  *
  * <p><b>本类的定位是"投影子集"，不是新的响应形状</b>：loan-service 的实际响应
  * {@code data} 是完整借据对象（{@code docs/接口契约-V16借据.md} §2.3 已冻结 15 个键），
- * 这里只取 bank 做匹配与回补判定必需、且 W1 期间不许改的 7 个。
+ * 这里只取 bank 做匹配与回补判定必需、且 W1 期间不许改的 8 个
+ * （2026-11-24 追加 {@code creditLineId}，理由见字段注释）。
  * Spring Boot 默认关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES}，多余的 JSON 键会被忽略，
  * 因此调用方可以只读这 7 个字段而不必跟着借据实体的字段漂移。</p>
  *
@@ -38,6 +39,16 @@ public class LoanSnapshotDto {
     /** 经销商 id，额度回补按它归户 */
     private Long dealerId;
 
+    /**
+     * 额度线 id（{@code loans.credit_line_id}），额度回补的目标。
+     *
+     * <p>2026-11-24 追加：PAYMENT_MATCHED 的消费方 credit-service 必须按额度线行锁回补，
+     * 仅凭 dealerId 无法在多条额度线之间定位。这是 additive 字段，不改变已有 7 个字段的口径；
+     * 实现方 loan-service 的响应本来就带 {@code creditLineId}（契约 §6.3 样例），
+     * 只是 W0 的 7 字段投影没有声明它。</p>
+     */
+    private Long creditLineId;
+
     /** 借据状态（如 ACTIVE / OVERDUE / SETTLED），取值口径以 loan-service 为准 */
     private String status;
 
@@ -46,6 +57,9 @@ public class LoanSnapshotDto {
 
     /** 到期日，ISO 日期字符串 yyyy-MM-dd */
     private String dueDate;
+
+    public Long getCreditLineId() { return creditLineId; }
+    public void setCreditLineId(Long creditLineId) { this.creditLineId = creditLineId; }
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }

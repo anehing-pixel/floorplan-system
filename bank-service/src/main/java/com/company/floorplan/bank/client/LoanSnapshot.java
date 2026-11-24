@@ -19,6 +19,8 @@ public record LoanSnapshot(
         Long advanceId,
         String vin,
         Long dealerId,
+        /** 额度线 id（loans.credit_line_id）。PAYMENT_MATCHED 的消费方按它行锁回补。 */
+        Long creditLineId,
         Long principal,
         LocalDate dueDate,
         String status,

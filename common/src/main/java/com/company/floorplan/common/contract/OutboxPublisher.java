@@ -20,7 +20,11 @@ public interface OutboxPublisher {
      * 在调用方事务内写一个 outbox 事件。
      *
      * @param eventType 事件名，用上面的常量
-     * @param aggregateKey 聚合键（通常是 vin 或借据号），消费端幂等锚点
+     * @param aggregateKey 聚合键 =「这一次发生」的主键（LOAN_CREATED 用 advanceId、
+     *                     PAYMENT_MATCHED 用 paymentRef），<b>禁止用 vin</b>。
+     *                     {@code JdbcOutboxPublisher} 的抑制条件是同键已有 PENDING/SENT，
+     *                     而 SENT 行永久保留——用 vin 会把同一台车的第二次合法事件永久吞掉。
+     *                     （V21 迁移注释里"vin 或借据号"的旧措辞已作废，迁移冻结不可改。）
      * @param payload JSON 字符串，必须包含 vin + traceId 两个字段
      */
     void publish(String eventType, String aggregateKey, String payload);

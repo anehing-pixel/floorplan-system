@@ -77,6 +77,19 @@ public class CreditLineController {
         return ApiResponse.ok(service.summary(id), UUID.randomUUID().toString());
     }
 
+    /**
+     * 可用额度（冻结契约 {@code CreditLineQueryClient}，契约文档 §6.4）。
+     *
+     * <p>2026-11-24 实现：此前该路径没有控制器，请求落到静态资源兜底，实测 500 SYS_001。
+     * 返回整数日元的 {@code data}，额度不存在 → 404 {@code NOT_FOUND_001}，负数截 0。
+     * 只读取额度线，不参与占用/回补——那两条都在各自用例的行锁事务里。</p>
+     */
+    @GetMapping("/{id}/available")
+    @RequirePermission(Permission.CREDIT_MANAGE)
+    public ApiResponse<Long> available(@PathVariable Long id) {
+        return ApiResponse.ok(service.available(id), UUID.randomUUID().toString());
+    }
+
     @GetMapping
     public ApiResponse<List<CreditLine>> listByDealer(@RequestParam Long dealerId) {
         return ApiResponse.ok(service.listByDealer(dealerId), UUID.randomUUID().toString());
