@@ -20,6 +20,7 @@
   ㉓ 担保权属权威源（ADR-Q27：门禁直读 V10 / #29 权限点 / #31 批量对账不改账）
   ㉔ 外围微服务网关可达性（loan / recon / release / bank / collateral-reg 全部端点经网关可达，不被 core 兜底）
   ㉕ 对拍 8 条规则全实现（业务口径总定源 ADR：R5-R8 真实取数 / ruleCount==8 / 差异类型非 TODO）
+  ㉖ 安全基线（JWT 撤销 / 权限回查 / 退出登录后旧令牌失效）
 """
 import json
 import os
@@ -198,7 +199,9 @@ def reset_test_data():
     这与业务侧"有车有额度时禁止删经销商"的护栏是同一条引用完整性约束，
     只是冒烟脚本作为数据维护工具有直接操作库的能力。
     """
-    sql = ("DELETE FROM interest_ledger WHERE vin LIKE 'TEST%'; "
+    sql = ("DELETE FROM user_roles WHERE username LIKE 'SEC-SMOKE-%'; "
+           "DELETE FROM users WHERE username LIKE 'SEC-SMOKE-%'; "
+           "DELETE FROM interest_ledger WHERE vin LIKE 'TEST%'; "
            "DELETE FROM interest_ledger_archive WHERE vin LIKE 'TEST%'; "
            "DELETE FROM curtailment_payments WHERE vin LIKE 'TEST%'; "
            "DELETE FROM repayments WHERE vin LIKE 'TEST%'; "
@@ -1271,13 +1274,60 @@ def main():
     ok(seen_types.issubset(new_types),
        "R5-R8 差异类型均为 ADR 裁决的真实类型 -> %s" % (sorted(seen_types) or "本批次无 R5-R8 差异"))
 
+    # ㉖ 安全基线（2026-11-24）：JWT 撤销 + 权限回查 + 退出登录语义。
+    # 用一次性用户，避免动到种子账号；角色用 PURCHASE_REVIEWER（持 VEHICLE_VERIFY）。
+    print("\n㉖ 安全基线：JWT 撤销 + 权限回查")
+    sec_user = "SEC-SMOKE-" + TS
+    sec_pwd = "sec12345"
+    psql("DELETE FROM user_roles WHERE username='%s'; DELETE FROM users WHERE username='%s'; "
+         "INSERT INTO users (username, password_hash, display_name, role, enabled) "
+         "VALUES ('%s', crypt('%s', gen_salt('bf',10)), '安全冒烟用户', 'PURCHASE_REVIEWER', TRUE); "
+         "INSERT INTO user_roles (username, role_code, is_primary) "
+         "VALUES ('%s','PURCHASE_REVIEWER',TRUE);"
+         % (sec_user, sec_user, sec_user, sec_pwd, sec_user))
+
+    st, res = call("POST", "/api/auth/login", {"username": sec_user, "password": sec_pwd})
+    sec_token = (res.get("data") or {}).get("token")
+    ok(st == 200 and bool(sec_token), "安全冒烟用户登录 -> %s" % st)
+    st, res = call("GET", "/api/credit-lines/%d" % credit_line_id, token=sec_token)
+    ok(st == 200, "持有效令牌读额度 -> %s" % st)
+
+    # 权限回查：令牌原样不动，只删 user_roles；同一令牌必须立即失去权限。
+    # 先确认移除前能过 VEHICLE_VERIFY 门禁（不是 403 即可，body 是否合法不影响门禁）。
+    st, res = call("POST", "/api/vehicles/batch-ingest", {
+        "dealerId": dealer_id, "creditLineId": credit_line_id,
+        "purchaseChannel": "OEM", "supplierName": "安全测试",
+        "vehicles": [], "idempotencyKey": "sec-" + TS}, token=sec_token)
+    ok(st != 403 and res.get("code") != "AUTH_002",
+       "移除角色前 PURCHASE_REVIEWER 可过 VEHICLE_VERIFY -> %s/%s" % (st, res.get("code")))
+    psql("DELETE FROM user_roles WHERE username='%s';" % sec_user)
+    st, res = call("POST", "/api/vehicles/batch-ingest", {
+        "dealerId": dealer_id, "creditLineId": credit_line_id,
+        "purchaseChannel": "OEM", "supplierName": "安全测试",
+        "vehicles": [], "idempotencyKey": "sec-" + TS}, token=sec_token)
+    ok(st == 403 and res.get("code") == "AUTH_002",
+       "删除 user_roles 后同一令牌立即 403（权限回查，不等令牌过期）-> %s/%s" % (st, res.get("code")))
+
+    # 撤销：退出登录 = token_version +1；旧令牌立即 401，账号本身仍可重新登录。
+    st, res = call("POST", "/api/auth/logout", {}, token=sec_token)
+    ok(st == 200 and (res.get("data") or {}).get("revoked") is True,
+       "退出登录 -> %s（token_version +1）" % st)
+    st, res = call("GET", "/api/credit-lines/%d" % credit_line_id, token=sec_token)
+    ok(st == 401 and res.get("code") == "AUTH_001",
+       "退出登录后旧令牌立即 401（可撤销，不等 8 小时过期）-> %s/%s" % (st, res.get("code")))
+    st, res = call("POST", "/api/auth/login", {"username": sec_user, "password": sec_pwd})
+    ok(st == 200 and bool((res.get("data") or {}).get("token")),
+       "重新登录仍成功（撤销的是旧令牌，不是禁用账号）-> %s" % st)
+    psql("DELETE FROM user_roles WHERE username='%s'; DELETE FROM users WHERE username='%s';"
+         % (sec_user, sec_user))
+
     print("\n" + "=" * 68)
     if FAILS:
         print("冒烟测试失败 %d 项：" % len(FAILS))
         for f in FAILS:
             print("  - " + f)
         sys.exit(1)
-    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉓）+ 外围服务网关可达性（㉔）+ 对拍 8 条规则全实现（㉕）验证通过")
+    print("全部通过 ✅  业务闭环七环节 + 流程缺口 P0/P1（⑧~⑱）+ 权限/CRUD/聚合/角色矩阵（⑲~㉓）+ 外围服务网关可达性（㉔）+ 对拍 8 条规则全实现（㉕）+ 安全基线（㉖）验证通过")
     print("=" * 68)
 
 
