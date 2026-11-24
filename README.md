@@ -6,6 +6,7 @@
 现已是 **DDD 四层 + Spring Cloud 微服务**架构：网关统一入口，核心账务留在单体守住事务红线，外围按限界上下文拆成独立服务，走网关的冒烟测试**全绿**（断言数随开发增长，以 `run-microservices.sh smoke` 的 FAIL=0 为准；另有 USED、浏览器、Redis 锁三套专项冒烟）。
 
 > 🖼️ **可视化架构图**：[`docs/architecture.html`](docs/architecture.html)（自包含 HTML + 内联 SVG，浏览器直接打开，可打印）。
+> 📖 **每个服务做什么（业务语言）**：[`docs/服务说明/README.md`](docs/服务说明/README.md)（11 个服务一个一份，先看总览）。
 
 > 🤖 **在本仓库写代码前先读 [`AGENTS.md`](AGENTS.md)**：环境坑、构建与验收判据、迁移号段、
 > 共享文件禁区、已裁决的业务口径红线、反模式清单都在里面。
