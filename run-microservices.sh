@@ -195,10 +195,23 @@ case "${1:-}" in
     do_stop
     exit $RC
     ;;
+  redis-smoke)
+    # Redis 锁实例冒烟：启动 Redis → 以 LOCK_PROVIDER=redis 起服务 → 跑断言 → 清理。
+    # 不启用作息调度（FLOORPLAN_JOBS_ENABLED 默认 false），只验证锁 provider。
+    bash run-redis.sh || exit 1
+    export LOCK_PROVIDER=redis
+    do_start || { do_stop; exit 1; }
+    echo "=== Redis 锁实例冒烟 ==="
+    SMOKE_BASE=http://127.0.0.1:18080 "$PYTHON" smoke_redis_lock.py
+    RC=$?
+    echo "=== Redis 锁冒烟退出码: $RC ==="
+    do_stop
+    exit $RC
+    ;;
   stop)
     do_stop
     ;;
   *)
-    echo "用法: $0 {start|stop|smoke}"; exit 1
+    echo "用法: $0 {start|stop|smoke|redis-smoke}"; exit 1
     ;;
 esac
