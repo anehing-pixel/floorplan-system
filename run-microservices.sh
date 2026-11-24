@@ -152,6 +152,7 @@ do_start() {
     echo ""
     echo "全部就绪。网关入口: http://127.0.0.1:18080"
     echo "跑冒烟测试: SMOKE_BASE=http://127.0.0.1:18080 $PYTHON smoke-test.py"
+    echo "          + $PYTHON smoke_payment_matched.py（事件链路）"
 }
 
 do_stop() {
@@ -178,10 +179,19 @@ case "${1:-}" in
   smoke)
     # 启动 → 走网关跑冒烟 → 无论结果都清理，全在一条命令生命周期内，避免 JVM 被回收
     do_start || { do_stop; exit 1; }
-    echo "=== 通过网关跑冒烟测试 ==="
+    echo "=== 通过网关跑主干冒烟 ==="
     SMOKE_BASE=http://127.0.0.1:18080 "$PYTHON" smoke-test.py
-    RC=$?
-    echo "=== 冒烟退出码: $RC ==="
+    RC1=$?
+    echo "=== 主干冒烟退出码: $RC1 ==="
+    # 事件链路（LOAN_CREATED 四条丢失断言 + PAYMENT_MATCHED 生产/消费）单独一个脚本：
+    # 两段的数据链互不相干，任何一段失败不应让另一段一条断言都跑不到。
+    echo "=== 通过网关跑事件链路冒烟 ==="
+    SMOKE_BASE=http://127.0.0.1:18080 "$PYTHON" smoke_payment_matched.py
+    RC2=$?
+    echo "=== 事件链路冒烟退出码: $RC2 ==="
+    RC=0
+    if [ "$RC1" -ne 0 ] || [ "$RC2" -ne 0 ]; then RC=1; fi
+    echo "=== 冒烟总退出码: $RC（主干 $RC1 / 事件 $RC2）==="
     do_stop
     exit $RC
     ;;
