@@ -38,6 +38,13 @@ spring:
           uri: ${ROUTE_BANK:lb://bank-service}
           predicates:
             - Path=/api/jobs/bank-fetch
+        # 经销商结算账户：端点在 web（SupplierController），但 /api/dealers/** 整段归 credit。
+        # 不先拦住会被 credit 路由接走 → credit 无此端点 → 经网关 404。
+        # 断点复现：POST /api/dealers/{id}/bank-accounts；回归断言见 smoke-test.py ㉑ 前。
+        - id: core-dealer-bank-accounts
+          uri: ${ROUTE_CORE:lb://floorplan-core}
+          predicates:
+            - Path=/api/dealers/*/bank-accounts
 
         # ---------------- 认证服务 ----------------
         - id: auth
@@ -51,7 +58,9 @@ spring:
           predicates:
             - Path=/api/dealers/**,/api/credit-lines/**,/api/rating-configs/**,/api/annual-reviews/**
         # 注意：/api/dealers/** 整段归 credit（含 /{id}/vehicles、/risk-grade），
-        # 因为 DealerApplicationService 已带这些查询；若日后 web 仍需 dealers 读接口，再细分。
+        # 因为 DealerApplicationService 已带这些查询；**唯一例外**是
+        # /api/dealers/*/bank-accounts（web 的 SupplierController），已在上方用精确路由先拦住。
+        # 若日后 web 还需 dealers 读接口，照此方式加精确路由，别把整段改回 core。
 
         # ---------------- 风控服务（预警/盘点/违约处置/担保台账）----------------
         - id: risk
