@@ -250,6 +250,15 @@ def insert_outbox(event_type, aggregate_key, payload, status="PENDING"):
     return eid
 
 
+def set_security(vin, reg_no):
+    """在匹配前把担保登记做上：解押消费方要有东西可释放。"""
+    st, res = call("POST", "/api/vehicles/%s/security" % vin,
+                   {"securityType": "RETENTION", "regNo": reg_no, "ownerName": "金融公司"},
+                   token=login("settlement"))
+    ok(st == 200 and D(res).get("securityStatus") == "REGISTERED",
+       "设定担保 %s -> %s/%s" % (vin, st, D(res).get("securityStatus")))
+
+
 def insert_payment_tx(tx_id, amount, reference):
     sql = ("INSERT INTO payment_transactions "
            "(transaction_id, account_ref, value_date, amount, reference, match_status, source) "
@@ -288,6 +297,7 @@ def cleanup():
         "DELETE FROM outbox_events WHERE payload LIKE '%%%s%%' OR payload LIKE '%%%s%%' "
         " OR payload LIKE '%%%s%%' OR payload LIKE '%%%s%%'; "
         "DELETE FROM credit_line_restorations WHERE payment_ref LIKE 'PMTX%%%s%%'; "
+        "DELETE FROM payment_security_releases WHERE payment_ref LIKE 'PMTX%%%s%%'; "
         "DELETE FROM lien_releases WHERE %s; "
         "DELETE FROM credit_restores WHERE %s; "
         "DELETE FROM payment_matches WHERE %s; "
@@ -296,16 +306,19 @@ def cleanup():
         "DELETE FROM loan_status_history WHERE loan_id IN (SELECT id FROM loans WHERE vin IN %s); "
         "DELETE FROM loans WHERE vin IN %s; "
         "DELETE FROM advances WHERE vin IN %s; "
+        "DELETE FROM collateral_registration_items WHERE vin IN %s; "
         "DELETE FROM collateral_evidence_links WHERE vin IN %s; "
         "DELETE FROM collateral_ledger WHERE vin IN %s; "
+        "DELETE FROM collateral_registration_batches WHERE registration_no LIKE 'PM-REG-%%%s%%'; "
         "DELETE FROM vehicle_units WHERE vin IN %s; "
         "DELETE FROM credit_lines WHERE dealer_id = %s; "
         "DELETE FROM dealers WHERE id = %s;"
     ) % (VIN_FULL, VIN_PARTIAL, VIN_MANUAL, VIN_BAD,
          VIN_FULL, VIN_PARTIAL, VIN_MANUAL, VIN_BAD,
-         TAG, tx_like, tx_like, tx_like, tx_like,
+         TAG, TAG,
+         tx_like, tx_like, tx_like, tx_like,
          vins, vins, vins, vins, vins, vins, vins,
-         DEALER_ID, DEALER_ID)
+         TAG, vins, DEALER_ID, DEALER_ID)
     if DEALER_ID is not None and psql(sql) is None:
         print("  [INFO] 清理未执行（psql 不可用或语句失败；不影响断言结论）")
 
@@ -326,6 +339,7 @@ def main():
     advance_id = full["advance_id"]
     loan_id = full["loan_id"]
     principal = full["principal"]
+    set_security(VIN_FULL, "PM-REG-FULL-" + TAG)
 
     ok(as_int("SELECT count(*) FROM outbox_events WHERE event_type='LOAN_CREATED' "
               "AND aggregate_key='%d'" % advance_id) == 1,
@@ -438,6 +452,33 @@ def main():
               "AND after_snapshot LIKE '%%paymentRef=%s%%'" % tx_full) >= 1,
        "C1 回补写审计（带 paymentRef 与 traceId）")
 
+    # C1b：core（floorplan-core）消费同一事件，真正解除担保（不碰额度）
+    def core_released():
+        # 等到完整终态再断言，避免"认领行已可见、明细还没回填"的假绿
+        v = one("SELECT status || '|' || ledger_released || '|' || cancellation_requested "
+                "FROM payment_security_releases WHERE payment_ref='%s'" % tx_full)
+        return v if v == "RELEASED|true|true" else None
+    ok(wait_until("core 解押释放", core_released, timeout=40) is not None,
+       "C1b core 消费 PAYMENT_MATCHED 并落解押台账")
+    ok(one("SELECT status FROM event_consumptions WHERE event_id=%d AND consumer='floorplan-core'"
+           % event_id) == "DONE", "C1b core 消费者对同一事件标 DONE")
+    ok(one("SELECT security_status FROM vehicle_units WHERE vin='%s'" % VIN_FULL) == "RELEASED",
+       "C1b vehicle_units.security_status -> RELEASED（真正解押，不是只写 V17 留痕）")
+    ledger_row = one("SELECT released || '|' || coalesce(release_reason,'NULL') "
+                     "FROM collateral_ledger WHERE vin='%s'" % VIN_FULL)
+    ok(ledger_row == "true|PAYMENT_MATCHED",
+       "C1b collateral_ledger 已解除担保，原因 PAYMENT_MATCHED -> %r" % ledger_row)
+    ok(one("SELECT cancellation_status FROM collateral_registration_batches "
+           "WHERE registration_no='PM-REG-FULL-%s'" % TAG) == "REQUESTED",
+       "C1b 登记批次抹消状态 -> REQUESTED（不冒充 DONE）")
+    release_row = one("SELECT status || '|' || ledger_released || '|' || cancellation_requested "
+                      "FROM payment_security_releases WHERE payment_ref='%s'" % tx_full)
+    ok(release_row == "RELEASED|true|true",
+       "C1b 解押台账记录 RELEASED + 台账已解除 + 抹消已发起 -> %r" % release_row)
+    ok(as_int("SELECT count(*) FROM audit_events WHERE action='RELEASE_SECURITY' "
+              "AND after_snapshot LIKE '%%paymentRef=%s%%'" % tx_full) >= 1,
+       "C1b 解押写审计（带 paymentRef，可追回银行流水）")
+
     # B5：发布端 NOT EXISTS 去重（PAYMENT_MATCHED 那一半）。
     # PROGRESS §3 明确：重复匹配会先被 uk_payment_match_txn 挡住，要单独钉发布端机制，
     # 必须先删 payment_matches 行、保留已 SENT 的 outbox 行，再从 HTTP 入口重放匹配。
@@ -465,14 +506,24 @@ def main():
         return v if v in ("DONE", "DEAD") else None
     replay_done = wait_until("credit-service 消费重放事件", replay_terminal, timeout=30)
     ok(replay_done == "DONE", "C2 重放事件被消费并标 DONE（不是死信）")
+
+    def core_replay_terminal():
+        v = one("SELECT status FROM event_consumptions WHERE event_id=%d AND consumer='floorplan-core'"
+                % replay_event)
+        return v if v in ("DONE", "DEAD") else None
+    ok(wait_until("core 消费重放事件", core_replay_terminal, timeout=30) is not None,
+       "C2 core 也消费了重放事件（L2 认领冲突后直接返回）")
     time.sleep(1)
     ok(as_int("SELECT count(*) FROM credit_line_restorations WHERE payment_ref='%s'" % tx_full) == 1,
        "C2 同一 paymentRef 只回补一次（V80 唯一约束是 L2）")
+    ok(as_int("SELECT count(*) FROM payment_security_releases WHERE payment_ref='%s'" % tx_full) == 1,
+       "C2 同一 paymentRef 只解押一次（V81 唯一约束是 L2）")
     ok(as_int("SELECT used_amount FROM credit_lines WHERE id=%d" % CREDIT_LINE_ID) == 0,
        "C2 重放未把 used_amount 扣成负数")
 
     # C3：部分回款不解押、不回补
     part = finance_vehicle(VIN_PARTIAL)
+    set_security(VIN_PARTIAL, "PM-REG-PART-" + TAG)
     tx_partial = "PMTX-PART-" + TAG
     insert_payment_tx(tx_partial, part["principal"] // 2, "PARTIAL FOR " + VIN_PARTIAL)
     st, res = match_tx(tx_partial)
@@ -495,9 +546,19 @@ def main():
        "C3 消费方未回补部分回款")
     ok(as_int("SELECT used_amount FROM credit_lines WHERE id=%d" % CREDIT_LINE_ID) == part["principal"],
        "C3 部分回款后 used_amount 保持=%d" % part["principal"])
+    ok(one("SELECT security_status FROM vehicle_units WHERE vin='%s'" % VIN_PARTIAL) == "REGISTERED",
+       "C3 部分回款不解除担保：security_status 仍 REGISTERED")
+    ok(one("SELECT released FROM collateral_ledger WHERE vin='%s'" % VIN_PARTIAL) == "f",
+       "C3 部分回款不标记担保物台账已解除")
+    ok(one("SELECT cancellation_status FROM collateral_registration_batches "
+           "WHERE registration_no='PM-REG-PART-%s'" % TAG) == "NOT_DUE",
+       "C3 部分回款不生成抹消待办（批次仍 NOT_DUE）")
+    ok(as_int("SELECT count(*) FROM payment_security_releases WHERE payment_ref='%s'" % tx_partial) == 0,
+       "C3 core 未对部分回款执行解押")
 
     # C4：人工绑定也走真实回补
     manual = finance_vehicle(VIN_MANUAL)
+    set_security(VIN_MANUAL, "PM-REG-MAN-" + TAG)
     tx_manual = "PMTX-MAN-" + TAG
     insert_payment_tx(tx_manual, manual["principal"], "NO VIN IN THIS REFERENCE")
     st, res = match_tx(tx_manual)
@@ -511,6 +572,15 @@ def main():
     # 部分回款那台车仍占着额度，所以这里应等于它的本金，而不是 0
     ok(as_int("SELECT used_amount FROM credit_lines WHERE id=%d" % CREDIT_LINE_ID) == part["principal"],
        "C4 人工绑定回补后 used_amount = 部分回款车仍占用的 %d" % part["principal"])
+
+    def core_manual_released():
+        v = one("SELECT status || '|' || ledger_released || '|' || cancellation_requested "
+                "FROM payment_security_releases WHERE payment_ref='%s'" % tx_manual)
+        return v if v == "RELEASED|true|true" else None
+    ok(wait_until("core 处理人工绑定的解押", core_manual_released, timeout=40) is not None,
+       "C4 core 对人工绑定的结清也执行解押")
+    ok(one("SELECT security_status FROM vehicle_units WHERE vin='%s'" % VIN_MANUAL) == "RELEASED",
+       "C4 人工绑定后 vehicle_units.security_status -> RELEASED")
 
     print("\n" + "=" * 68)
     if FAILS:
