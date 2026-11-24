@@ -235,6 +235,8 @@ def reset_test_data():
            "  (SELECT id FROM dealers WHERE dealer_code LIKE 'DL-SMOKE-%' "
            "   OR dealer_code LIKE 'DL-CRUD-%' OR dealer_code LIKE 'DL-OP-%' "
            "   OR dealer_code LIKE 'DL-GUARD-%'); "
+           # 网关路由回归测试创建的经销商结算账户（V7 dealer_bank_accounts）
+           "DELETE FROM dealer_bank_accounts WHERE account_ref LIKE 'ACC-GW-%'; "
            # 最后删经销商本身
            "DELETE FROM dealers WHERE dealer_code LIKE 'DL-SMOKE-%' "
            "  OR dealer_code LIKE 'DL-CRUD-%' OR dealer_code LIKE 'DL-OP-%' "
@@ -940,6 +942,17 @@ def main():
     ok(status == 200, "删除空档经销商成功 -> %s" % status)
     status, res = call("GET", "/api/dealers/%d" % tmp_id)
     ok(status == 404, "删除后再查为 404 -> %s" % status)
+
+    # 网关精确路由回归（2026-11-24）：/api/dealers/** 整段归 credit，
+    # 但经销商结算账户端点在 web（SupplierController）。缺少
+    # /api/dealers/*/bank-accounts 精确路由时，经网关会被 credit 接走 -> 404。
+    # 只直连 web 测不出来，必须经网关；这条断言与 gateway 的 GatewayRouteOrderTest 双保险。
+    status, res = call("POST", "/api/dealers/%d/bank-accounts" % dealer_id, {
+        "bankName": "テスト銀行", "accountHolder": "テスト車商",
+        "accountNo": "1234567" + TS[-4:], "accountRef": "ACC-GW-" + TS,
+        "effectiveFrom": today.isoformat()}, token=login_role("import_op"))
+    ok(status == 200 and res.get("data", {}).get("accountRef") == "ACC-GW-" + TS,
+       "POST /api/dealers/{id}/bank-accounts 经网关归 web（未被 credit 路由吞掉）-> %s" % status)
 
     print("\n㉑ 名下车辆聚合视图")
     status, res = call("GET", "/api/dealers/%d/vehicles" % dealer_id)
