@@ -1,16 +1,15 @@
 package com.company.floorplan.web.config;
 
 import com.company.floorplan.application.service.AuthApplicationService;
+import com.company.floorplan.application.service.AuthApplicationService.AuthContext;
 import com.company.floorplan.domain.exception.BusinessException;
 import com.company.floorplan.domain.exception.ErrorCode;
 import com.company.floorplan.domain.model.Permission;
 import com.company.floorplan.domain.model.UserRole;
-import com.company.floorplan.domain.service.RoleSeparationPolicy;
 import com.company.floorplan.web.dto.ApiResponse;
 import com.company.floorplan.web.security.RequireAdmin;
 import com.company.floorplan.web.security.RequirePermission;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -20,8 +19,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.util.Collection;
-import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -81,9 +78,9 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             throw new BusinessException(ErrorCode.AUTH_001, Map.of("reason", "NO_TOKEN"));
         }
 
-        Claims claims;
+        AuthContext auth;
         try {
-            claims = authService.verify(header.substring(7));   // 去掉 "Bearer " 前缀
+            auth = authService.verify(header.substring(7));   // 去掉 "Bearer " 前缀
         } catch (BusinessException ex) {
             // 验签失败：不要 500，明确写 401 + 统一错误结构
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
@@ -94,16 +91,15 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             return false;  // 拦下，不进业务代码
         }
 
-        String username = claims.getSubject();
-        String role = claims.get("role") == null ? null : String.valueOf(claims.get("role"));
+        String username = auth.username();
+        String role = auth.primaryRole();
         request.setAttribute("authUsername", username);
         request.setAttribute("authRole", role);
-        // 角色集合与有效权限点：令牌里直接带权限点，拦截器无需回查数据库。
-        // 带权限点而非只带角色，是为了避免每个请求都查一次 user_roles；
-        // 代价是"角色调整"要等令牌过期才生效——这在金融系统里是可接受的
-        // （紧急撤权走"禁用账号"通道，禁用后重新登录即失效）。
-        Set<UserRole> roles = parseRoles(claims);
-        Set<Permission> permissions = parsePermissions(claims);
+        // 角色与权限来自本次请求的库内回查（AuthApplicationService.verify）：
+        // 不再信任令牌里的 perms 快照。角色调整、退出登录（token_version +1）、
+        // 禁用账号都会在下一次请求立即生效，而不是等 8 小时令牌过期。
+        Set<UserRole> roles = auth.roles();
+        Set<Permission> permissions = auth.permissions();
         request.setAttribute("authRoles", roles);
         request.setAttribute("authPermissions", permissions);
         // 回填给 RequestLoggingFilter：过滤器在拦截器之前执行，日志写在其 finally 里，
@@ -136,69 +132,6 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         }
 
         return true;   // 放行，进入业务代码
-    }
-
-    /**
-     * 从令牌载荷解析角色集合。
-     *
-     * <p>兼容两种载荷：多角色数组 {@code roles}，与旧版单值 {@code role}。
-     * 旧令牌的 {@code role=ADMIN} 会被映射为 {@link UserRole#SYSTEM_ADMIN}，
-     * {@code role=USER} 映射为 {@link UserRole#READONLY_USER}。</p>
-     */
-    private Set<UserRole> parseRoles(Claims claims) {
-        Set<UserRole> roles = new LinkedHashSet<>();
-        Object raw = claims.get("roles");
-        if (raw instanceof Collection<?> list) {
-            for (Object item : list) {
-                if (item == null) continue;
-                try {
-                    roles.add(UserRole.valueOf(String.valueOf(item)));
-                } catch (IllegalArgumentException ignored) {
-                    // 令牌里出现未知角色（枚举演进后旧令牌残留）：跳过，不放行任何权限
-                    log.debug("令牌含未知角色，已忽略：{}", item);
-                }
-            }
-        }
-        if (roles.isEmpty()) {
-            String legacy = claims.get("role") == null ? null : String.valueOf(claims.get("role"));
-            if (legacy != null) {
-                if ("ADMIN".equals(legacy)) {
-                    roles.add(UserRole.SYSTEM_ADMIN);
-                } else if ("USER".equals(legacy)) {
-                    roles.add(UserRole.READONLY_USER);
-                } else {
-                    try {
-                        roles.add(UserRole.valueOf(legacy));
-                    } catch (IllegalArgumentException ignored) {
-                        // 未知角色按无权限处理
-                    }
-                }
-            }
-        }
-        return roles;
-    }
-
-    /**
-     * 从令牌载荷解析有效权限点集合。
-     *
-     * <p>优先用令牌里直接签发的 {@code perms}；缺失时由角色推导
-     * （兼容手工构造的旧令牌）。</p>
-     */
-    private Set<Permission> parsePermissions(Claims claims) {
-        Set<Permission> permissions = new LinkedHashSet<>();
-        Object raw = claims.get("perms");
-        if (raw instanceof Collection<?> list) {
-            for (Object item : list) {
-                if (item == null) continue;
-                try {
-                    permissions.add(Permission.valueOf(String.valueOf(item)));
-                } catch (IllegalArgumentException ignored) {
-                    log.debug("令牌含未知权限点，已忽略：{}", item);
-                }
-            }
-            return permissions;
-        }
-        return RoleSeparationPolicy.effectivePermissions(parseRoles(claims));
     }
 
     /** 是否拥有全部所需权限点。 */

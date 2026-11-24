@@ -30,6 +30,9 @@ public class JdbcAuthUserRepository implements AuthUserRepository {
         u.setDisplayName(rs.getString("display_name"));
         u.setRole(rs.getString("role"));
         u.setEnabled(rs.getBoolean("enabled"));
+        // V82：JWT 撤销版本号。旧库未迁移时该列不存在，但迁移链保证启动前已建；
+        // 这里不做"列缺失就吞异常"的降级——吞了会让撤销静默失效，宁可启动失败。
+        u.setTokenVersion(rs.getInt("token_version"));
         return u;
     };
 
@@ -63,5 +66,11 @@ public class JdbcAuthUserRepository implements AuthUserRepository {
             }
         }
         return roles;
+    }
+
+    @Override
+    public int bumpTokenVersion(String username) {
+        return jdbc.update("UPDATE users SET token_version = token_version + 1 WHERE username = ?",
+                username);
     }
 }

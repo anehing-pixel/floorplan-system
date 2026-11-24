@@ -1,6 +1,7 @@
 package com.company.floorplan.common.config;
 
 import com.company.floorplan.application.service.AuthApplicationService;
+import com.company.floorplan.application.service.AuthApplicationService.AuthContext;
 import com.company.floorplan.common.dto.ApiResponse;
 import com.company.floorplan.common.security.RequireAdmin;
 import com.company.floorplan.common.security.RequirePermission;
@@ -8,9 +9,7 @@ import com.company.floorplan.domain.exception.BusinessException;
 import com.company.floorplan.domain.exception.ErrorCode;
 import com.company.floorplan.domain.model.Permission;
 import com.company.floorplan.domain.model.UserRole;
-import com.company.floorplan.domain.service.RoleSeparationPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -20,8 +19,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.util.Collection;
-import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -29,8 +26,13 @@ import java.util.UUID;
 /**
  * JWT 认证拦截器（全服务共用，从 web 版迁入）。
  *
- * <p>两道关：认证（令牌签名/过期）→ 授权（接口声明的权限点）。
+ * <p>两道关：认证（令牌签名/过期/撤销版本/账号启用状态）→ 授权（接口声明的权限点）。
  * 验签通过把操作人放入请求属性，供审计兜底。</p>
+ *
+ * <p><b>权限来源</b>（2026-11-24 起）：{@code AuthApplicationService.verify()} 每次请求从
+ * {@code user_roles} 现算角色与有效权限，拦截器只使用返回的 {@link AuthContext}，
+ * <b>不再信任令牌里的 {@code perms}/{@code roles} 快照</b>。这样角色调整对已签发令牌立即生效，
+ * 退出登录（token_version +1）与禁用账号也会在下一次请求即失效。</p>
  *
  * <p>依赖 {@code AuthApplicationService.verify()} 验签，故 common 依赖 application 层；
  * 密钥来自 {@code floorplan.auth.secret}，各服务必须与 auth-service 一致。
@@ -65,9 +67,9 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             throw new BusinessException(ErrorCode.AUTH_001, Map.of("reason", "NO_TOKEN"));
         }
 
-        Claims claims;
+        AuthContext auth;
         try {
-            claims = authService.verify(header.substring(7));
+            auth = authService.verify(header.substring(7));
         } catch (BusinessException ex) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType("application/json;charset=UTF-8");
@@ -77,12 +79,12 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        String username = claims.getSubject();
-        String role = claims.get("role") == null ? null : String.valueOf(claims.get("role"));
+        String username = auth.username();
+        String role = auth.primaryRole();
         request.setAttribute("authUsername", username);
         request.setAttribute("authRole", role);
-        Set<UserRole> roles = parseRoles(claims);
-        Set<Permission> permissions = parsePermissions(claims);
+        Set<UserRole> roles = auth.roles();
+        Set<Permission> permissions = auth.permissions();
         request.setAttribute("authRoles", roles);
         request.setAttribute("authPermissions", permissions);
         request.setAttribute("requestLogActor", username);
@@ -110,55 +112,6 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         }
 
         return true;
-    }
-
-    private Set<UserRole> parseRoles(Claims claims) {
-        Set<UserRole> roles = new LinkedHashSet<>();
-        Object raw = claims.get("roles");
-        if (raw instanceof Collection<?> list) {
-            for (Object item : list) {
-                if (item == null) continue;
-                try {
-                    roles.add(UserRole.valueOf(String.valueOf(item)));
-                } catch (IllegalArgumentException ignored) {
-                    log.debug("令牌含未知角色，已忽略：{}", item);
-                }
-            }
-        }
-        if (roles.isEmpty()) {
-            String legacy = claims.get("role") == null ? null : String.valueOf(claims.get("role"));
-            if (legacy != null) {
-                if ("ADMIN".equals(legacy)) {
-                    roles.add(UserRole.SYSTEM_ADMIN);
-                } else if ("USER".equals(legacy)) {
-                    roles.add(UserRole.READONLY_USER);
-                } else {
-                    try {
-                        roles.add(UserRole.valueOf(legacy));
-                    } catch (IllegalArgumentException ignored) {
-                        // 未知角色按无权限处理
-                    }
-                }
-            }
-        }
-        return roles;
-    }
-
-    private Set<Permission> parsePermissions(Claims claims) {
-        Set<Permission> permissions = new LinkedHashSet<>();
-        Object raw = claims.get("perms");
-        if (raw instanceof Collection<?> list) {
-            for (Object item : list) {
-                if (item == null) continue;
-                try {
-                    permissions.add(Permission.valueOf(String.valueOf(item)));
-                } catch (IllegalArgumentException ignored) {
-                    log.debug("令牌含未知权限点，已忽略：{}", item);
-                }
-            }
-            return permissions;
-        }
-        return RoleSeparationPolicy.effectivePermissions(parseRoles(claims));
     }
 
     private boolean hasAllPermissions(Set<Permission> owned, Permission[] required) {

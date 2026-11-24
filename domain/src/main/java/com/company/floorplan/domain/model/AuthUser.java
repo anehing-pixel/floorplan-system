@@ -16,6 +16,15 @@ public class AuthUser {
     private String role;
     private boolean enabled;
 
+    /**
+     * JWT 撤销版本号（V82）。登录时写进令牌的 {@code ver} 声明；
+     * 每次请求验签后回查本值，不相等即判令牌失效。
+     *
+     * <p>退出登录 / 管理员强制下线 = 本值 +1，该账号所有已签发令牌立即失效。
+     * 旧令牌没有 {@code ver} 声明时按 -1 处理，同样失效（强制重新登录）。</p>
+     */
+    private int tokenVersion;
+
     public Long getId() {
         return id;
     }
@@ -62,5 +71,13 @@ public class AuthUser {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public int getTokenVersion() {
+        return tokenVersion;
+    }
+
+    public void setTokenVersion(int tokenVersion) {
+        this.tokenVersion = tokenVersion;
     }
 }

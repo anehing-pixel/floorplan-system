@@ -71,12 +71,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
+    /**
+     * 未知异常统一兜底。
+     *
+     * <p><b>不把 {@code ex.getMessage()} 回给客户端</b>：它可能含 SQL 片段、内部类名、
+     * 文件路径、连接串等实现细节（安全基线，2026-11-24）。客户端只拿到
+     * {@code SYS_001} 的固定文案与 traceId；完整异常栈进服务端日志，
+     * 排障时按 traceId 检索。</p>
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception ex, HttpServletRequest request) {
         String traceId = traceIdOf(request);
         log.error("系统异常 traceId={}", traceId, ex);
         ApiResponse<Void> body = ApiResponse.fail(
-                ErrorCode.SYS_001.getCode(), ErrorCode.SYS_001.getMessage() + "：" + ex.getMessage(), traceId, null);
+                ErrorCode.SYS_001.getCode(), ErrorCode.SYS_001.getMessage(), traceId, null);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }
 }

@@ -63,5 +63,11 @@
       <artifactId>poi-ooxml</artifactId>
       <version>5.2.5</version>
     </dependency>
+    <!-- 认证撤销/权限回查单测：纯 JUnit + 手写 Fake 仓储，不连库 -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>

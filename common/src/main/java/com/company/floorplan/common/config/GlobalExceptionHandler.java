@@ -29,10 +29,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex, HttpServletRequest request) {
         ErrorCode code = ex.getErrorCode();
-        String traceId = String.valueOf(request.getAttribute("traceId"));
-        if ("null".equals(traceId)) {
-            traceId = java.util.UUID.randomUUID().toString();
-        }
+        String traceId = traceIdOf(request);
         log.warn("业务异常 code={} traceId={} msg={}", code.getCode(), traceId, ex.getMessage());
         ApiResponse<Void> body = ApiResponse.fail(code.getCode(), ex.getMessage(), traceId, ex.getDetails());
         return ResponseEntity.status(HttpStatus.valueOf(code.getHttpStatus())).body(body);
@@ -45,10 +42,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex,
                                                                    HttpServletRequest request) {
-        String traceId = String.valueOf(request.getAttribute("traceId"));
-        if ("null".equals(traceId)) {
-            traceId = java.util.UUID.randomUUID().toString();
-        }
+        String traceId = traceIdOf(request);
         log.warn("入参校验失败 traceId={} msg={}", traceId, ex.getMessage());
         ApiResponse<Void> body = ApiResponse.fail(
                 ErrorCode.VALID_001.getCode(), ex.getMessage(), traceId, null);
@@ -63,22 +57,36 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException.class,
             HttpMessageNotReadableException.class})
     public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex, HttpServletRequest request) {
-        String traceId = String.valueOf(request.getAttribute("traceId"));
-        if ("null".equals(traceId)) {
-            traceId = java.util.UUID.randomUUID().toString();
-        }
+        String traceId = traceIdOf(request);
         log.warn("请求参数错误 traceId={} msg={}", traceId, ex.getMessage());
         ApiResponse<Void> body = ApiResponse.fail(
                 ErrorCode.VALID_001.getCode(), "请求参数错误：" + ex.getMessage(), traceId, null);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
+    /**
+     * 未知异常统一兜底。
+     *
+     * <p><b>不把 {@code ex.getMessage()} 回给客户端</b>：它可能含 SQL 片段、内部类名、
+     * 文件路径、连接串等实现细节（安全基线，2026-11-24）。客户端只拿到
+     * {@code SYS_001} 的固定文案与 traceId；完整异常栈进服务端日志，
+     * 排障时按 traceId 检索。</p>
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception ex, HttpServletRequest request) {
-        String traceId = java.util.UUID.randomUUID().toString();
+        String traceId = traceIdOf(request);
         log.error("系统异常 traceId={}", traceId, ex);
         ApiResponse<Void> body = ApiResponse.fail(
-                ErrorCode.SYS_001.getCode(), ErrorCode.SYS_001.getMessage() + "：" + ex.getMessage(), traceId, null);
+                ErrorCode.SYS_001.getCode(), ErrorCode.SYS_001.getMessage(), traceId, null);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+    }
+
+    /** 复用请求入口生成的 traceId；取不到时生成一个，保证响应体永远可报障。 */
+    private static String traceIdOf(HttpServletRequest request) {
+        Object existing = request.getAttribute("traceId");
+        if (existing == null || "null".equals(String.valueOf(existing))) {
+            return java.util.UUID.randomUUID().toString();
+        }
+        return String.valueOf(existing);
     }
 }

@@ -27,4 +27,14 @@ public interface AuthUserRepository {
      * @return 角色列表；无角色时返回空列表
      */
     List<UserRole> findRoles(String username);
+
+    /**
+     * 递增该用户的 JWT 版本号（安全基线 / V82）。
+     *
+     * <p>退出登录或管理员强制下线时调用：该账号所有已签发令牌在下一次请求时
+     * 因 {@code ver} 与库内值不一致而立即失效。</p>
+     *
+     * @return 受影响行数；0 表示用户不存在
+     */
+    int bumpTokenVersion(String username);
 }
