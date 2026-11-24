@@ -52,7 +52,7 @@
 | 事件 | 生产方（触发时机） | 消费方（`EventConsumer.name()`） | `aggregate_key` | payload 字段 |
 |---|---|---|---|---|
 | `LOAN_CREATED` | core（银行回调 PAID 之后） | `loan-service` | `advanceId` | vin, advanceId, dealerId, creditLineId, principal, dueDate, gracePeriodDays, traceId |
-| `PAYMENT_MATCHED` | bank-service（`AUTO_MATCHED` 落库同事务） | `release-service`、`credit-service` | `paymentRef`(=transaction_id) | vin, loanId, advanceId, dealerId, paymentRef, amount, settled, matchedAt, traceId |
+| `PAYMENT_MATCHED` | bank-service（`AUTO_MATCHED` / `MANUAL_MATCHED` 落库同事务） | `credit-service`（2026-11-24 已落地）；`release-service`（本期未实现，属 USED R7 的指令域） | `paymentRef`(=transaction_id) | vin, loanId, advanceId, dealerId, creditLineId, paymentRef, amount, settled, restoreAmount?, matchedAt, traceId |
 | `COLLATERAL_CHANGED` | collateral-reg-service | core（只读投影，可后置） | 待定源：建议 `regNo` + 变更序号 | vin, status, regNo, ownerName, changedAt, traceId |
 
 ### 2.1 `LOAN_CREATED` 字段口径
@@ -79,11 +79,19 @@
 | `settled` | boolean | ✅ | 是否结清。`credit-service` 只在 `settled=true`（或事件显式带 `restoreAmount`）时回补额度 |
 | `amount` | number（整数日元） | ✅ | 本次匹配金额 |
 | `vin` / `loanId` / `advanceId` / `dealerId` | — | 建议 | 下游定位借据用；`loanId` 是 `loans.id` |
+| `creditLineId` | number | 建议（**回补时必填**） | 2026-11-24 追加：回补目标额度线（`loans.credit_line_id`）。仅凭 `dealerId` 无法在多条额度线之间定位，credit-service 收到回补事件但缺此字段会判失败进重试/死信 |
 | `matchedAt` | string(ISO) | 建议 | 匹配成功时间（业务时间，不等于 `outbox_events.created_at`） |
 | `traceId` | string | ✅ | 同上 |
 | `restoreAmount` | number | **可选** | 若不给，回补方**不许按比例推算**（ADR Q24：部分还款不回补额度）。给了就以它为准 |
 
-未匹配 / 候选待确认 / 人工绑定前的挂起：**一律不发事件**。
+未匹配 / 候选待确认 / 人工绑定前的挂起 / 人工忽略：**一律不发事件**。
+
+**2026-11-24 实现口径（bank-service `PaymentMatchedPublisher`）**：
+- `settled = 本次匹配金额 >= 借据剩余应回本金`；金额未知（找不到流水）一律按未结清处理；
+- `restoreAmount` 只在 `settled=true` 且借据本金可得时出现，值 = 放款时占用的本金（D09 §8.3），
+  不含利息；
+- 部分回款（`settled=false`）不带 `restoreAmount`，**同时不进入解押/回补编排**——部分还款不解除担保；
+- 人工绑定（`MANUAL_MATCHED`）同样发事件，但 `settled` 仍按流水金额判定；找不到流水时按未结清处理。
 
 ### 2.3 `COLLATERAL_CHANGED` —— 口径未完全定源，先按最小集
 
@@ -111,8 +119,8 @@
 | 事件 | 业务幂等键 | 实现方式 |
 |---|---|---|
 | `LOAN_CREATED` | `advanceId` | `loan_no = 'LN-' + advanceId` + `ON CONFLICT`，命中则复用未结清借据 |
-| `PAYMENT_MATCHED`（回补） | `paymentRef` / `matchId` | `uk_credit_restore_match` 唯一键冲突 → 直接返回，不重复扣减 |
-| `PAYMENT_MATCHED`（解押） | `paymentRef` | release 侧同理，指令表按 `paymentRef` 唯一 |
+| `PAYMENT_MATCHED`（回补） | `paymentRef` | credit-service 在行锁事务里先 `INSERT INTO credit_line_restorations ... ON CONFLICT (payment_ref) DO NOTHING` 认领；冲突 → 直接返回，不重复扣减（V80 唯一约束 `uk_credit_line_restore_payment_ref`） |
+| `PAYMENT_MATCHED`（解押） | `paymentRef` | bank 侧 V17 `lien_releases.uk_lien_release_match(match_id)`；真实车辆/担保台账释放**本期未接**，见 §7 |
 
 > **W1-CREDIT 卡面里"再插同 matchId 事件 → `used_amount` 不再变化"测的就是这一层。**
 > 新插一行 outbox 会拿到新 `event_id`，框架层视为新事件、一定会调 `consume()`；
@@ -127,9 +135,9 @@
 - 用 `vin` ⇒ 同一台车的第二次合法事件（二次放款、多笔回款）被永久抑制，债与额度都漏记；
 - 这是"看起来去重了，实际是把业务吞了"的典型。
 
-⚠️ **两处历史措辞作废**（代码未改，以本文为准）：
-`V21` 迁移注释写"aggregate_key：vin 或借据号"，`OutboxPublisher` javadoc 写"通常是 vin 或借据号"。
-两处均在 W0 之后由实现证明不成立（V1–V25 迁移冻结不可改；javadoc 待 W3 一并修正）。
+⚠️ **一处历史措辞冻结、一处已修正**：
+`V21` 迁移注释写"aggregate_key：vin 或借据号" —— 迁移已落库、checksum 冻结，**不能改**，以本文为准；
+`OutboxPublisher` / `DomainEvent` 的 javadoc 已于 2026-11-24 修正为"这一次发生的主键，禁止用 vin"。
 
 ---
 
@@ -234,10 +242,10 @@ payload 不是合法 JSON、字段缺失 → 抛 `IllegalArgumentException`，**
 
 | 接口 | 方法 → 路径 | 返回 | 状态 |
 |---|---|---|---|
-| `LoanQueryClient` | `GET /api/loans/by-vin/{vin}` | `ApiResponse<LoanSnapshotDto>` | ✅ **W0 新增，实现方已存在且冒烟验过** |
-| `CreditLineQueryClient` | `GET /api/credit-lines/{id}/available` | `ApiResponse<Long>` | ⚠️ **W0 新增，实现方待 W1-CREDIT** |
+| `LoanQueryClient` | `GET /api/loans/by-vin/{vin}` | `ApiResponse<LoanSnapshotDto>` | ✅ **2026-11-24 起有真实调用方**：bank-service `FeignLoanLookupClient`（回款匹配） |
+| `CreditLineQueryClient` | `GET /api/credit-lines/{id}/available` | `ApiResponse<Long>` | ✅ **2026-11-24 已实现**（credit-service `CreditLineController#available`） |
 | `CollateralClient` | `GET /api/collateral-reg/registration?vin=` | `RegistrationVO`（裸 VO） | 已有，W0 只加 `url` |
-| `CreditLineClient` | `GET /api/credit-lines/available?dealerId=` | `BigDecimal` | ❌ **死契约，无实现方** |
+| ~~`CreditLineClient`~~ | ~~`GET /api/credit-lines/available?dealerId=`~~ | ~~`BigDecimal`~~ | 🗑 **2026-11-24 删除**（死契约，无实现方；Q-EVT2 二选一选 `CreditLineQueryClient`） |
 
 > **为什么新增的都返回 `ApiResponse<T>` 而不是裸对象**：实现方 `LoanController` 返回的就是
 > `ApiResponse` 包装。若契约声明裸 `LoanSnapshotDto`，Jackson 会把 `{code,message,data,traceId}`
@@ -296,10 +304,13 @@ HTTP 状态码 **404**（不是 200 + `data=null`）。字段两条实测确认�
 - **未命中的字段不出现在 JSON 里**（序列化省略 null），DTO 侧对应字段就是 null；
 - `details` 为 null 时整个键省略，所以响应可能是 3 个键而不是 5 个。
 
-`LoanSnapshotDto` 只声明 7 个字段：`id, vin, advanceId, dealerId, status, principal, dueDate`。
+`LoanSnapshotDto` 声明 8 个字段：`id, vin, advanceId, dealerId, creditLineId, status, principal, dueDate`。
 **这是投影，不是全量**：`currentDpd`、`principalOutstanding` 等响应里有但 DTO 里没有，
 调用方**不要依赖未声明字段**（实现方哪天裁掉不会通知你）。需要更多字段 → 改 DTO + 本文 + 通知全体。
-W0 机制冒烟第 5 步曾用真实响应逐字段校验这 7 个字段的存在与取值，改一边忘另一边会红。（脚本已删，本次改造需在 USED 冒烟里重建这条逐字段断言）
+2026-11-24 追加 `creditLineId`：`PAYMENT_MATCHED` 的消费方要按额度线行锁回补，仅凭 dealerId
+在多条额度线时无法定位；这是 additive 字段，loan-service 的响应本来就有它。
+W0 机制冒烟第 5 步曾用真实响应逐字段校验这 7 个字段的存在与取值，改一边忘另一边会红。
+（脚本已删；新冒烟 `smoke_payment_matched.py` 通过真实匹配链路间接校验了 by-vin 的 8 个字段。）
 
 **调用方语义约定**（W1-BANK 已按此写单测）：
 - 404 → `Optional.empty()`（"这个 VIN 没有未结清借据"是合法业务事实）；
@@ -314,11 +325,10 @@ W0 机制冒烟第 5 步曾用真实响应逐字段校验这 7 个字段的存�
 
 - `data` 是**整数日元**（`total - used - frozen`，负数截 0），不是小数、不是字符串；
 - 额度不存在 → 404 + `NOT_FOUND_001`（bank 侧按 fail-closed 处理）；
-- **实测现状（2026-11-22）**：`GET /api/credit-lines/34/available` → **HTTP 500**
-  `{"code":"SYS_001","message":"系统内部错误：No static resource api/credit-lines/34/available."}`
-  —— 该路径在 credit-service 上没有控制器，落到了静态资源兜底。
-  所以 W1-CREDIT 必须实现它（并加 `@RequirePermission` 读权限），或删除这条契约。
-  W0 机制冒烟对此**只打印不断言**（断言"现在必须是 500"会在 W1 实现后反过来变红，两种都是假信号）。
+- **2026-11-24 已实现**：`credit-service` 的 `GET /api/credit-lines/{id}/available` 返回
+  `ApiResponse<Long>`，带 `@RequirePermission(Permission.CREDIT_MANAGE)`；冒烟实测 200 + 整数日元。
+  同一提交删除了另一条 BigDecimal 死契约 `CreditLineClient`（Q-EVT2 二选一）。
+- 历史（2026-11-22）曾实测该路径 500 `SYS_001`（落到静态资源兜底）；该现象已消除。
 
 ---
 
@@ -326,11 +336,13 @@ W0 机制冒烟第 5 步曾用真实响应逐字段校验这 7 个字段的存�
 
 | # | 缺口 | 归属 | 说明 |
 |---|---|---|---|
-| 1 | `OutboxPublisher` **零生产调用方** | W2-CORE（`LOAN_CREATED`）、W1-BANK（`PAYMENT_MATCHED`） | 发布端实现已完成但没有业务代码调它，"发布去重"因此无法端到端冒烟（见下） |
-| 2 | 发布端去重端到端 0 验证 | **W1-BANK 收口**（W2-CORE 复验），W3 合并进 `smoke-test.py` | 卡面 smoke 第 4 步（"同 (`event_type`,`aggregate_key`) 已存在 PENDING 时断言不重复插入"）用 psql 验不了：psql 直插不走发布端，拦它的是发布端 SQL 里的 `WHERE NOT EXISTS`（抑制条件实查为 `status IN ('PENDING','SENT')`），不是表约束。**2026-11-22 用户裁决 = A：不扩权建 `infrastructure/src/test`**——不为一段尚无调用方的 SQL 引入全仓第一个连库测试，`mvn -B clean package` 保持不依赖 5434。改由第一个真实生产者接线时在冒烟里验；⚠️ 注意「同一 transaction_id 再匹配一次」这条断言**归因不唯一**（会先被 `uk_payment_match_txn` 挡住），要把机制单独钉住见 `PROGRESS.md §7` W0-3 行的取法。判据与风险登记同步在案，勿再重复申请扩权 |
-| 3 | `CreditLineQueryClient` 无实现 | W1-CREDIT | §6.4 |
-| 4 | `CreditLineClient`（`GET /api/credit-lines/available?dealerId=`，返回 `BigDecimal`）全仓无实现，只被 bank 的本地存根实现 | W1-CREDIT 处置 | 与 §6.4 是两条不同路径、两种不同金额类型。实现或删，别留死契约 |
-| 5 | `COLLATERAL_CHANGED` 的 `aggregate_key` 与 `status` 取值域未定源 | W2-CORE / 权属 owner | §2.3 |
+| 1 | ~~`OutboxPublisher` 零生产调用方~~ | ✅ 2026-11-24 | 两个真实生产者：`OutboxLoanCreatedPublisher`（LOAN_CREATED，键 advanceId）与 bank-service `PaymentMatchedPublisher`（PAYMENT_MATCHED，键 paymentRef） |
+| 2 | ~~发布端去重端到端 0 验证~~ | ✅ 2026-11-24 | `smoke_payment_matched.py` B5：先让事件投递成 SENT，再删 `payment_matches` 行、从 HTTP 入口重放匹配 → 仍只有 1 条事件。这条取法避开了 `uk_payment_match_txn` 的归因干扰 |
+| 3 | ~~`CreditLineQueryClient` 无实现~~ | ✅ 2026-11-24 | credit-service 已实现 `GET /api/credit-lines/{id}/available`，§6.4 |
+| 4 | ~~`CreditLineClient` 死契约~~ | 🗑 2026-11-24 删除 | 选 `CreditLineQueryClient`（ApiResponse<Long>），删掉 BigDecimal 那条 |
+| 5 | `COLLATERAL_CHANGED` 的 `aggregate_key` 与 `status` 取值域未定源 | W2-CORE / 权属 owner | §2.3，仍未动 |
 | 6 | DEAD 事件的人工重放 | W3 | 表结构与状态已就位，缺运维入口 |
+| 7 | `PAYMENT_MATCHED` 的 `release-service` 消费 | USED R7 | 合同列出两个消费方；本期只落了 credit-service 的真实回补。release-service 没有"解押指令"领域对象，不能为接事件而违反它自己的状态机（未 CONFIRMED 不得 RELEASED / 未 RELEASED 不得 LIEN_DISCHARGED） |
+| 8 | 回款匹配后的车辆/担保台账跨域释放 | 待业务定源 | V17 `lien_releases` 已记录"实体权利消灭 + 抹消待办 REQUESTED"，但 `vehicle_units.security_status` / `collateral_ledger` 由 core 拥有，bank 不得直写。**与直接还款路径的双重回补/双重释放尚未共用结算幂等键**（USED R8 §8.1 的 `settle_seq`），本轮不猜 |
 | 7 | 多实例共游标互相覆盖 | 拆库/多实例前必须处理 | §4.2 |
 | 8 | `OutboxPublisher` javadoc 仍写"通常是 vin 或借据号" | W3 顺手改 | 与 §3.3 冲突，实现已按 §3.3 |

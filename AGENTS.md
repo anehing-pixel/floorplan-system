@@ -31,9 +31,10 @@
 当前主线是**二手车库存垫资改造（USED 域）**，设计基准见 `docs/二手车库存垫资改造-00-设计基线与命名定源.md`。
 
 **当前真实状态**：核心（新车）链路后端主干可运行、全 Maven 模块全绿（模块数以父 `pom.xml` `<modules>` 为准）；
-事件机制（发布/轮询/游标/消费幂等/死信）已落地，第一条业务线已接上（放款确认 → `LOAN_CREATED` → 建借据）；
-但**回款匹配 `PAYMENT_MATCHED`、权属变更 `COLLATERAL_CHANGED` 两个生产者仍零调用方**、
-**工单表没有 Java 类**，所以 11 个业务环节里除「放款 → 借据」外的跨服务衔接仍靠人工搬数据。
+事件机制（发布/轮询/游标/消费幂等/死信）已落地，两条业务线已接上：
+放款确认 → `LOAN_CREATED` → 建借据；回款匹配 → `PAYMENT_MATCHED` → credit-service 真实额度回补（2026-11-24）。
+但**权属变更 `COLLATERAL_CHANGED` 仍零调用方**、**工单表没有 Java 类**，
+且回款匹配后的**车辆/担保台账解押仍未接**（bank 只落 V17 留痕），跨服务衔接仍有多处靠人工搬数据。
 USED 域目前**只有库结构与字典层**（V40–V74 + 状态机枚举），业务编排层在重写中。
 不要假设「表建了就是功能有了」。
 
@@ -164,8 +165,9 @@ bash run-local.sh                 # 只起 web 单体
 
 - 断言数会随开发增长（历史值 182 / 204 / 211），**不要把数字写死在文档或脚本里**，看 FAIL 就行。
 - 只跑 `-DskipTests` 的编译**不算验证**，不能作为「已完成」的依据。
-- 改了某个能力却没在冒烟里加对应断言 → 视为未完成。端到端断言写进
-  `scripts/smoke_used*.py`，收进 `run-microservices.sh smoke` 的调用链里。
+- 改了某个能力却没在冒烟里加对应断言 → 视为未完成。端到端断言写进根目录的
+  `smoke_used.py` / `smoke_payment_matched.py`（或新开一个 `smoke_*.py`），
+  并收进 `run-microservices.sh smoke` 的调用链里。
 
 ---
 
@@ -259,11 +261,13 @@ V30 经销商画像快照、V31 `dpd_stage_rules` 这几个用途还没实现；
 1. **借据的事件字段不全** — `LoanApplicationService.createFromLoanCreated()` 已由 `LoanCreatedConsumer` 调用，
    `loans` 表不再恒空；但 `dueDate`/`gracePeriodDays` 因 Q-EVT3 未签字仍不进事件载荷
    ⟹ 新建借据 `due_date IS NULL`、`repayment_plans` 零行，逾期 DPD 与对账仍转不起来。
-2. **事件机制只有生产者的一半** — 发布/轮询/游标/消费幂等/死信机制（`JdbcOutboxPublisher` /
-   `EventDispatcher` / `@Scheduled` / `event_consumptions`+`consumer_offsets`）之上只有 `LOAN_CREATED`
-   一个真实调用方（`AdvanceApplicationService.confirmAdvance`，PAID 之后、同事务、键 `advanceId`）。
-   `PAYMENT_MATCHED`（回款匹配）、`COLLATERAL_CHANGED`（聚合键与 status 取值域待业务定源）**仍零调用方**。
-   「调度器和表都在」不等于「闭环已通」，「一根线通了」也不等于「事件驱动层落地了」。
+2. **事件机制已通两条线，第三条仍未接** — 发布/轮询/游标/消费幂等/死信机制（`JdbcOutboxPublisher` /
+   `EventDispatcher` / `@Scheduled` / `event_consumptions`+`consumer_offsets`）之上有两个真实调用方：
+   `LOAN_CREATED`（`AdvanceApplicationService.confirmAdvance`，键 `advanceId`）与
+   `PAYMENT_MATCHED`（bank `PaymentMatchApplicationService`，键 `paymentRef`；credit-service 消费后行锁回补）。
+   `COLLATERAL_CHANGED`（聚合键与 status 取值域待 Q-EVT1）**仍零调用方**。
+   回款匹配的**解押**仍只到 bank V17 留痕，core 车辆/担保台账释放待结算归属口径。
+   「调度器和表都在」不等于「闭环已通」，「两根线通了」也不等于「事件驱动层落地了」。
 3. **回款匹配后不解押不回补** — `ReleaseOrchestrator` 解押只记日志，`availableAfter = before`。
 4. **工单体系 0 Java** — `work_orders` / `work_order_actions` 表齐全，零实体零 Service。
    门禁拒付说「生成 HIGH 工单」，实际只写 `risk_alerts`。
@@ -327,7 +331,7 @@ USED 域的三份规格源别绕过自己发明口径：
 - [ ] 读过 `PROGRESS.md`，知道当前 HEAD 和断点
 - [ ] 需要新迁移 → 号段已在 `PROGRESS.md §2` 登记，且没撞上 USED 的 V40–V79
 - [ ] 涉及业务口径 → 查过 §8 红线；未签字的按「采纳默认值 + 配置外置 + 标 `[待定源]`」处理
-- [ ] 写完有端到端断言（`scripts/smoke_used*.py`），且能在网关侧打通
+- [ ] 写完有端到端断言（根目录 `smoke_*.py`，并已进 `run-microservices.sh smoke` 调用链），且能在网关侧打通
 - [ ] `mvn -B clean package` 全绿（`$?` 自己取）
 - [ ] `PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke` EXIT 0、FAIL 0
 - [ ] 提交信息带验证结论，且用 pathspec；别人的脏文件原样留着

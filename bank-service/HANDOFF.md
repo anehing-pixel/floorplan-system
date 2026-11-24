@@ -1,5 +1,12 @@
 # PAYMENT Agent 交接 · 回款匹配与自动解押（T2-3 后半段）
 
+> **2026-11-24 状态更新（以 `PROGRESS.md` 为准）**：本文 §5/§7 的三条主接缝已落地——
+> `LoanLookupClient` 换成真实 Feign（`FeignLoanLookupClient` → `LoanQueryClient`）、
+> `InMemoryPaymentStore` 换成 `JdbcPaymentStore`（V17 三表）、`PAYMENT_MATCHED` 已在匹配事务内发布。
+> 额度回补改为 credit-service 消费事件后行锁真实写入（V80 幂等表）；bank 侧 `ReleaseOrchestrator`
+> 只登记 `PENDING` 请求，不再写 `availableAfter = before`。**车辆/担保台账的跨域解押仍未接**，
+> release-service 消费属 USED R7。`CreditLineClient`（BigDecimal 死契约）已删除。
+
 > 分支 `agent/payment`，worktree `wt-payment`，起点 e441da1。
 > 交付边界：`bank-service/**` + `V17__payment_match_and_release.sql`，其他目录一律未改。
 
@@ -92,12 +99,16 @@
 
 ## 7. TODO（按优先级）
 
-1. Wave2 接真实 Feign：`LoanLookupClient` → loan-service；`CreditLineClient` → credit-service；解押写入端点由 collateral/loan agent 提供。
-2. `InMemoryPaymentStore` → `JdbcPaymentStore`（V17 三表）；保留 `putIfAbsent` 语义，禁止先查后插。
+1. ~~Wave2 接真实 Feign：`LoanLookupClient` → loan-service~~ ✅ 2026-11-24（`FeignLoanLookupClient`）；
+   `CreditLineClient` 已随 Q-EVT2 删除（回补不再从 bank 查额度）；解押写入端点仍缺（collateral/loan 契约未提供）。
+2. ~~`InMemoryPaymentStore` → `JdbcPaymentStore`~~ ✅ 2026-11-24（V17 三表，`ON CONFLICT DO NOTHING`）。
 3. 流水 `match_status` 回写：需与采集侧 agent 协调增加受控 update（或改由 outbox 消费端写），当前 V17 是权威读源。
 4. 权限点：设计稿建议新增 `PAYMENT_MATCH_EXECUTE`，因不能改 `domain.Permission`，当前沿用 `REPAYMENT_EXECUTE`；请 PM 决定是否升权限矩阵。
-5. `OutboxPublisher.EVENT_PAYMENT_MATCHED` 常量已在 common 冻结，但仓库无实现 bean；接线后可用它触发异步释放与审计。
-6. 解押与回补需在真实实现中放进同一本地事务，或用强制工单补偿（当前失败只留 `FAILED` 凭证，解押已发生时回补失败需人工介入）。
+5. ~~`OutboxPublisher.EVENT_PAYMENT_MATCHED` 无实现 bean~~ ✅ 2026-11-24（`PaymentMatchedPublisher`；
+   与匹配结论同本地事务，聚合键 `paymentRef`）。
+6. 解押与回补的跨服务一致性：2026-11-24 起回补由 credit-service 消费事件后行锁完成（V80 幂等），
+   bank 侧只登记请求。**解押仍只到 V17 留痕**；车辆/担保台账释放与「直接还款 vs 银行匹配」的
+   双重释放防线（共用 `settle_seq`）仍未定源。
 7. 设计稿五级匹配规则当前只实现 VIN(95) + 金额(60/45)；订单号(90)、时间窗(10)、付款人(20) 信号待补。
 8. 一流水多借据的人工拆分（`payment_allocations`，设计稿 §3.5）与 8 类预警/工单联动未实现。
 9. `common/config/application.yml` 相关配置（Feign 超时、outbox 投递频率）未改，按边界交 Wave2 集成。
