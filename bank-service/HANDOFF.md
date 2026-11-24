@@ -107,8 +107,9 @@
 5. ~~`OutboxPublisher.EVENT_PAYMENT_MATCHED` 无实现 bean~~ ✅ 2026-11-24（`PaymentMatchedPublisher`；
    与匹配结论同本地事务，聚合键 `paymentRef`）。
 6. 解押与回补的跨服务一致性：2026-11-24 起回补由 credit-service 消费事件后行锁完成（V80 幂等），
-   bank 侧只登记请求。**解押仍只到 V17 留痕**；车辆/担保台账释放与「直接还款 vs 银行匹配」的
-   双重释放防线（共用 `settle_seq`）仍未定源。
+   解押由 core（floorplan-core）消费同一事件、`settled=true` 时释放车辆/担保台账（V81 幂等）；
+   bank 侧 V17 只登记请求/留痕。仍开放：release-service 指令域消费、
+   「直接还款 vs 银行匹配」共用 `settle_seq` 的双重释放防线。
 7. 设计稿五级匹配规则当前只实现 VIN(95) + 金额(60/45)；订单号(90)、时间窗(10)、付款人(20) 信号待补。
 8. 一流水多借据的人工拆分（`payment_allocations`，设计稿 §3.5）与 8 类预警/工单联动未实现。
 9. `common/config/application.yml` 相关配置（Feign 超时、outbox 投递频率）未改，按边界交 Wave2 集成。

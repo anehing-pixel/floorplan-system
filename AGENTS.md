@@ -33,8 +33,9 @@
 **当前真实状态**：核心（新车）链路后端主干可运行、全 Maven 模块全绿（模块数以父 `pom.xml` `<modules>` 为准）；
 事件机制（发布/轮询/游标/消费幂等/死信）已落地，两条业务线已接上：
 放款确认 → `LOAN_CREATED` → 建借据；回款匹配 → `PAYMENT_MATCHED` → credit-service 真实额度回补（2026-11-24）。
-但**权属变更 `COLLATERAL_CHANGED` 仍零调用方**、**工单表没有 Java 类**，
-且回款匹配后的**车辆/担保台账解押仍未接**（bank 只落 V17 留痕），跨服务衔接仍有多处靠人工搬数据。
+但**权属变更 `COLLATERAL_CHANGED` 仍零调用方**、**工单表没有 Java 类**；
+回款匹配的解押已由 core（`floorplan-core`）消费同一事件落地（2026-11-24），
+但 release-service 的指令域消费与「银行匹配 vs 直接还款」的共用 `settle_seq` 幂等仍未接。
 USED 域目前**只有库结构与字典层**（V40–V74 + 状态机枚举），业务编排层在重写中。
 不要假设「表建了就是功能有了」。
 
@@ -266,7 +267,8 @@ V30 经销商画像快照、V31 `dpd_stage_rules` 这几个用途还没实现；
    `LOAN_CREATED`（`AdvanceApplicationService.confirmAdvance`，键 `advanceId`）与
    `PAYMENT_MATCHED`（bank `PaymentMatchApplicationService`，键 `paymentRef`；credit-service 消费后行锁回补）。
    `COLLATERAL_CHANGED`（聚合键与 status 取值域待 Q-EVT1）**仍零调用方**。
-   回款匹配的**解押**仍只到 bank V17 留痕，core 车辆/担保台账释放待结算归属口径。
+   回款匹配的**解押已接 core**：`floorplan-core` 消费同一事件，`settled=true` 时释放车辆/担保台账并生成抹消待办。
+   **仍未接**：release-service 指令域消费；「银行匹配 vs 直接还款」共用 `settle_seq` 的双重释放防线。
    「调度器和表都在」不等于「闭环已通」，「两根线通了」也不等于「事件驱动层落地了」。
 3. **回款匹配后不解押不回补** — `ReleaseOrchestrator` 解押只记日志，`availableAfter = before`。
 4. **工单体系 0 Java** — `work_orders` / `work_order_actions` 表齐全，零实体零 Service。

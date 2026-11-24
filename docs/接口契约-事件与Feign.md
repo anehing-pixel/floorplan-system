@@ -52,7 +52,7 @@
 | 事件 | 生产方（触发时机） | 消费方（`EventConsumer.name()`） | `aggregate_key` | payload 字段 |
 |---|---|---|---|---|
 | `LOAN_CREATED` | core（银行回调 PAID 之后） | `loan-service` | `advanceId` | vin, advanceId, dealerId, creditLineId, principal, dueDate, gracePeriodDays, traceId |
-| `PAYMENT_MATCHED` | bank-service（`AUTO_MATCHED` / `MANUAL_MATCHED` 落库同事务） | `credit-service`（2026-11-24 已落地）；`release-service`（本期未实现，属 USED R7 的指令域） | `paymentRef`(=transaction_id) | vin, loanId, advanceId, dealerId, creditLineId, paymentRef, amount, settled, restoreAmount?, matchedAt, traceId |
+| `PAYMENT_MATCHED` | bank-service（`AUTO_MATCHED` / `MANUAL_MATCHED` 落库同事务） | `credit-service`（额度回补，2026-11-24 已落地）；`floorplan-core`（core 解押释放，2026-11-24 已落地）；`release-service`（本期未实现，属 USED R7 的指令域） | `paymentRef`(=transaction_id) | vin, loanId, advanceId, dealerId, creditLineId, paymentRef, amount, settled, restoreAmount?, matchedAt, traceId |
 | `COLLATERAL_CHANGED` | collateral-reg-service | core（只读投影，可后置） | 待定源：建议 `regNo` + 变更序号 | vin, status, regNo, ownerName, changedAt, traceId |
 
 ### 2.1 `LOAN_CREATED` 字段口径
@@ -93,6 +93,14 @@
 - 部分回款（`settled=false`）不带 `restoreAmount`，**同时不进入解押/回补编排**——部分还款不解除担保；
 - 人工绑定（`MANUAL_MATCHED`）同样发事件，但 `settled` 仍按流水金额判定；找不到流水时按未结清处理。
 
+**两个 core/credit 消费方各写各的表（2026-11-24）**：
+- `credit-service` 只碰 `credit_lines`，L2 = V80 `credit_line_restorations.payment_ref`；
+- `floorplan-core` 只碰 `vehicle_units.security_status`、`collateral_ledger`、`collateral_registration_batches`，
+  L2 = V81 `payment_security_releases.payment_ref`；`settled` 非 true 一律跳过；
+- 任何一方都不得跨域直写对方的表；额度与解押因此是**同一事件上的两个独立事务**。
+  一个消费方失败不影响另一个：若 core 消费进入 DEAD 而 credit 成功，会出现
+  「额度已回补、担保未解除」的部分状态，需 `LEDGER_GAP` 巡检兜底（当前未实现，登记在 PROGRESS §3）。
+
 ### 2.3 `COLLATERAL_CHANGED` —— 口径未完全定源，先按最小集
 
 `aggregate_key` 用哪个键、`status` 取值域是否与 `CollateralClient.RegistrationVO.status`
@@ -120,7 +128,7 @@
 |---|---|---|
 | `LOAN_CREATED` | `advanceId` | `loan_no = 'LN-' + advanceId` + `ON CONFLICT`，命中则复用未结清借据 |
 | `PAYMENT_MATCHED`（回补） | `paymentRef` | credit-service 在行锁事务里先 `INSERT INTO credit_line_restorations ... ON CONFLICT (payment_ref) DO NOTHING` 认领；冲突 → 直接返回，不重复扣减（V80 唯一约束 `uk_credit_line_restore_payment_ref`） |
-| `PAYMENT_MATCHED`（解押） | `paymentRef` | bank 侧 V17 `lien_releases.uk_lien_release_match(match_id)`；真实车辆/担保台账释放**本期未接**，见 §7 |
+| `PAYMENT_MATCHED`（解押） | `paymentRef` | bank 侧 V17 `lien_releases.uk_lien_release_match(match_id)`；core 侧 V81 `payment_security_releases.payment_ref` 唯一约束（2026-11-24 已落地） |
 
 > **W1-CREDIT 卡面里"再插同 matchId 事件 → `used_amount` 不再变化"测的就是这一层。**
 > 新插一行 outbox 会拿到新 `event_id`，框架层视为新事件、一定会调 `consume()`；
@@ -342,7 +350,7 @@ W0 机制冒烟第 5 步曾用真实响应逐字段校验这 7 个字段的存�
 | 4 | ~~`CreditLineClient` 死契约~~ | 🗑 2026-11-24 删除 | 选 `CreditLineQueryClient`（ApiResponse<Long>），删掉 BigDecimal 那条 |
 | 5 | `COLLATERAL_CHANGED` 的 `aggregate_key` 与 `status` 取值域未定源 | W2-CORE / 权属 owner | §2.3，仍未动 |
 | 6 | DEAD 事件的人工重放 | W3 | 表结构与状态已就位，缺运维入口 |
-| 7 | `PAYMENT_MATCHED` 的 `release-service` 消费 | USED R7 | 合同列出两个消费方；本期只落了 credit-service 的真实回补。release-service 没有"解押指令"领域对象，不能为接事件而违反它自己的状态机（未 CONFIRMED 不得 RELEASED / 未 RELEASED 不得 LIEN_DISCHARGED） |
-| 8 | 回款匹配后的车辆/担保台账跨域释放 | 待业务定源 | V17 `lien_releases` 已记录"实体权利消灭 + 抹消待办 REQUESTED"，但 `vehicle_units.security_status` / `collateral_ledger` 由 core 拥有，bank 不得直写。**与直接还款路径的双重回补/双重释放尚未共用结算幂等键**（USED R8 §8.1 的 `settle_seq`），本轮不猜 |
+| 7 | `PAYMENT_MATCHED` 的 `release-service` 消费 | USED R7 | 合同列出三个消费方；2026-11-24 已落 credit-service（回补）与 floorplan-core（解押）。release-service 没有"解押指令"领域对象，不能为接事件而违反它自己的状态机（未 CONFIRMED 不得 RELEASED / 未 RELEASED 不得 LIEN_DISCHARGED） |
+| 8 | 回款匹配后的车辆/担保台账跨域释放 | ✅ 2026-11-24 core 已接 | `floorplan-core` 的 `PaymentMatchedSecurityConsumer` 在 `settled=true` 时置 `vehicle_units.security_status=RELEASED`、`collateral_ledger` 解除、登记批次抹消 REQUESTED；V81 L2 防重放。**仍开放**：与直接还款路径的双重回补/双重释放尚未共用结算幂等键（USED R8 §8.1 的 `settle_seq`），本实现不猜 |
 | 7 | 多实例共游标互相覆盖 | 拆库/多实例前必须处理 | §4.2 |
 | 8 | `OutboxPublisher` javadoc 仍写"通常是 vin 或借据号" | W3 顺手改 | 与 §3.3 冲突，实现已按 §3.3 |

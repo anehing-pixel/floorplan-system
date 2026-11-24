@@ -9,7 +9,8 @@
 > 那段过程记录要查就查 git 历史（`git log --oneline -- PROGRESS.md docs/`，删除前的最后一份是 `d3ec429`）。
 > 本文件只保留仍然成立的事实与待办。
 
-最后更新：2026-11-24（GMT+8） · **PAYMENT_MATCHED 生产/消费链路落地：真实借据 Feign 查询 + JDBC 匹配存储 + credit-service 事件驱动额度回补（V80）+ 四条丢失断言重建（见 §2）**；
+最后更新：2026-11-24（GMT+8） · **解押跨域释放落地：core（floorplan-core）消费 PAYMENT_MATCHED，settled=true 时真正解除车辆担保与担保物台账、生成抹消待办（V81），并与 credit-service 回补并存（见 §2）**；
+此前：PAYMENT_MATCHED 生产/消费链路落地（真实借据 Feign + JDBC 匹配存储 + credit-service 回补 + 四条丢失断言重建）；
 此前：生产级差距清单落档（全局 + 13 模块代码实查，仅分析、未改代码）；
 此前：浏览器端到端测试首次落地（37/37）+ 修复参数绑定异常误报 500（见 §2）；
 此前：USED R2 车辆主数据／車検証切片贯通（见 §2），R1 之后第二个贯通的业务切片；
@@ -30,11 +31,12 @@
    `work_orders` 之外的业务表齐全。历史技术债（B-2 处置解冻、B-3 处置期不回补、
    collateral-reg 全端点 500、`/api/payments/**` 被 core 兜底 404、四个新服务漏装 `AuthApplicationService`、
    `V19` 部分唯一索引非法语法）**均已闭环**，细节在 git 历史里。
-2. **事件链路已通两根线**：`LOAN_CREATED`（放款确认 → 建借据）与 `PAYMENT_MATCHED`
-   （回款匹配 → credit-service 真实额度回补）端到端已通；`COLLATERAL_CHANGED` 仍零调用方。
-   **但回款匹配后的「解押」仍只落 bank 侧 V17 留痕**（`lien_releases` RELEASED + 抹消 REQUESTED）——
-   车辆/担保台账的跨域释放属结算归属口径（USED R8 `settle_seq`），本轮按「资金侧优先」未接 core。
-   见 §3 的开放项，别把冒烟绿色读成解押闭环。
+2. **事件链路已通两根线，回款链的回补与解押都已接上**：`LOAN_CREATED`（放款确认 → 建借据）；
+   `PAYMENT_MATCHED`（回款匹配 → credit-service 额度回补 + core 解押，2026-11-24）。
+   core 侧 `PaymentMatchedSecurityConsumer` 在 `settled=true` 时置
+   `vehicle_units.security_status=RELEASED`、`collateral_ledger.released=true`、登记批次抹消 `REQUESTED`。
+   `COLLATERAL_CHANGED` 仍零调用方。**仍未接**：release-service 的指令域消费；
+   与直接还款路径共用 `settle_seq` 的双重释放防线（USED R8 §8.1）。见 §3 的开放项。
 3. **USED（二手车库存垫资）已从「只有库结构与字典层」推进到「R1 + R2 贯通」**：V40–V74 已落库（资质/车辆/車検証/担保多源/估值/LTV/
    拍卖/库龄/监管仓/放车放证/登记委托/集成五段）、`Permission` 69 点与 `UserRole` 14 岗已含 USED 权限点、
    错误码段（QUAL_/CERT_/VALU_/LTV_/AUC_/REGI_/WMS_/RELS_/PTNR_）已定源。
@@ -52,7 +54,7 @@
 | 分支 | `master`（主干）· `feat/payment-matched-chain`（PAYMENT_MATCHED 链路，2026-11-24 从 `681ed7a` 切出；`used-floorplan-dev` 已不存在，此前 USED R1–R3 实际落在 `master`） |
 | 数据库 | Docker 容器 `floorplan-db2`，端口 **5434**（5432 被占用），库/用户/密码均 `floorplan`；宿主无 `psql`，用 `docker exec floorplan-db2 psql -h 127.0.0.1 -p 5434 -U floorplan -d floorplan` |
 | 库的来源 | **2026-11-23 从仓库迁移链干净重建**：`public` 重建那一刻 = 56 版 Flyway、位于 v74，90 张表（此后 R1/R2 又落了 V75–V78，现位于 v78，见下一行）。重建前的库改名 `floorplan_legacy_20261123`（内含并行期 agent 直打 public 留下的漂移：history 记到 V27 而 `V27__release_payment_ref.sql` 只存在于未合并的 `agent/w1-release`；另有六个 agent 隔离 schema）。整库备份 `backups/pre-used-rebuild-20261123-102807.sql.gz` |
-| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`：**V75–V77 已被 R1 资质切片占用**（V75 种 3 个配置键、V76 合规二人签认列+CHECK、V77 dealers 双维评分四列+CHECK），**V78 已被 R2 占用**（种里程差异阈值 `floorplan.used.mileage-diff-threshold-km`），**V79 已被 R3 占用**（种估值三键 + 回正 V78 source_ref）。**V80 已被 PAYMENT_MATCHED 回补占用**（`credit_line_restorations`，credit-service 消费侧 L2 幂等表；2026-11-24 已落库，下一可用号 **V81**，取号前先 `order by installed_rank desc` 复核——`max(version)` 是字符串排序，会把 '9' 排到 '79' 前面）。库里现位于 **v80 / 62 版**。⚠️ 号段只能往 head 之上取：库里 head=V74 且 Flyway 未开 `out-of-order`，低号（含 D04 §2 预留的 V42–V44）会让启动校验抛 `Detected resolved migration not applied to database` 整栈起不来，那几个号从此是永久空号。核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
+| 迁移号段 | `V1`–`V74` 已落库**禁改**（checksum）。USED 占 `V40`–`V79`：**V75–V77 已被 R1 资质切片占用**（V75 种 3 个配置键、V76 合规二人签认列+CHECK、V77 dealers 双维评分四列+CHECK），**V78 已被 R2 占用**（种里程差异阈值 `floorplan.used.mileage-diff-threshold-km`），**V79 已被 R3 占用**（种估值三键 + 回正 V78 source_ref）。**V80 已被 PAYMENT_MATCHED 回补占用**（`credit_line_restorations`，credit-service 消费侧 L2 幂等表），**V81 已被 core 解押释放占用**（`payment_security_releases`，floorplan-core 消费 `PAYMENT_MATCHED` 的 L2 幂等表；2026-11-24 已落库，下一可用号 **V82**，取号前先 `order by installed_rank desc` 复核——`max(version)` 是字符串排序，会把 '9' 排到 '79' 前面）。库里现位于 **v81 / 63 版**。⚠️ 号段只能往 head 之上取：库里 head=V74 且 Flyway 未开 `out-of-order`，低号（含 D04 §2 预留的 V42–V44）会让启动校验抛 `Detected resolved migration not applied to database` 整栈起不来，那几个号从此是永久空号。核心侧下一可用号 **V27**；`V32`–`V39` 是有意留的空隙，别占。逐号台账以本节为准，改号段先在这里登记 |
 | 编译 | Windows JDK 17 + Maven 3.9.16 |
 | 启动坑 | 启动一律 `env -u SERVER__PORT`（否则覆盖各服务端口）；`run-microservices.sh` 已处理 |
 | 进程坑 | 后台 JVM 随 shell 回收 → 启动 + 测试 + 清理必须在**同一条命令**内 |
@@ -77,7 +79,8 @@
 | 自检口径修正 | `SqlStructureSelfCheck` 原来只查 INSERT 列、且不带 schema 过滤。R1 首跑时 `UPDATE dealers ... SET updated_by=?` 撞 500（该表从 V1 起就没这列）暴露两个洞：① UPDATE 引用的列不在任何 INSERT 清单里 ⟹ 查不到；② 同库有 `floorplan_legacy_20261123` 同名表，只按 `table_name` 过滤会把两套列并起来 ⟹ 假通过 | 已加 `table_schema = current_schema()` 与 `dealers` 条目；启动期 **22 张表**列名一致（R2 再补 4 张 USED 表条目，并把 `vehicle_units` 清单加进 `updated_at`） |
 | **浏览器端到端测试（2026-11-23 17:40 落地）** | 新增 `browser-test.py`（Playwright + 本机 Chrome，经网关 18080）：登录页错误密码/正确登录/令牌写入、11 个视图逐个真实渲染、新增/编辑经销商弹窗、名下车辆/车辆详情抽屉、全局刷新、admin vs operator 写按钮权限差、退出登录、浏览器内 fetch 冒烟；全程收集 console.error/pageerror/失败请求并落截图到 `browser-test-results/`（已 gitignore） | `PYTHONIOENCODING=utf-8 python browser-test.py` → **37 PASS / 0 FAIL / EXIT 0**，截图 18 张；主干 `smoke-test.py` 211 PASS / 0 FAIL、USED `smoke_used.py` 209 PASS / 0 FAIL |
 | **修复：参数绑定异常误报 500（浏览器测试揪出）** | `GET /api/vehicles`、`/api/credit-lines` 缺必填 `dealerId` 时抛 `MissingServletRequestParameterException`，web 与 common 的 `GlobalExceptionHandler` 都只兜底到 `handleUnknown` ⟹ 500 SYS_001。这属客户端传参错误，应是 400 | web/common 两处 `GlobalExceptionHandler` 新增 `handleBadRequest`，接 `MissingServletRequestParameterException`/`MethodArgumentTypeMismatchException`/`HttpMessageNotReadableException` → 400 VALID_001（`ErrorCode.VALID_001` 既有，400）。浏览器测试加两条断言钉住：缺参 `/api/vehicles` 与 `/api/credit-lines` 均返回 400 VALID_001（不再 500）；`mvn -B -DskipTests package` 全绿 |
-| **PAYMENT_MATCHED 生产/消费链路（2026-11-24 落地）** | bank-service：`FeignLoanLookupClient` 替换日志存根（真实契约 `LoanQueryClient`；404=无在贷借据，5xx 抛异常）、`JdbcPaymentStore` 替换内存存储（V17 三表，匹配结论重启不丢）、`PaymentMatchedPublisher` 在匹配事务内发 `PAYMENT_MATCHED`（键 `paymentRef`；`settled`/`restoreAmount`/`creditLineId` 口径见契约 §2.2）、`ReleaseOrchestrator` 不再写 `availableAfter=before` 冒充回补（V17 只登记 PENDING 请求）；credit-service：`PaymentMatchedConsumer` 行锁真实回补 + V80 `credit_line_restorations` L2 幂等 + 实现 `GET /api/credit-lines/{id}/available`；删除 BigDecimal 死契约 `CreditLineClient`。**未做**：core 车辆/担保台账释放（跨域归属口径未定）、release-service 消费（USED R7） | `mvn -B package` 全绿；`PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke` EXIT 0：主干 211 PASS + 新 `smoke_payment_matched.py` **50 PASS / 0 FAIL**（A1–A4 四条丢失断言、B1–B5 生产者与发布端去重、C1–C4 真实回补 / L2 / 部分回款 / 人工绑定） |
+| **解押跨域释放（2026-11-24 落地）** | core（floorplan-core）新增 `PaymentMatchedSecurityConsumer`：消费同一 `PAYMENT_MATCHED`，`settled=true` 时行锁释放 `vehicle_units.security_status`、`markReleased` 担保物台账、登记批次抹消 REQUESTED；V81 `payment_security_releases(payment_ref)` 做 L2 幂等；`settled=false`/缺失一律跳过（部分回款不解押）；台账缺失写 HIGH 告警但车辆侧仍释放；**不碰额度**（credit-service 负责），避免跨域直写与双重回补 | `mvn -B package` 全绿；`run-microservices.sh smoke` EXIT 0：主干 211 + 事件 **68** PASS / 0 FAIL（C1b 真实解押、C2 重放不重复、C3 部分回款不释放、C4 人工绑定释放） |
+| **PAYMENT_MATCHED 生产/消费链路（2026-11-24 落地）** | bank-service：`FeignLoanLookupClient` 替换日志存根（真实契约 `LoanQueryClient`；404=无在贷借据，5xx 抛异常）、`JdbcPaymentStore` 替换内存存储（V17 三表，匹配结论重启不丢）、`PaymentMatchedPublisher` 在匹配事务内发 `PAYMENT_MATCHED`（键 `paymentRef`；`settled`/`restoreAmount`/`creditLineId` 口径见契约 §2.2）、`ReleaseOrchestrator` 不再写 `availableAfter=before` 冒充回补（V17 只登记 PENDING 请求）；credit-service：`PaymentMatchedConsumer` 行锁真实回补 + V80 `credit_line_restorations` L2 幂等 + 实现 `GET /api/credit-lines/{id}/available`；删除 BigDecimal 死契约 `CreditLineClient`。本行落地时 core 解押尚未接（随后由上一行补齐）；仍缺 release-service 消费（USED R7） | `mvn -B package` 全绿；`PYTHON=python PYTHONIOENCODING=utf-8 bash run-microservices.sh smoke` EXIT 0：主干 211 PASS + `smoke_payment_matched.py` **50 PASS / 0 FAIL**（随后扩到 68，见上一行） |
 | **生产级差距清单（2026-11-23 22:04，仅分析零代码改动）** | 全局 + 按模块两份视角归集成 `docs/生产级差距清单.md`。**全局 P0 六项**：密钥无强校验（web 硬编码 `floorplan/floorplan`、JWT/webhook/账户 key 全有 dev 兜底）、核心闭环未完成、生产开关默认关、JWT 不可撤销且权限不回查、无健康检查/容器化/保活、无备份恢复。**模块视角 13 块**：gateway 路由吞噬 `/api/dealers/{id}/bank-accounts`（经网关必 404）＋治理六项全无；web 出款是内存 Mock＋银行流水 demo＋作业全手动点；auth 无 MFA/锁定/审计/租户；external-api 纯骨架零 Controller；common 幂等键只是回显＋Feign 无认证头致担保门禁形同虚设；bank 匹配只两级＋内存存储重启即丢；loan 借据 7 态只写 3 态、还款计划利息恒 0；release 解押只打日志、回补 `availableAfter=before`；recon 只比内部表、actor 不写审计；credit 可用额度三套口径、乐观锁无 `AND version=?`；risk 告警只落库、`risk_rules` 零读写；collateral-reg 零事务/零锁、门禁默认关 | 全部条目带文件路径+行号，可复现。动手顺序见该文档 §3。**注意：本文是分析快照，唯一事实来源仍是本 PROGRESS.md；业务口径以 ADR 总定源为准** |
 
 **架构裁决（本轮定，写进代码注释）**：不逐字搬任一并行分支的业务层，结构取 serial 版、
@@ -139,7 +142,7 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 |---|---|---|
 | **事件生产者已接两个，`COLLATERAL_CHANGED` 仍零调用方** | 真实调用方：`AdvanceApplicationService.confirmAdvance`（`LOAN_CREATED`，键 `advanceId`）与 bank `PaymentMatchApplicationService`（`PAYMENT_MATCHED`，键 `paymentRef`，2026-11-24）。`COLLATERAL_CHANGED` 仍零调用方，聚合键与 `status` 取值域待 Q-EVT1 | ✅ `PAYMENT_MATCHED` 已接；`COLLATERAL_CHANGED` ⬜ 等业务 |
 | **发布端 `NOT EXISTS` 去重（两半都已验）** | `LOAN_CREATED` 那半已有端到端断言；`PAYMENT_MATCHED` 那半 2026-11-24 补上：`smoke_payment_matched.py` B5 先让事件投递成 `SENT`，再**删 `payment_matches` 行、保留 outbox 的 SENT 行**从 HTTP 入口重放匹配 ⟹ 仍只 1 条事件。这条取法避开了 `uk_payment_match_txn` 的归因干扰。抑制条件仍是 `status IN ('PENDING','SENT')` | ✅ 已闭环 |
-| **回款匹配后的回补已真实落地；解押只到 bank 台账** | credit-service `PaymentMatchedConsumer` 在行锁事务里真实回补，V80 `credit_line_restorations(payment_ref)` 挡 L2 重复；冒烟实测 `used_amount` 归零、`available` 回升。`ReleaseOrchestrator` 不再写 `availableAfter = before` 冒充已回补。V17 `lien_releases` 记录实体权利消灭 + 抹消待办 REQUESTED，但 `vehicle_units.security_status` / `collateral_ledger` 由 core 拥有，**跨域释放未接**——它与直接还款路径尚未共用 `settle_seq` 幂等键（USED R8 §8.1），本轮按「资金侧优先」不猜 | ✅ 回补闭环；🟡 解押待业务定源 |
+| **回款匹配后的回补与解押均已真实落地** | credit-service `PaymentMatchedConsumer` 行锁回补 + V80 `credit_line_restorations(payment_ref)` L2；core `PaymentMatchedSecurityConsumer` 在同一事件上释放车辆担保、担保物台账与抹消待办 + V81 `payment_security_releases(payment_ref)` L2。`ReleaseOrchestrator` 不再写 `availableAfter = before` 冒充已回补。**仍未接**：release-service 的指令域消费；「银行匹配」与「直接还款」尚未共用 `settle_seq` 幂等键（USED R8 §8.1），两条路径同时走时额度可能被释放两次；⚠️ 两个消费方是同一事件上的**两个独立事务**，core DEAD 而 credit 成功会出现「额度已回补、担保未解除」的部分状态，需 `LEDGER_GAP` 巡检兜底（未实现） | ✅ 回补+解押闭环；🟡 双路径幂等/部分状态巡检待定源 |
 | **`COLLATERAL_CHANGED` 聚合键与 `status` 取值域未定源** | 属业务口径（Q-EVT1），契约文档里留白并标 owner，没按猜测填 | ⬜ 等业务 |
 | **`DEAD` 事件无人工重放接口** | 死信只能查 `event_consumptions.status='DEAD'`；游标已越过该 id，回退会连带重放历史事件 | ⬜ 开放（接缝保留）|
 | **多实例共用一条游标** | `consumer_offsets` 按 `consumer` 一行，两进程同名会互覆盖游标 → 漏读/重复读。单实例部署未暴露；**多实例前必须**改 `FOR UPDATE SKIP LOCKED` 或按实例名分片 | ⬜ 开放（部署前置条件）|
@@ -207,7 +210,7 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 
 | 编号 | 需求 | 实证 | 依赖 |
 |---|---|---|---|
-| D1 | 回款自动匹配到 VIN + 自动解押/额度释放 | 2026-11-24 已落：`FeignLoanLookupClient` 替换日志存根、`JdbcPaymentStore` 替换内存存储、`PAYMENT_MATCHED` 生产 + credit-service 真实回补。**仍缺**：五级匹配只实现 VIN + 金额（订单号/时间窗/付款人未做）；core 车辆/担保台账的解押释放未接；release-service 消费未做；真实出款通道仍是 Mock | 结算归属口径（USED R8）+ 外部通道 |
+| D1 | 回款自动匹配到 VIN + 自动解押/额度释放 | 2026-11-24 已落：`FeignLoanLookupClient` 替换日志存根、`JdbcPaymentStore` 替换内存存储、`PAYMENT_MATCHED` 生产 + credit-service 真实回补 + core 真实解押（`PaymentMatchedSecurityConsumer`）。**仍缺**：五级匹配只实现 VIN + 金额（订单号/时间窗/付款人未做）；release-service 消费未做；与直接还款路径共用 `settle_seq` 的双重释放防线；真实出款通道仍是 Mock | 结算归属口径（USED R8）+ 外部通道 |
 | D3 | recon 差异处置闭环 | `recon_diffs.status` 的 CONFIRMED/IGNORED/RESOLVED 无接口；`actor` 未写 `audit_events`；无分布式锁；未发 outbox 事件 | 后续增强 |
 | D4 | release 撤销端点 + 账实缺口巡检 | `SENT 超期未回执` / `RELEASED 但台账未更新` 巡检作业未实现 | 后续增强（USED R6/R7 会重做这块）|
 | D5 | 三源快照实际导入作业 | 只有 `POST /snapshot/import` 接口，没有推送方/定时拉取方 | 跨服务依赖 |
@@ -249,8 +252,8 @@ application/web/integration 层重写。理由：`used/wu1`…`used/wu5` 五路�
 ### 5.4 已实现但零/低端到端覆盖
 
 - 主干 `smoke-test.py` 覆盖 211 条断言（含 ㉔ 五个外围服务的「从网关可达」9 项）；
-  事件链路 `smoke_payment_matched.py` 覆盖 50 条（A1–A4 丢失断言 + B1–B5 生产者/发布去重 + C1–C4 真实回补）。
-  `run-microservices.sh smoke` 现在两个脚本串跑，任一失败即总退出码非 0。
+  事件链路 `smoke_payment_matched.py` 覆盖 68 条（A1–A4 丢失断言 + B1–B5 生产者/发布去重 +
+  C1–C4 真实回补 + C1b/C2/C4 core 解押与 L2）。`run-microservices.sh smoke` 两个脚本串跑，任一失败即总退出码非 0。
 - ✅ **并行套件删除带来的覆盖回退已补**（2026-11-24）：原 `smoke_w0/w2_core/w1_loan/smoke_used_wu4` 删除后，
   四条行为曾零自动化覆盖。新 `smoke_payment_matched.py` A1–A4 已重建：
   `aggregate_key`=`advanceId` 而非 VIN、重复回调不重复发事件、缺 `dueDate` ⇒ 还款计划为空、
